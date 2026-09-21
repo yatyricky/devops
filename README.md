@@ -136,14 +136,24 @@ ansible all -m ping
 
 ### GUI（Semaphore UI，http://localhost:3000）
 
+已在 WSL 内安装并配置完成（Semaphore v2.19.12，systemd 服务 `semaphore`，随 WSL 启动）。
+
+- 登录：**admin / ChangeMe_123**（⚠ 首次登录后立即在 UI 里改密码）
+- 项目 `devops` 已建好：Key=none（沿用 nef 的 `~/.ssh`）、仓库=本仓库本地路径直读、
+  Inventory=`inventory/hosts.yml`、Environment 已注入 `ANSIBLE_CONFIG` 与 vault 密码
+- 三个任务模板：**deploy**（参数 `site/target/env`）、**rollback**（参数 `release`）、
+  **audit**（挂每日 08:00 定时巡检，FAIL 会在 UI 标红）
+- 运行前可在模板参数框临时改 `-e` 参数（如 `force=yes`、`site=bs target=server`）
+
+重装/重配方法：
+
 ```bash
-# 安装（WSL 内 root）：
-bash semaphore/install.sh
-# 建项目/环境/三个任务模板（管理员 admin/ChangeMe_123，装完先改密）：
-bash semaphore/configure.sh
+bash semaphore/install.sh      # 装二进制 + systemd 服务 + 管理员（幂等）
+bash semaphore/configure.sh    # 建/补全项目、模板、定时（幂等，API 字段已按 v2.19 实测）
 ```
 
-UI 里预置三个任务模板：**deploy**（参数 site/target/env）、**rollback**（参数 release）、**audit**（挂每日 08:00 定时巡检，FAIL 会在 UI 标红）。运行前可在 UI 临时改参数（如 `force=yes`）。
+注意：inventory 还是占位主机时，在 UI 里跑 deploy/audit 会对着不存在的目标连接超时并失败——
+这是预期行为；填好真实主机后即为正式可用。
 
 ---
 

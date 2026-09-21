@@ -18,8 +18,8 @@ DATA_DIR=/var/lib/semaphore
 PORT="${SEMAPHORE_PORT:-3000}"
 
 echo "== 1/5 下载 Semaphore 二进制 =="
-if command -v semaphore >/dev/null 2>&1 && semaphore -version >/dev/null 2>&1; then
-  echo "已安装：$(semaphore -version 2>&1 | head -1)，跳过下载"
+if command -v semaphore >/dev/null 2>&1 && semaphore version >/dev/null 2>&1; then
+  echo "已安装：$(semaphore version 2>/dev/null | head -1)，跳过下载"
 else
   ARCH=linux_amd64
   VER=$(curl -fsSL --max-time 30 https://api.github.com/repos/semaphoreui/semaphore/releases/latest | jq -r '.tag_name')
@@ -39,14 +39,20 @@ mkdir -p "$CONF_DIR" "$DATA_DIR"
 chown "$RUN_USER:$RUN_USER" "$DATA_DIR"
 
 if [ ! -f "$CONF_DIR/config.json" ]; then
+  # v2.19 配置格式：bolt 已废弃（改 SQLite）；会话密钥键名为 cookie_hash/cookie_encryption；
+  # cookie_encryption 必须精确 16/24/32 字节（这里用 32 字符随机串），否则报 crypto/aes: invalid key size
+  rand() { tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c "$1"; }
+  HASH_KEY=$(rand 64)
+  ENC_KEY=$(rand 32)
   cat > "$CONF_DIR/config.json" <<EOF
 {
-  "mysql": { "host": "localhost", "user": "semaphore", "pass": "", "name": "" },
-  "bolt": { "path": "$DATA_DIR/semaphore.bolt.db" },
+  "dialect": "sqlite",
   "port": "$PORT",
   "interface": "0.0.0.0",
   "tmp_path": "/tmp/semaphore",
-  "git_client": "/usr/bin/git"
+  "git_client": "cmd_git",
+  "cookie_hash": "$HASH_KEY",
+  "cookie_encryption": "$ENC_KEY"
 }
 EOF
   chown "$RUN_USER:$RUN_USER" "$CONF_DIR/config.json"
