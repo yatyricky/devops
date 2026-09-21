@@ -1,0 +1,226 @@
+---
+# kids-ledger 全栈发布（目标主机上执行）
+# 相比原 deploy.ps1/remote-setup.sh 的升级点：
+#   * release 目录 + current 符号链接（原来直接覆盖 /opt/kids-ledger）
+#   * data/ 与 config.json 独立于 release：data → shared/data 软链，config 从 vault 渲染
+#   * systemd unit 由本仓库管理，部署即重启，无需人工
+#   * 健康检查失败自动回滚
+
+- name: deploy | kl | create directory skeleton
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ kl_deploy_dir }}"
+    - "{{ kl_deploy_dir }}/releases"
+    - "{{ kl_deploy_dir }}/releases/{{ release_name }}"
+    - "{{ kl_deploy_dir }}/shared"
+  become: true
+
+- name: deploy | kl | hand ownership to ssh user（后续解压/装依赖不再需要 sudo）
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_gid }}"
+  loop:
+    - "{{ kl_deploy_dir }}"
+    - "{{ kl_deploy_dir }}/releases"
+    - "{{ kl_deploy_dir }}/releases/{{ release_name }}"
+    - "{{ kl_deploy_dir }}/shared"
+  become: true
+
+- name: deploy | kl | shared data dir owned by service user（SQLite 写入）
+  ansible.builtin.file:
+    path: "{{ kl_data_dir }}"
+    state: directory
+    owner: "{{ kl_user }}"
+    group: "{{ kl_user }}"
+    mode: "0750"
+  become: true
+
+- name: deploy | kl | upload artifact
+  ansible.builtin.copy:
+    src: "{{ hostvars['localhost']['artifact_path'] | default(artifact_path) }}"
+    dest: "{{ kl_deploy_dir }}/releases/{{ release_name }}.tgz"
+    mode: "0644"
+
+- name: deploy | kl | extract release
+  ansible.builtin.unarchive:
+    src: "{{ kl_deploy_dir }}/releases/{{ release_name }}.tgz"
+    dest: "{{ kl_deploy_dir }}/releases/{{ release_name }}"
+    remote_src: true
+    creates: "{{ kl_deploy_dir }}/releases/{{ release_name }}/server/index.js"
+
+- name: deploy | kl | validate release layout
+  ansible.builtin.stat:
+    path: "{{ kl_deploy_dir }}/releases/{{ release_name }}/{{ item }}"
+  loop: [server/index.js, start.sh, dist/index.html, package.json, pnpm-lock.yaml]
+  register: deploy_kl_layout
+
+- name: deploy | kl | layout must be complete
+  ansible.builtin.fail:
+    msg: "产物缺文件: {{ item.item }}"
+  loop: "{{ deploy_kl_layout.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not item.stat.exists
+
+- name: deploy | kl | install prod deps（bash -l 兼容 nvm 环境的服务器）
+  ansible.builtin.command: >
+    bash -lc 'cd {{ kl_deploy_dir }}/releases/{{ release_name }} && pnpm install --prod --frozen-lockfile || pnpm install --prod --no-frozen-lockfile'
+  changed_when: true
+
+- name: deploy | kl | start.sh executable
+  ansible.builtin.file:
+    path: "{{ kl_deploy_dir }}/releases/{{ release_name }}/start.sh"
+    mode: "0755"
+
+- name: deploy | kl | render config.json from vault
+  ansible.builtin.copy:
+    content: "{{ vault_kl_config }}"
+    dest: "{{ kl_deploy_dir }}/releases/{{ release_name }}/config.json"
+    mode: "0600"
+    owner: "{{ kl_user }}"
+    group: "{{ kl_user }}"
+  become: true
+
+- name: deploy | kl | link shared data dir（db.js 按 __dirname/../data 解析，软链指向共享数据）
+  ansible.builtin.file:
+    src: "{{ kl_data_dir }}"
+    dest: "{{ kl_deploy_dir }}/releases/{{ release_name }}/data"
+    state: link
+    force: true
+
+- name: deploy | kl | chown release to service user
+  ansible.builtin.file:
+    path: "{{ kl_deploy_dir }}/releases/{{ release_name }}"
+    state: directory
+    owner: "{{ kl_user }}"
+    group: "{{ kl_user }}"
+    recurse: true
+  become: true
+
+- name: deploy | kl | record current release (回滚锚点)
+  ansible.builtin.command: readlink {{ kl_deploy_dir }}/current
+  changed_when: false
+  failed_when: false
+  register: deploy_kl_prev
+
+- name: deploy | kl | switch release + verify
+  block:
+    - name: deploy | kl | install systemd unit
+      ansible.builtin.template:
+        src: kl/kids-ledger.service.j2
+        dest: "/etc/systemd/system/{{ kl_service_name }}.service"
+        mode: "0644"
+      become: true
+
+    - name: deploy | kl | daemon-reload
+      ansible.builtin.command: systemctl daemon-reload
+      become: true
+      changed_when: true
+
+    - name: deploy | kl | switch current symlink
+      ansible.builtin.file:
+        src: "{{ kl_deploy_dir }}/releases/{{ release_name }}"
+        dest: "{{ kl_deploy_dir }}/current"
+        state: link
+        force: true
+      become: true
+
+    - name: deploy | kl | enable + restart service
+      ansible.builtin.systemd:
+        name: "{{ kl_service_name }}"
+        enabled: true
+        state: restarted
+      become: true
+
+    - name: deploy | kl | wait for service active
+      ansible.builtin.command: systemctl is-active {{ kl_service_name }}
+      register: deploy_kl_state
+      until: deploy_kl_state.stdout | trim == 'active'
+      retries: 10
+      delay: 2
+      changed_when: false
+
+    - name: deploy | kl | local health check
+      ansible.builtin.uri:
+        url: "{{ kl_healthcheck_url }}"
+        status_code: "{{ kl_healthcheck_status | default(200) }}"
+      register: deploy_kl_health
+      until: deploy_kl_health.status == (kl_healthcheck_status | default(200) | int)
+      retries: 5
+      delay: 3
+
+    - name: deploy | kl | end-to-end health check through nginx（配置了 kl_domain 才执行）
+      ansible.builtin.uri:
+        url: "http://{{ kl_domain }}/"
+        status_code: 200
+      delegate_to: localhost
+      become: false
+      register: deploy_kl_public
+      until: deploy_kl_public.status == 200
+      retries: 5
+      delay: 3
+      when: kl_domain is defined
+
+  rescue:
+    - name: deploy | kl | failed — rolling back
+      ansible.builtin.debug:
+        msg: "发布失败（{{ release_name }}），自动回滚到 {{ deploy_kl_prev.stdout | default('无上一版本') }}"
+
+    - name: deploy | kl | restore previous release symlink
+      ansible.builtin.file:
+        src: "{{ deploy_kl_prev.stdout }}"
+        dest: "{{ kl_deploy_dir }}/current"
+        state: link
+        force: true
+      become: true
+      when: deploy_kl_prev.stdout | default('') | length > 0
+
+    - name: deploy | kl | remove symlink (首次部署)
+      ansible.builtin.file:
+        path: "{{ kl_deploy_dir }}/current"
+        state: absent
+      become: true
+      when: deploy_kl_prev.stdout | default('') | length == 0
+
+    - name: deploy | kl | remove failed release
+      ansible.builtin.file:
+        path: "{{ kl_deploy_dir }}/releases/{{ release_name }}"
+        state: absent
+      become: true
+      when: deploy_kl_prev.stdout | default('') | length == 0
+
+    - name: deploy | kl | restart previous release
+      ansible.builtin.systemd:
+        name: "{{ kl_service_name }}"
+        state: restarted
+      become: true
+      failed_when: false
+
+    - name: deploy | kl | rollback complete — fail the run
+      ansible.builtin.fail:
+        msg: "部署 {{ release_name }} 失败，已回滚。请查看上方错误。"
+
+- name: deploy | kl | prune old releases
+  ansible.builtin.shell: |
+    cd "{{ kl_deploy_dir }}/releases" &&
+    ls -1 | grep -v '\.tgz$' | sort | head -n -{{ release_keep }} | xargs -r rm -rf --
+  become: true
+  changed_when: true
+
+- name: deploy | kl | cleanup upload
+  ansible.builtin.file:
+    path: "{{ kl_deploy_dir }}/releases/{{ release_name }}.tgz"
+    state: absent
+
+- name: deploy | kl | cleanup local artifact
+  ansible.builtin.file:
+    path: "{{ artifact_path }}"
+    state: absent
+  delegate_to: localhost
+  run_once: true
+  become: false

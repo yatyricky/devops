@@ -1,0 +1,42 @@
+[Unit]
+Description=Frp Client Service
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User={{ frp_user }}
+Group={{ frp_user }}
+Restart=on-failure
+RestartSec=5s
+ExecStart=/usr/local/bin/frpc -c /etc/frp/frpc.toml
+ExecReload=/usr/local/bin/frpc reload -c /etc/frp/frpc.toml
+LimitNOFILE=1048576
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+ReadOnlyPaths=/etc/frp
+
+[Install]
+WantedBy=multi-user.target

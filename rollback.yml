@@ -1,0 +1,41 @@
+---
+# =====================================================================
+# 回滚入口（不构建，仅切换服务器上的既有 release）
+#
+# 用法：
+#   ansible-playbook rollback.yml -e "site=ls target=client release=previous"
+#   ansible-playbook rollback.yml -e "site=bs target=server release=<release 名>"
+#   ansible-playbook rollback.yml -e "site=kl release=previous"
+#
+#   release=previous 回到按时间排序的上一版；也可指定完整 release 名
+#   （release 名可用 status.yml 查看）
+# =====================================================================
+
+- name: Rollback | 切换既有 release
+  hosts: "{{ 'kids_ledger' if (site | default('kl')) == 'kl' else site }}"
+  gather_facts: false
+  tasks:
+    - name: rollback | 参数校验
+      ansible.builtin.assert:
+        that:
+          - site is defined
+          - site in ['ls', 'bs', 'kl']
+          - site == 'kl' or target in ['client', 'server']
+          - rollback_release is defined
+        fail_msg: >-
+          参数不合法。示例：-e "site=bs target=server release=previous" 或 -e "site=kl release=previous"
+
+    - name: rollback | dispatch
+      block:
+        - name: rollback | xlgbis | 前端
+          ansible.builtin.include_tasks: tasks/rollback/xlgbis_client.yml
+          when: site in ['ls', 'bs'] and target == 'client'
+
+        - name: rollback | xlgbis | 服务端
+          ansible.builtin.include_tasks: tasks/rollback/xlgbis_server.yml
+          when: site in ['ls', 'bs'] and target == 'server'
+
+        - name: rollback | kids-ledger
+          ansible.builtin.include_tasks: tasks/rollback/kids_ledger.yml
+          when: site == 'kl'
+      when: site == 'kl' or (xlgbis_env | default('test')) == (env | default('test'))

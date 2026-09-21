@@ -1,0 +1,78 @@
+---
+# kids-ledger 回滚
+
+- name: rollback | kl | preflight
+  ansible.builtin.fail:
+    msg: "缺少 release 参数"
+  when: rollback_release | default('') | length == 0
+
+- name: rollback | kl | validate release name
+  ansible.builtin.fail:
+    msg: "非法 release 名: {{ rollback_release }}"
+  when: not (rollback_release is match('^[A-Za-z0-9._-]+$'))
+
+- name: rollback | kl | resolve target（previous = 按时间排序的上一版）
+  ansible.builtin.shell: |
+    cd "{{ kl_deploy_dir }}/releases" || exit 1
+    if [ "{{ rollback_release }}" = "previous" ]; then
+      cur=$(readlink "{{ kl_deploy_dir }}/current" 2>/dev/null | xargs -r basename)
+      ls -1 | grep -v '\.tgz$' | sort | awk -v c="$cur" '$0==c{print p; exit} {p=$0}'
+    else
+      echo "{{ rollback_release }}"
+    fi
+  register: rollback_kl_target
+  changed_when: false
+
+- name: rollback | kl | target must exist
+  ansible.builtin.fail:
+    msg: "未找到可回滚的目标 release"
+  when: rollback_kl_target.stdout | trim | length == 0
+
+- name: rollback | kl | validate layout
+  ansible.builtin.stat:
+    path: "{{ kl_deploy_dir }}/releases/{{ rollback_kl_target.stdout | trim }}/{{ item }}"
+  loop: [server/index.js, start.sh, config.json, dist/index.html]
+  register: rollback_kl_entry
+
+- name: rollback | kl | files must exist
+  ansible.builtin.fail:
+    msg: "release 内缺少 {{ item.item }}"
+  loop: "{{ rollback_kl_entry.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not item.stat.exists
+
+- name: rollback | kl | switch current symlink
+  ansible.builtin.file:
+    src: "{{ kl_deploy_dir }}/releases/{{ rollback_kl_target.stdout | trim }}"
+    dest: "{{ kl_deploy_dir }}/current"
+    state: link
+    force: true
+  become: true
+
+- name: rollback | kl | restart service
+  ansible.builtin.systemd:
+    name: "{{ kl_service_name }}"
+    state: restarted
+  become: true
+
+- name: rollback | kl | wait for service active
+  ansible.builtin.command: systemctl is-active {{ kl_service_name }}
+  register: rollback_kl_state
+  until: rollback_kl_state.stdout | trim == 'active'
+  retries: 10
+  delay: 2
+  changed_when: false
+
+- name: rollback | kl | local health check
+  ansible.builtin.uri:
+    url: "{{ kl_healthcheck_url }}"
+    status_code: "{{ kl_healthcheck_status | default(200) }}"
+  register: rollback_kl_health
+  until: rollback_kl_health.status == (kl_healthcheck_status | default(200) | int)
+  retries: 5
+  delay: 3
+
+- name: rollback | kl | done
+  ansible.builtin.debug:
+    msg: "已回滚到 {{ rollback_kl_target.stdout | trim }}"

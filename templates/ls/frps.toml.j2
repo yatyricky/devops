@@ -1,0 +1,15 @@
+bindPort = {{ frps_bind_port }}
+vhostHTTPPort = {{ frps_vhost_http_port }}
+subDomainHost = "{{ frps_subdomain_host }}"
+
+# Force TLS on control connection between frpc and frps
+transport.tls.force = true
+
+auth.method = "token"
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "{{ frp_token_path }}"
+
+# Custom 404 page when no proxy is bound to the domain
+custom404Page = "/etc/frp/503.html"
+
+transport.maxPoolCount = 20

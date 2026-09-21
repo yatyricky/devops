@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# ansible-playbook 包装器 —— 仓库放在 /mnt/c（WSL 视角世界可写）时，ansible 会
+# 拒绝把 ./ansible.cfg 当作配置源；这里用 ANSIBLE_CONFIG 显式指定。
+# 用法等价于 ansible-playbook：
+#   ./ap deploy.yml -e "site=ls target=client env=test"
+#   ./ap audit.yml -l ls-test
+set -euo pipefail
+HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+export ANSIBLE_CONFIG="$HERE/ansible.cfg"
+export PATH="$HOME/.local/bin:$PATH"
+exec ansible-playbook "$@"

@@ -1,0 +1,128 @@
+---
+# LS 配置下发（等价于原 ls_apply_config.sh，改为幂等模板渲染）
+# 覆盖：/etc/frp（frps.toml、frp_token、503.html）、systemd units
+# （frps/nginx/xlgbis-login）、nginx 站点；nginx -t 失败自动恢复备份。
+
+- name: cfg | ls | /etc/frp 目录（0700，frp 用户）
+  ansible.builtin.file:
+    path: /etc/frp
+    state: directory
+    owner: "{{ frp_user }}"
+    group: "{{ frp_user }}"
+    mode: "0700"
+  become: true
+
+- name: cfg | ls | frps 运行用户
+  ansible.builtin.user:
+    name: "{{ frp_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+  become: true
+
+- name: cfg | ls | 503 页面
+  ansible.builtin.copy:
+    src: ls/503.html
+    dest: /etc/frp/503.html
+    owner: "{{ frp_user }}"
+    group: "{{ frp_user }}"
+    mode: "0644"
+  become: true
+
+- name: cfg | ls | frp token（来自 vault，0600）
+  ansible.builtin.copy:
+    content: "{{ vault_frps_token }}"
+    dest: "{{ frp_token_path }}"
+    owner: "{{ frp_user }}"
+    group: "{{ frp_user }}"
+    mode: "0600"
+  become: true
+  no_log: true
+
+- name: cfg | ls | frps.toml
+  ansible.builtin.template:
+    src: ls/frps.toml.j2
+    dest: /etc/frp/frps.toml
+    owner: "{{ frp_user }}"
+    group: "{{ frp_user }}"
+    mode: "0600"
+  become: true
+
+- name: cfg | ls | systemd units（frps/nginx 为静态文件，xlgbis-login 需渲染变量）
+  ansible.builtin.copy:
+    src: "ls/{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  loop: [frps.service, nginx.service]
+
+- name: cfg | ls | xlgbis-login.service
+  ansible.builtin.template:
+    src: ls/xlgbis-login.service.j2
+    dest: /etc/systemd/system/xlgbis-login.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: cfg | ls | 备份现有 nginx 站点（供 nginx -t 失败回滚）
+  ansible.builtin.command: cp /etc/nginx/sites-available/xlgbis /tmp/xlgbis.site.prev
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: cfg | ls | nginx 站点（TLS 终结 + FRP vhost 反代）
+  block:
+    - name: cfg | ls | 渲染站点
+      ansible.builtin.template:
+        src: ls/nginx-site.j2
+        dest: /etc/nginx/sites-available/xlgbis
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+
+    - name: cfg | ls | 启用站点
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/xlgbis
+        dest: /etc/nginx/sites-enabled/xlgbis
+        state: link
+        force: true
+      become: true
+
+    - name: cfg | ls | nginx 配置测试
+      ansible.builtin.command: nginx -t
+      become: true
+      changed_when: false
+
+  rescue:
+    - name: cfg | ls | nginx -t 失败 → 恢复备份
+      ansible.builtin.command: cp /tmp/xlgbis.site.prev /etc/nginx/sites-available/xlgbis
+      become: true
+      changed_when: true
+      failed_when: false
+
+    - name: cfg | ls | 校验恢复后的配置
+      ansible.builtin.command: nginx -t
+      become: true
+      changed_when: false
+
+    - name: cfg | ls | 中止
+      ansible.builtin.fail:
+        msg: "新 nginx 配置非法，已恢复原配置。请检查 templates/ls/nginx-site.j2"
+
+- name: cfg | ls | daemon-reload + 重启相关服务
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - systemctl daemon-reload
+    - systemctl restart frps
+    - systemctl restart xlgbis-login
+    - systemctl reload-or-restart nginx
+  become: true
+  changed_when: true
+
+- name: cfg | ls | done
+  ansible.builtin.debug:
+    msg: "LS 配置已下发（{{ inventory_hostname }}）"

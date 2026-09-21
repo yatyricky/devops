@@ -1,0 +1,87 @@
+---
+# kids-ledger 配置下发（原来散落在 remote-setup.sh 与 README 手工步骤里）：
+#   nginx 站点（sites-available/conf.d 自适应）+ systemd unit
+
+- name: cfg | kl | 探测 nginx 布局（sites-enabled 或 conf.d）
+  ansible.builtin.stat:
+    path: /etc/nginx/sites-enabled
+  register: cfg_kl_sites_dir
+
+- name: cfg | kl | 记录布局
+  ansible.builtin.set_fact:
+    kl_nginx_sites_enabled: "{{ cfg_kl_sites_dir.stat.exists }}"
+    kl_nginx_site_path: "{{ '/etc/nginx/sites-available/kl.conf' if cfg_kl_sites_dir.stat.exists else '/etc/nginx/conf.d/kl.conf' }}"
+
+- name: cfg | kl | systemd unit
+  ansible.builtin.template:
+    src: kl/kids-ledger.service.j2
+    dest: "/etc/systemd/system/{{ kl_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: cfg | kl | 备份现有 nginx 站点
+  ansible.builtin.command: "cp {{ kl_nginx_site_path }} /tmp/kl.site.prev"
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: cfg | kl | nginx 站点
+  block:
+    - name: cfg | kl | 渲染站点（sites-available 布局）
+      ansible.builtin.template:
+        src: kl/nginx-site.j2
+        dest: /etc/nginx/sites-available/kl.conf
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+      when: kl_nginx_sites_enabled | bool
+
+    - name: cfg | kl | 启用站点
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/kl.conf
+        dest: /etc/nginx/sites-enabled/kl.conf
+        state: link
+        force: true
+      become: true
+      when: kl_nginx_sites_enabled | bool
+
+    - name: cfg | kl | 渲染站点（conf.d 布局）
+      ansible.builtin.template:
+        src: kl/nginx-site.j2
+        dest: /etc/nginx/conf.d/kl.conf
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+      when: not (kl_nginx_sites_enabled | bool)
+
+    - name: cfg | kl | nginx 配置测试
+      ansible.builtin.command: nginx -t
+      become: true
+      changed_when: false
+
+  rescue:
+    - name: cfg | kl | nginx -t 失败 → 恢复备份
+      ansible.builtin.command: "cp /tmp/kl.site.prev {{ kl_nginx_site_path }}"
+      become: true
+      changed_when: true
+      failed_when: false
+
+    - name: cfg | kl | 中止
+      ansible.builtin.fail:
+        msg: "新 nginx 配置非法，已恢复原配置。"
+
+- name: cfg | kl | daemon-reload + reload nginx
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - systemctl daemon-reload
+    - systemctl reload-or-restart nginx
+  become: true
+  changed_when: true
+
+- name: cfg | kl | done
+  ansible.builtin.debug:
+    msg: "kids-ledger 配置已下发（{{ inventory_hostname }}）"

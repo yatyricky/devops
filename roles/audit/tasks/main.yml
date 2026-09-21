@@ -1,0 +1,355 @@
+---
+# =====================================================================
+# 服务器状态审计 —— 1:1 移植 xlgbis/devops/ops_common.js 的全部检查项
+# 输出 PASS/INFO/WARN/FAIL 报告；存在 FAIL 时 playbook 以非零码结束
+# 实现约定：每个检查项独立 task + 单行 Jinja 三元表达式（多行内联 if-else 解析会失败）
+# =====================================================================
+- name: audit | init findings
+  ansible.builtin.set_fact:
+    audit_findings: []
+    audit_sudo_ok: false
+
+# ── sudo ────────────────────────────────────────────────────────────
+- name: audit | sudo | test passwordless sudo
+  ansible.builtin.command: sudo -n true
+  changed_when: false
+  failed_when: false
+  register: audit_sudo_rc
+
+- name: audit | sudo | record finding
+  ansible.builtin.set_fact:
+    audit_sudo_ok: "{{ audit_sudo_rc.rc == 0 }}"
+    audit_findings: "{{ audit_findings + [audit_sudo_item] }}"
+  vars:
+    audit_sudo_item: "{{ dict(category='sudo', check='nopasswd-sudo', sev=('PASS' if audit_sudo_rc.rc == 0 else 'FAIL'), detail=('passwordless sudo confirmed' if audit_sudo_rc.rc == 0 else 'sudo -n failed (rc=' ~ audit_sudo_rc.rc ~ '); sudo-dependent checks skipped')) }}"
+
+# ── sshd ────────────────────────────────────────────────────────────
+- name: audit | sshd | read effective config
+  ansible.builtin.command: sshd -T
+  become: true
+  changed_when: false
+  failed_when: false
+  register: audit_sshd_raw
+  when: audit_sudo_ok | bool
+
+- name: audit | sshd | extract settings
+  ansible.builtin.set_fact:
+    sshd_passwordauth: "{{ ((audit_sshd_raw.stdout | regex_findall('(?im)^passwordauthentication\\s+(\\S+)') | first) | default('?')) | lower }}"
+    sshd_kbd: "{{ (((audit_sshd_raw.stdout | regex_findall('(?im)^kbdinteractiveauthentication\\s+(\\S+)') | first) | default((audit_sshd_raw.stdout | regex_findall('(?im)^challengeresponseauthentication\\s+(\\S+)') | first) | default(''))) | lower }}"
+    sshd_root: "{{ ((audit_sshd_raw.stdout | regex_findall('(?im)^permitrootlogin\\s+(\\S+)') | first) | default('?')) | lower }}"
+    sshd_pubkey: "{{ ((audit_sshd_raw.stdout | regex_findall('(?im)^pubkeyauthentication\\s+(\\S+)') | first) | default('?')) | lower }}"
+  when: audit_sudo_ok | bool and (audit_sshd_raw.stdout | default('') | length > 0)
+
+- name: audit | sshd | password-auth
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='ssh', check='password-auth', sev=('PASS' if sshd_passwordauth == 'no' else 'FAIL'), detail=('PasswordAuthentication is disabled' if sshd_passwordauth == 'no' else 'PasswordAuthentication=' ~ sshd_passwordauth ~ ' (should be no)')) }}"
+  when: sshd_passwordauth is defined
+
+- name: audit | sshd | kbd-interactive
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='ssh', check='kbd-interactive', sev='WARN', detail='KbdInteractiveAuthentication=' ~ sshd_kbd ~ ' (should be no)') }}"
+  when: sshd_kbd is defined and sshd_kbd not in ['no', '']
+
+- name: audit | sshd | root-login
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='ssh', check='root-login', sev=('PASS' if sshd_root in ['no', 'prohibit-password'] else 'WARN'), detail='PermitRootLogin=' ~ sshd_root) }}"
+  when: sshd_root is defined
+
+- name: audit | sshd | pubkey-auth
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='ssh', check='pubkey-auth', sev='WARN', detail='PubkeyAuthentication=' ~ sshd_pubkey ~ ' (should be yes)') }}"
+  when: sshd_pubkey is defined and sshd_pubkey != 'yes'
+
+- name: audit | sshd | unreadable config
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [dict(category='ssh', check='sshd-config', sev='WARN', detail='could not read effective sshd config (sshd -T failed)')] }}"
+  when: audit_sudo_ok | bool and (audit_sshd_raw.stdout | default('') | length == 0)
+
+# ── firewall (ufw) ──────────────────────────────────────────────────
+- name: audit | firewall | ufw status
+  ansible.builtin.command: ufw status verbose
+  become: true
+  changed_when: false
+  failed_when: false
+  register: audit_ufw
+  when: audit_sudo_ok | bool
+
+- name: audit | firewall | ufw-active
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='firewall', check='ufw-active', sev=('PASS' if (audit_ufw.stdout | default('') is search('Status:\\s*active')) else 'FAIL'), detail=('ufw is active' if (audit_ufw.stdout | default('') is search('Status:\\s*active')) else 'ufw is not active')) }}"
+  when: audit_sudo_ok | bool and (audit_ufw.stdout | default('') | length > 0)
+
+- name: audit | firewall | ufw-default
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='firewall', check='ufw-default', sev=('PASS' if (audit_ufw.stdout | default('') is search('Default:\\s*deny \\(incoming\\)')) else 'WARN'), detail=('default policy denies incoming' if (audit_ufw.stdout | default('') is search('Default:\\s*deny \\(incoming\\)')) else 'default incoming policy is not deny')) }}"
+  when: audit_sudo_ok | bool and (audit_ufw.stdout | default('') | length > 0)
+
+- name: audit | firewall | ufw missing
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [dict(category='firewall', check='ufw', sev='WARN', detail='ufw not installed or status unreadable')] }}"
+  when: audit_sudo_ok | bool and (audit_ufw.stdout | default('') | length == 0)
+
+# ── exposure（监听端口暴露面）────────────────────────────────────────
+- name: audit | exposure | list unexpected public listeners
+  ansible.builtin.shell: |
+    set -o pipefail
+    ss -H -tlnp | awk -v okports="{{ expected_public_ports | join(',') }}" '
+    {
+      l=$4; if (l !~ /:[0-9]+$/) next;
+      port=l; sub(/^.*:/,"",port); port+=0;
+      addr=l; sub(/:[0-9]+$/,"",addr); gsub(/[\[\]]/,"",addr);
+      if (addr=="127.0.0.1" || addr=="::1" || addr ~ /^127\./) next;
+      allowed=0; split(okports, ok, ","); for (k in ok) if (ok[k]+0 == port) allowed=1;
+      if (allowed) next;
+      proc=$0;
+      if (sub(/.*users:\(\("/,"",proc)) { sub(/".*/,"",proc); print l " (" proc ")"; } else print l " (?)";
+    }'
+  become: true
+  changed_when: false
+  failed_when: false
+  register: audit_listeners
+  when: audit_sudo_ok | bool
+
+- name: audit | exposure | record finding
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='exposure', check='listeners', sev=expo_sev, detail=expo_detail) }}"
+    expo_sev: "{{ 'PASS' if (audit_listeners.stdout | default('') | trim | length == 0) else 'WARN' }}"
+    expo_detail: "{{ ('no unexpected public listeners (only ' ~ (expected_public_ports | join('/')) ~ ' + loopback)') if (audit_listeners.stdout | default('') | trim | length == 0) else ('publicly-bound ports beyond ' ~ (expected_public_ports | join('/')) ~ ': ' ~ (audit_listeners.stdout_lines | join(', '))) }}"
+  when: audit_sudo_ok | bool
+
+# ── frp 配置权限 ────────────────────────────────────────────────────
+- name: audit | frp | stat /etc/frp and toml
+  ansible.builtin.command: "stat -c %a {{ item }}"
+  become: true
+  changed_when: false
+  failed_when: false
+  loop:
+    - /etc/frp
+    - "/etc/frp/{{ frp_toml }}"
+  loop_control:
+    label: "{{ item }}"
+  register: audit_frp_stat
+  when: audit_sudo_ok | bool
+
+- name: audit | frp | extract stat results
+  ansible.builtin.set_fact:
+    frp_dir_mode: "{{ (audit_frp_stat.results | selectattr('item', 'equalto', '/etc/frp') | map(attribute='stdout') | first | default('')) | trim }}"
+    frp_toml_mode: "{{ ((audit_frp_stat.results | selectattr('item', 'equalto', ('/etc/frp/' ~ frp_toml)) | map(attribute='stdout') | first | default('')) | trim) if (frp_toml | length > 0) else '' }}"
+  when: audit_sudo_ok | bool
+
+- name: audit | frp | dir perms
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='frp', check='frp-dir-perms', sev=frp_dir_sev, detail=frp_dir_detail) }}"
+    frp_dir_sev: "{{ 'PASS' if frp_dir_mode == '700' else ('FAIL' if ((frp_dir_mode | length > 0) and ((frp_dir_mode[-1] | int) > 0)) else 'WARN') }}"
+    frp_dir_detail: "{{ ('/etc/frp mode ' ~ frp_dir_mode ~ ('' if frp_dir_mode == '700' else ' (expected 700)')) if (frp_dir_mode | length > 0) else '/etc/frp not present' }}"
+  when: audit_sudo_ok | bool and frp_dir_mode | default('') | length > 0
+
+- name: audit | frp | toml perms（600，防 token 泄露）
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='frp', check=(frp_toml[:-5] ~ '-toml-perms'), sev=frp_toml_sev, detail=frp_toml_detail) }}"
+    frp_toml_sev: "{{ 'PASS' if ((frp_toml_mode | length > 3) and ((frp_toml_mode[1] | int) == 0) and ((frp_toml_mode[2] | int) == 0)) else 'FAIL' }}"
+    frp_toml_detail: "{{ (frp_toml ~ ' mode ' ~ frp_toml_mode ~ ('' if frp_toml_sev == 'PASS' else ' exposes the FRP token (expected 600)')) if (frp_toml_mode | length > 0) else (frp_toml ~ ' not found') }}"
+  when: audit_sudo_ok | bool and frp_toml | length > 0 and frp_toml_mode | default('') | length > 0
+
+# ── nginx 配置 ──────────────────────────────────────────────────────
+- name: audit | nginx | read sites-enabled
+  ansible.builtin.shell: cat /etc/nginx/sites-enabled/* 2>/dev/null
+  become: true
+  changed_when: false
+  failed_when: false
+  register: audit_nginx_conf
+  when: audit_sudo_ok | bool
+
+- name: audit | nginx | tls-protocols
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_proto: "{{ ((audit_nginx_conf.stdout | default('') | regex_findall('(?im)^\\s*ssl_protocols[^;]*;') | first) | default('')) | trim }}"
+    audit_item: "{{ dict(category='nginx', check='tls-protocols', sev=proto_sev, detail=proto_detail) }}"
+    proto_sev: "{{ 'FAIL' if (audit_proto is search('TLSv1(\\.0|\\.1)?(\\s|;)', ignorecase=True)) else ('PASS' if (audit_proto | length > 0) else 'INFO') }}"
+    proto_detail: "{{ audit_proto if (audit_proto | length > 0) else 'no explicit ssl_protocols (relying on nginx default)' }}"
+  when: audit_sudo_ok | bool and (audit_nginx_conf.stdout | default('') | length > 0)
+
+- name: audit | nginx | server-tokens
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='nginx', check='server-tokens', sev=tokens_sev, detail=tokens_detail) }}"
+    tokens_sev: "{{ 'PASS' if (audit_nginx_conf.stdout is search('server_tokens\\s+off\\s*;', ignorecase=True)) else 'WARN' }}"
+    tokens_detail: "{{ 'server_tokens off' if (audit_nginx_conf.stdout is search('server_tokens\\s+off\\s*;', ignorecase=True)) else 'server_tokens not disabled (leaks nginx version)' }}"
+  when: audit_sudo_ok | bool and (audit_nginx_conf.stdout | default('') | length > 0)
+
+- name: audit | nginx | tls-listener
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='nginx', check='tls-listener', sev=listen_sev, detail=listen_detail) }}"
+    listen_sev: "{{ 'PASS' if (audit_nginx_conf.stdout is search('listen[^;]*443[^;]*ssl', ignorecase=True)) else 'WARN' }}"
+    listen_detail: "{{ 'TLS listener on 443 present' if (audit_nginx_conf.stdout is search('listen[^;]*443[^;]*ssl', ignorecase=True)) else 'no `listen 443 ssl` found' }}"
+  when: audit_sudo_ok | bool and (audit_nginx_conf.stdout | default('') | length > 0)
+
+# ── 证书有效期 ──────────────────────────────────────────────────────
+- name: audit | tls | check certificate expiry
+  ansible.builtin.shell: |
+    d=$(ls -d /etc/letsencrypt/live/*/ 2>/dev/null | head -1)
+    if [ -n "$d" ]; then
+      pem="${d}fullchain.pem"
+      end=$(openssl x509 -enddate -noout -in "$pem" 2>/dev/null | sed 's/^notAfter=//')
+      if ! openssl x509 -noout -checkend 0 -in "$pem" >/dev/null 2>&1; then st=EXPIRED
+      elif ! openssl x509 -noout -checkend 1209600 -in "$pem" >/dev/null 2>&1; then st=SOON
+      else st=OK; fi
+      echo "$st|$end"
+    else
+      echo "NONE|"
+    fi
+  become: true
+  changed_when: false
+  failed_when: false
+  register: audit_cert
+  when: audit_sudo_ok | bool
+
+- name: audit | tls | record finding
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_cert_st: "{{ (audit_cert.stdout | default('NONE|') | split('|') | first) }}"
+    audit_cert_end: "{{ (audit_cert.stdout | default('NONE|') | split('|') | last) }}"
+    audit_item: "{{ dict(category='tls', check='cert-expiry', sev=cert_sev, detail=cert_detail) }}"
+    cert_sev: "{{ {'OK': 'PASS', 'SOON': 'WARN', 'EXPIRED': 'FAIL', 'NONE': 'INFO'}[audit_cert_st] | default('INFO') }}"
+    cert_detail: "{{ ('certificate valid until ' ~ audit_cert_end) if audit_cert_st == 'OK' else (('certificate expires within 14 days (' ~ audit_cert_end ~ ')') if audit_cert_st == 'SOON' else (('certificate EXPIRED (' ~ audit_cert_end ~ ')') if audit_cert_st == 'EXPIRED' else 'no Let\\'s Encrypt certificate found under /etc/letsencrypt/live')) }}"
+  when: audit_sudo_ok | bool
+
+# ── 补丁状态 ────────────────────────────────────────────────────────
+- name: audit | patching | pending updates and reboot flag
+  ansible.builtin.shell: |
+    total=$(apt-get -s -o Debug::NoLocking=true dist-upgrade 2>/dev/null | grep -c '^Inst' || true)
+    sec=$(apt-get -s -o Debug::NoLocking=true dist-upgrade 2>/dev/null | grep '^Inst' | grep -ci security || true)
+    reboot=no; test -f /var/run/reboot-required && reboot=yes
+    echo "$total|$sec|$reboot"
+  changed_when: false
+  failed_when: false
+  register: audit_patch
+
+- name: audit | patching | updates
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    patch_total: "{{ (audit_patch.stdout | split('|') | first) | int(-1) }}"
+    patch_sec: "{{ (audit_patch.stdout | split('|') | list)[1] | default('0') | int }}"
+    audit_item: "{{ dict(category='patching', check='updates', sev=patch_sev, detail=patch_detail) }}"
+    patch_sev: "{{ 'WARN' if patch_sec > 0 else ('INFO' if patch_total > 0 else 'PASS') }}"
+    patch_detail: "{{ ((patch_sec ~ ' security update(s) pending (' ~ patch_total ~ ' total)') if patch_sec > 0 else ((patch_total ~ ' non-security update(s) pending') if patch_total > 0 else 'system is up to date')) if patch_total >= 0 else 'could not determine pending updates (apt unavailable?)' }}"
+
+- name: audit | patching | reboot required
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [dict(category='patching', check='reboot', sev='WARN', detail='a reboot is required to apply updates')] }}"
+  when: (audit_patch.stdout | split('|') | last | default('no')) == 'yes'
+
+# ── 部署目录权限 ────────────────────────────────────────────────────
+- name: audit | deploy-dir | find world-writable files
+  ansible.builtin.command: >
+    find {{ deploy_dir | default('') }} -xdev -not -type l -perm -0002
+    -not -path '*/node_modules/*' -not -path '*/client-build/*'
+  become: true
+  changed_when: false
+  failed_when: false
+  register: audit_worldwritable
+  when: audit_sudo_ok | bool and (deploy_dir | default('') | length > 0)
+
+- name: audit | deploy-dir | record finding
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    ww_count: "{{ audit_worldwritable.stdout_lines | default([]) | length }}"
+    audit_item: "{{ dict(category='service', check='deploy-dir-perms', sev=ww_sev, detail=ww_detail) }}"
+    ww_sev: "{{ 'PASS' if ww_count | int == 0 else 'FAIL' }}"
+    ww_detail: "{{ ('no world-writable files in ' ~ deploy_dir) if ww_count | int == 0 else (ww_count ~ ' world-writable file(s) in ' ~ deploy_dir ~ ': ' ~ ((audit_worldwritable.stdout_lines | default([]))[:5] | join(', ')) ~ ('...' if ww_count | int > 5 else '')) }}"
+  when: audit_sudo_ok | bool and (deploy_dir | default('') | length > 0)
+
+# ── 僵尸进程 ────────────────────────────────────────────────────────
+- name: audit | zombies | count zombie processes
+  ansible.builtin.shell: |
+    ps -eo state,comm | awk '$1=="Z" {count++; procs=procs $2 ", "} END {if (!count) print "NONE"; else print count ":" procs}'
+  changed_when: false
+  failed_when: false
+  register: audit_zombies
+
+- name: audit | zombies | record finding
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    z_out: "{{ audit_zombies.stdout | default('NONE') | trim }}"
+    audit_item: "{{ dict(category='service', check='zombies', sev=z_sev, detail=z_detail) }}"
+    z_sev: "{{ 'PASS' if z_out == 'NONE' else 'WARN' }}"
+    z_detail: "{{ 'no zombie processes' if z_out == 'NONE' else ('zombie process(es): ' ~ (z_out | regex_replace(',$', ''))) }}"
+
+# ── 站点服务状态 ────────────────────────────────────────────────────
+- name: audit | services | systemctl is-active
+  ansible.builtin.command: "systemctl is-active {{ item }}"
+  changed_when: false
+  failed_when: false
+  loop: "{{ audit_services }}"
+  loop_control:
+    label: "{{ item }}"
+  register: audit_services_rc
+
+- name: audit | services | record findings
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='service', check=item.item, sev=('PASS' if (item.stdout | trim == 'active') else 'FAIL'), detail=(item.item ~ ' is ' ~ ((item.stdout | trim) if (item.stdout | trim | length > 0) else 'inactive'))) }}"
+  loop: "{{ audit_services_rc.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: audit | services | fail2ban (recommended)
+  ansible.builtin.command: systemctl is-active fail2ban
+  changed_when: false
+  failed_when: false
+  register: audit_fail2ban
+
+- name: audit | services | fail2ban finding
+  ansible.builtin.set_fact:
+    audit_findings: "{{ audit_findings + [audit_item] }}"
+  vars:
+    audit_item: "{{ dict(category='service', check='fail2ban', sev=('PASS' if (audit_fail2ban.stdout | trim == 'active') else 'WARN'), detail=('fail2ban is active' if (audit_fail2ban.stdout | trim == 'active') else 'fail2ban not active (recommended for an internet-facing host)')) }}"
+
+# ── 报告 ────────────────────────────────────────────────────────────
+- name: audit | print report
+  ansible.builtin.debug:
+    msg: "[{{ item.sev }}] {{ item.category }}/{{ item.check }}: {{ item.detail }}"
+  loop: "{{ audit_findings }}"
+  loop_control:
+    label: "{{ item.category }}/{{ item.check }}"
+
+- name: audit | summary
+  ansible.builtin.debug:
+    msg: >-
+      PASS {{ audit_findings | selectattr('sev', 'equalto', 'PASS') | list | length }}
+      WARN {{ audit_findings | selectattr('sev', 'equalto', 'WARN') | list | length }}
+      FAIL {{ audit_findings | selectattr('sev', 'equalto', 'FAIL') | list | length }}
+
+- name: audit | exit non-zero on FAIL
+  ansible.builtin.fail:
+    msg: >-
+      Audit found {{ audit_findings | selectattr('sev', 'equalto', 'FAIL') | list | length }} FAIL item(s);
+      see report above.
+  when: audit_findings | selectattr('sev', 'equalto', 'FAIL') | list | length > 0

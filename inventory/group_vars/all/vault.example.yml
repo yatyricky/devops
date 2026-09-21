@@ -1,0 +1,31 @@
+# =====================================================================
+# vault 模板 —— 复制为同目录 vault.yml 后填入真实值，再加密：
+#   cp vault.example.yml vault.yml
+#   # 填好真实值后：
+#   ansible-vault encrypt inventory/group_vars/all/vault.yml
+# （vault.yml 已被 .gitignore 排除，永不入库；此处只是占位模板）
+# =====================================================================
+---
+# frps/frpc 共享认证 token（原 FRP_TOKEN，下发到两端的 {{ frp_token_path }}）
+vault_frps_token: "CHANGE_ME"
+
+# login-server 与 biz-server 共用的 JWT 签名密钥（原 JWT_SECRET）
+vault_jwt_secret: "CHANGE_ME"
+
+# 企业微信应用密钥（login-server QYWX_SECRET）
+vault_qywx_secret: "CHANGE_ME"
+
+# biz-server PostgreSQL 连接串（原 DB_URL）
+vault_db_url: "postgresql://user:pass@host:5432/db"
+
+# biz-server 超级用户的企业微信账号（原 DB_SU_ACCQYWX）
+vault_db_su_accqywx: "CHANGE_ME"
+
+# kids-ledger 的 config.json 完整内容（tokens 即登录口令，用强随机值）
+vault_kl_config: |
+  {
+    "tokens": [
+      "CHANGE_ME_parent_token",
+      "CHANGE_ME_kid_token"
+    ]
+  }

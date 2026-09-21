@@ -1,0 +1,18 @@
+---
+# 计算 kids-ledger 部署版本号（规则与 xlgbis 相同）
+
+- name: build | version | resolve git facts (delegate to controller)
+  ansible.builtin.set_fact:
+    kl_git_hash: "{{ lookup('pipe', 'git -C ' ~ kids_ledger_src ~ ' rev-parse --short HEAD') }}"
+    kl_git_ref: "{{ lookup('pipe', 'git -C ' ~ kids_ledger_src ~ ' symbolic-ref --quiet --short HEAD 2>/dev/null || git -C ' ~ kids_ledger_src ~ ' rev-parse HEAD') }}"
+    kl_git_dirty: "{{ (lookup('pipe', 'test -n \"$(git -C ' ~ kids_ledger_src ~ ' status --porcelain)\" && echo dirty || echo clean') == 'dirty') | ternary('-dirty', '') }}"
+    kl_build_time: "{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%S') }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: build | version | compose release facts
+  ansible.builtin.set_fact:
+    release_version: "{{ (kl_git_ref | regex_replace('[^A-Za-z0-9._-]', '_')) ~ '-' ~ kl_git_hash ~ kl_git_dirty }}"
+    release_name: "kids-ledger-{{ (kl_git_ref | regex_replace('[^A-Za-z0-9._-]', '_')) }}-{{ kl_git_hash }}{{ kl_git_dirty }}-{{ kl_build_time }}"
+  delegate_to: localhost
+  run_once: true

@@ -1,0 +1,24 @@
+---
+# =====================================================================
+# 服务器状态审计（只读巡检，1:1 移植原 ops_common.js 检查项）
+#
+# 用法：
+#   ansible-playbook audit.yml                 # 全部主机
+#   ansible-playbook audit.yml -l ls-test      # 单台
+#   ansible-playbook audit.yml --check         # 无写入型命令，--check 与实跑等价
+#
+# 有 FAIL 项时以非零码结束（Semaphore 定时巡检里显示为失败）
+# =====================================================================
+
+- name: Audit | 服务器状态审计
+  hosts: all
+  gather_facts: false
+  roles:
+    - role: audit
+      # ls/bs 组的 frp_toml / audit_services / deploy_dir 来自 group_vars 与主机变量
+  pre_tasks:
+    - name: audit | kids-ledger 主机映射审计用目录
+      ansible.builtin.set_fact:
+        deploy_dir: "{{ kl_deploy_dir }}"
+        audit_services: ["{{ kl_service_name }}", nginx]
+      when: kl_deploy_dir is defined

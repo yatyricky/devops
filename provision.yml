@@ -1,0 +1,163 @@
+---
+# =====================================================================
+# 新服务器初始化（重建原仓库已删除的 install_ls/bs 装机能力；按需分段开启）
+#
+# 用法：
+#   ansible-playbook provision.yml -l bs-test                     # 基础包 + node22 + pnpm
+#   ansible-playbook provision.yml -l ls-test -e provision_frp=yes # 追加 frp 二进制
+#   ansible-playbook provision.yml -l bs-test -e provision_firewall=yes  # ufw 收紧
+#
+# 分段开关（默认值）：
+#   provision_base=yes     基础 apt 包（nginx/ufw/curl 等，只安装不启用）
+#   provision_node=yes     node22 + pnpm 11.15.1 装到 /usr/local（systemd unit 用 /usr/local/bin/node）
+#   provision_frp=no       创建 frp 用户 + 下载 frp/frps 二进制到 /usr/local/bin
+#   provision_webuser=no   创建 web_server_user 系统用户（运行应用的用户）
+#   provision_firewall=no  ufw：默认拒绝入站，放行 22/80/443（谨慎：SSH 放行 22 优先）
+# 证书（Let's Encrypt 泛域名需 DNS 验证）与 fail2ban 不在此范围，见 README。
+# =====================================================================
+
+- name: Provision | 新服务器初始化
+  hosts: all
+  gather_facts: true
+  vars:
+    provision_base: yes
+    provision_node: yes
+    provision_frp: no
+    provision_webuser: no
+    provision_firewall: no
+    node_version: "22.14.0"
+    node_mirror: "https://registry.npmmirror.com/-/binary/node"
+    pnpm_version: "11.15.1"
+    frp_version: "0.61.1"
+    frp_mirror: "https://github.com/fatedier/frp/releases/download"
+  tasks:
+    - name: provision | base | apt 基础包
+      when: provision_base | bool
+      block:
+        - name: provision | base | apt update
+          ansible.builtin.apt:
+            update_cache: true
+            cache_valid_time: 3600
+          become: true
+
+        - name: provision | base | 安装基础包
+          ansible.builtin.apt:
+            name: [curl, git, rsync, unzip, jq, ca-certificates, nginx, ufw]
+            state: present
+          become: true
+
+    - name: provision | node | node {{ node_version }} + pnpm {{ pnpm_version }}
+      when: provision_node | bool
+      block:
+        - name: provision | node | 已装则跳过
+          ansible.builtin.command: /usr/local/bin/node --version
+          changed_when: false
+          failed_when: false
+          register: provision_node_ver
+
+        - name: provision | node | 下载并安装（/usr/local/bin/{node,npm,corepack}）
+          when: not (provision_node_ver.stdout is search('v' ~ node_version))
+          block:
+            - name: provision | node | 下载 tarball
+              ansible.builtin.get_url:
+                url: "{{ node_mirror }}/v{{ node_version }}/node-v{{ node_version }}-linux-x64.tar.xz"
+                dest: "/tmp/node-v{{ node_version }}.tar.xz"
+                mode: "0644"
+              become: true
+
+            - name: provision | node | 解包到 /usr/local
+              ansible.builtin.unarchive:
+                src: "/tmp/node-v{{ node_version }}.tar.xz"
+                dest: /usr/local
+                remote_src: true
+                extra_opts: [--strip-components=1]
+              become: true
+
+            - name: provision | node | 安装 pnpm（全局）
+              community.general.npm:
+                name: pnpm
+                version: "{{ pnpm_version }}"
+                global: true
+              become: true
+
+            - name: provision | node | 验证
+              ansible.builtin.command: "{{ item }}"
+              loop: [node --version, pnpm --version]
+              changed_when: false
+
+    - name: provision | frp | frp 用户与二进制
+      when: provision_frp | bool
+      block:
+        - name: provision | frp | 系统用户
+          ansible.builtin.user:
+            name: "{{ frp_user | default('frp') }}"
+            system: true
+            shell: /usr/sbin/nologin
+            create_home: false
+          become: true
+
+        - name: provision | frp | 下载
+          ansible.builtin.get_url:
+            url: "{{ frp_mirror }}/v{{ frp_version }}/frp_{{ frp_version }}_linux_amd64.tar.gz"
+            dest: "/tmp/frp_{{ frp_version }}.tar.gz"
+            mode: "0644"
+          become: true
+
+        - name: provision | frp | 解包
+          ansible.builtin.unarchive:
+            src: "/tmp/frp_{{ frp_version }}.tar.gz"
+            dest: /tmp
+            remote_src: true
+          become: true
+
+        - name: provision | frp | 安装 frps/frpc 到 /usr/local/bin
+          ansible.builtin.copy:
+            src: "/tmp/frp_{{ frp_version }}_linux_amd64/{{ item }}"
+            dest: "/usr/local/bin/{{ item }}"
+            mode: "0755"
+            remote_src: true
+          loop: [frps, frpc]
+          become: true
+
+    - name: provision | webuser | 应用运行用户
+      when: provision_webuser | bool
+      ansible.builtin.user:
+        name: "{{ web_server_user | default('deploy') }}"
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+      become: true
+
+    - name: provision | firewall | ufw 基线（谨慎执行，确保 SSH 端口已覆盖）
+      when: provision_firewall | bool
+      block:
+        - name: provision | firewall | 默认拒绝入站
+          community.general.ufw:
+            direction: incoming
+            policy: deny
+          become: true
+
+        - name: provision | firewall | 放行 22/80/443
+          community.general.ufw:
+            rule: allow
+            port: "{{ item }}"
+            proto: tcp
+          loop: ["22", "80", "443"]
+          become: true
+
+        - name: provision | firewall | 启用 ufw
+          community.general.ufw:
+            state: enabled
+          become: true
+
+- name: Provision | 提示后续步骤
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: provision | 后续步骤
+      ansible.builtin.debug:
+        msg:
+          - "1. 导入主机指纹: ssh-keyscan -t ed25519 <host> >> ~/.ssh/known_hosts（或首次交互连接）"
+          - "2. 下发配置: ansible-playbook apply-config.yml -l <host>"
+          - "3. 首次部署: ansible-playbook deploy.yml -e 'site=xx target=yy env=test'"
+          - "4. Let's Encrypt 泛域名证书需 DNS 验证，手动 certbot certonly --preferred-challenges dns"

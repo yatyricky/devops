@@ -1,0 +1,121 @@
+---
+# BS 配置下发（等价于原 bs_apply_config.sh，修复其两处缺陷：
+#   1) nginx -t 失败声称恢复备份但无实际动作 → 现在 block/rescue 真恢复
+#   2) restart 用 || true 吞错 → 现在 nginx -t 通过后正常重启，失败即中止）
+# 覆盖：/etc/frp（frpc.toml、frp_token）、systemd units（frpc/xlgbis-biz）、nginx 站点。
+
+- name: cfg | bs | frpc 运行用户
+  ansible.builtin.user:
+    name: "{{ frp_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+  become: true
+
+- name: cfg | bs | /etc/frp 目录（0700，frp 用户）
+  ansible.builtin.file:
+    path: /etc/frp
+    state: directory
+    owner: "{{ frp_user }}"
+    group: "{{ frp_user }}"
+    mode: "0700"
+  become: true
+
+- name: cfg | bs | frp token（与 LS 相同的共享密钥，来自 vault，0600）
+  ansible.builtin.copy:
+    content: "{{ vault_frps_token }}"
+    dest: "{{ frp_token_path }}"
+    owner: "{{ frp_user }}"
+    group: "{{ frp_user }}"
+    mode: "0600"
+  become: true
+  no_log: true
+
+- name: cfg | bs | frpc.toml
+  ansible.builtin.template:
+    src: bs/frpc.toml.j2
+    dest: /etc/frp/frpc.toml
+    owner: "{{ frp_user }}"
+    group: "{{ frp_user }}"
+    mode: "0600"
+  become: true
+
+- name: cfg | bs | frpc.service（模板内 User 统一使用 frp_user 变量）
+  ansible.builtin.template:
+    src: bs/frpc.service.j2
+    dest: /etc/systemd/system/frpc.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: cfg | bs | xlgbis-biz.service
+  ansible.builtin.template:
+    src: bs/xlgbis-biz.service.j2
+    dest: /etc/systemd/system/xlgbis-biz.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: cfg | bs | 备份现有 nginx 站点
+  ansible.builtin.command: cp /etc/nginx/sites-available/xlgbis /tmp/xlgbis.site.prev
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: cfg | bs | nginx 站点（仅监听 127.0.0.1:80，公网流量走 FRP 隧道）
+  block:
+    - name: cfg | bs | 渲染站点
+      ansible.builtin.template:
+        src: bs/nginx-site.j2
+        dest: /etc/nginx/sites-available/xlgbis
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+
+    - name: cfg | bs | 启用站点
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/xlgbis
+        dest: /etc/nginx/sites-enabled/xlgbis
+        state: link
+        force: true
+      become: true
+
+    - name: cfg | bs | nginx 配置测试
+      ansible.builtin.command: nginx -t
+      become: true
+      changed_when: false
+
+  rescue:
+    - name: cfg | bs | nginx -t 失败 → 恢复备份
+      ansible.builtin.command: cp /tmp/xlgbis.site.prev /etc/nginx/sites-available/xlgbis
+      become: true
+      changed_when: true
+      failed_when: false
+
+    - name: cfg | bs | 校验恢复后的配置
+      ansible.builtin.command: nginx -t
+      become: true
+      changed_when: false
+
+    - name: cfg | bs | 中止
+      ansible.builtin.fail:
+        msg: "新 nginx 配置非法，已恢复原配置。请检查 templates/bs/nginx-site.j2"
+
+- name: cfg | bs | daemon-reload + enable/重启服务
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - systemctl daemon-reload
+    - systemctl enable frpc.service
+    - systemctl enable xlgbis-biz.service
+    - systemctl restart frpc.service
+    - systemctl restart xlgbis-biz.service
+    - systemctl reload nginx
+  become: true
+  changed_when: true
+
+- name: cfg | bs | done
+  ansible.builtin.debug:
+    msg: "BS 配置已下发（{{ inventory_hostname }}）"

@@ -1,0 +1,54 @@
+---
+# =====================================================================
+# BS（内网业务服务器）站点参数 —— 对应原 bs_ops.js envSchema 与 devops/business/ 模板
+# deploy_dir / xlgbis_env / bsi / ansible_host 等主机相关值见 inventory/hosts.yml
+# =====================================================================
+
+xlgbis_site: bs
+
+# --- frpc（穿透客户端，连 LS 的 frps） ---
+frp_user: frp
+frp_token_path: /etc/frp/frp_token
+frps_server_addr: login.domain.com  # 原 FRPS_SERVER_ADDR：LS 公网域名
+frps_bind_port: 9999
+frps_subdomain_host: domain.com     # 与 ls.yml 保持一致
+bsi: bs1                            # 业务站标识（frp 子域名 + JWT 字段）；多台 BS 在 hosts.yml 按主机覆盖
+
+# --- 应用 ---
+biz_app_port: 3000                  # 原 BIZ_APP_PORT：xlgbis-biz 监听端口
+web_server_user: opbiz              # 原 WEB_SERVER_USER
+service_name: xlgbis-biz
+local_nginx_web_root: "{{ deploy_dir }}/client"  # 原 LOCAL_NGINX_WEB_ROOT
+
+# --- biz-server 运行时 .env（非密钥部分；密钥来自 vault.yml） ---
+bs_debug: false
+bs_upload_dir: "a_secure_dir"       # 原 UPLOAD_DIR
+bs_jwt_kid: v1
+
+# --- 部署目标（原 SITES.bs） ---
+client_subdir: biz-client
+client_archive_prefix: biz-client
+client_link_packages: [biz-shared]      # biz-client 经 link:../packages/biz-shared 引用
+server_subdir: biz-server
+server_archive_prefix: biz-server
+server_env_template: bs/biz-server.env.j2
+
+# --- 前端构建注入（原 SITES.bs.clientEnvKeys） ---
+login_url: "https://login.domain.com"   # 原 LOGIN_URL
+url_oa_server: ""                       # 原 URL_OA_SERVER
+vite_log_level: info                    # 原 LOG_LEVEL
+client_vite_env:
+  VITE_VERSION: "{{ release_version }}"
+  VITE_LOGIN_URL: "{{ login_url }}"
+  VITE_URL_OA_SERVER: "{{ url_oa_server }}"
+  VITE_LOG_LEVEL: "{{ vite_log_level }}"
+
+# --- 审计/状态（原 bs_ops.js） ---
+frp_toml: frpc.toml
+audit_services: [xlgbis-biz, frpc, nginx]
+
+# --- 健康检查 ---
+client_healthcheck_url: "https://{{ bsi }}.{{ frps_subdomain_host }}/"
+client_healthcheck_status: 200
+# biz-server 无 /healthz 端点（仅 login-server 有），改用端口探活 + systemd 状态
+server_healthcheck_port: "{{ biz_app_port }}"

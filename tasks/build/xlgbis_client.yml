@@ -1,0 +1,124 @@
+---
+# xlgbis 前端（SPA）构建 + 打包（在控制机 WSL 本地执行，产物与原 deploy_client.js 兼容：
+# tgz 内为顶层 build/ 目录，远端目录结构与旧脚本完全一致）
+# 注意：client 通过 `link:../packages/*` 引用相邻包（login-client→common，biz-client→biz-shared），
+#       因此工作区必须保留同级目录布局：workdir/{client_subdir}/ + workdir/packages/...。
+
+- name: build | client | compose release name
+  ansible.builtin.set_fact:
+    client_release_name: "{{ archive_prefix }}-{{ release_version }}-{{ xlgbis_build_time }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: build | client | assert source tree
+  ansible.builtin.stat:
+    path: "{{ xlgbis_src }}/{{ client_subdir }}/package.json"
+  delegate_to: localhost
+  run_once: true
+  register: build_client_src
+
+- name: build | client | source must exist
+  ansible.builtin.fail:
+    msg: "源码不存在: {{ xlgbis_src }}/{{ client_subdir }}（检查 group_vars 中的 xlgbis_src 与 client_subdir）"
+  delegate_to: localhost
+  run_once: true
+  when: not build_client_src.stat.exists
+
+- name: build | client | prepare clean workdir
+  ansible.builtin.file:
+    path: "{{ build_root }}/{{ client_subdir }}-ws"
+    state: absent
+  delegate_to: localhost
+  run_once: true
+
+- name: build | client | create workdir dirs
+  ansible.builtin.file:
+    path: "{{ build_root }}/{{ client_subdir }}-ws/packages"
+    state: directory
+  delegate_to: localhost
+  run_once: true
+
+- name: build | client | copy source (exclude node_modules/build/.svelte-kit/.env)
+  ansible.builtin.command: >
+    rsync -a --delete
+    --exclude node_modules --exclude build --exclude .svelte-kit --exclude dist --exclude .env
+    {{ xlgbis_src }}/{{ client_subdir }}/ {{ build_root }}/{{ client_subdir }}-ws/{{ client_subdir }}/
+  delegate_to: localhost
+  run_once: true
+  changed_when: true
+
+- name: build | client | copy adjacent link packages（link:../packages/* 依赖）
+  ansible.builtin.command: >
+    rsync -a --delete --exclude node_modules --exclude .env
+    {{ xlgbis_src }}/packages/{{ item }}/ {{ build_root }}/{{ client_subdir }}-ws/packages/{{ item }}/
+  loop: "{{ client_link_packages }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: true
+
+- name: build | client | write Vite .env (原 writeClientEnv)
+  ansible.builtin.copy:
+    dest: "{{ build_root }}/{{ client_subdir }}-ws/{{ client_subdir }}/.env"
+    content: "{{ client_vite_env | dict2items | map(attribute='key') | zip(client_vite_env | dict2items | map(attribute='value')) | map('join', '=') | join('\n') }}\n"
+    mode: "0644"
+  delegate_to: localhost
+  run_once: true
+
+- name: build | client | install deps (pnpm, frozen)
+  ansible.builtin.command: pnpm install --frozen-lockfile
+  args:
+    chdir: "{{ build_root }}/{{ client_subdir }}-ws/{{ client_subdir }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: true
+
+- name: build | client | build (vite)
+  ansible.builtin.command: pnpm build
+  args:
+    chdir: "{{ build_root }}/{{ client_subdir }}-ws/{{ client_subdir }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: true
+
+- name: build | client | verify index.html
+  ansible.builtin.stat:
+    path: "{{ build_root }}/{{ client_subdir }}-ws/{{ client_subdir }}/build/index.html"
+  delegate_to: localhost
+  run_once: true
+  register: build_client_out
+
+- name: build | client | build output must exist
+  ansible.builtin.fail:
+    msg: "构建产物缺失: build/index.html（vite build 失败？）"
+  delegate_to: localhost
+  run_once: true
+  when: not build_client_out.stat.exists
+
+- name: build | client | create artifact dir
+  ansible.builtin.file:
+    path: "{{ artifacts_dir }}"
+    state: directory
+  delegate_to: localhost
+  run_once: true
+
+- name: build | client | archive (顶层 build/，与原 compress(clientDir, ['build']) 一致)
+  ansible.builtin.command: >
+    tar -czf {{ artifacts_dir }}/{{ client_release_name }}.tgz
+    -C {{ build_root }}/{{ client_subdir }}-ws/{{ client_subdir }} build
+  delegate_to: localhost
+  run_once: true
+  changed_when: true
+
+- name: build | client | expose release facts
+  ansible.builtin.set_fact:
+    release_name: "{{ client_release_name }}"
+    artifact_path: "{{ artifacts_dir }}/{{ client_release_name }}.tgz"
+  delegate_to: localhost
+  run_once: true
+
+- name: build | client | remove workdir
+  ansible.builtin.file:
+    path: "{{ build_root }}/{{ client_subdir }}-ws"
+    state: absent
+  delegate_to: localhost
+  run_once: true

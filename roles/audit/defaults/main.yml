@@ -1,0 +1,8 @@
+---
+# audit role 默认值（ls/bs 组在 group_vars 覆盖）
+# frp_toml: frps.toml | frpc.toml | ""（空则跳过 FRP 检查，如 kids-ledger 主机）
+frp_toml: ""
+# 本站点需要确认 active 的 systemd 服务清单
+audit_services: []
+# 允许对公网监听的端口（与原 ops_common.js EXPECTED_PUBLIC_PORTS 一致；group_vars/all 覆盖）
+expected_public_ports: [22, 80, 443]
