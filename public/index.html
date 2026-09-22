@@ -64,7 +64,7 @@
   /* 模态框 */
   #overlay { position: fixed; inset: 0; background: rgba(4, 8, 14, .66); display: none; align-items: center; justify-content: center; z-index: 20; }
   #overlay.open { display: flex; }
-  .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; width: min(520px, 92vw); }
+  .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; width: min(520px, 92vw); max-height: 92vh; overflow-y: auto; }
   .modal.wide { width: min(880px, 96vw); }
   .modal h3 { margin: 0 0 12px; font-size: 15px; }
   .modal label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 4px; }
@@ -312,9 +312,9 @@ function taskAction(appName, task) {
 }
 
 // ── 模态框 ────
+// 关闭只走显式按钮（取消/关闭/✕）；点背景不关闭，防止长表单误触丢内容。
 function modal(html, wide = false) { const box = $("#modalBox"); box.innerHTML = html; box.classList.toggle("wide", wide); $("#overlay").classList.add("open"); return box; }
 function closeModal() { $("#overlay").classList.remove("open"); }
-$("#overlay").addEventListener("click", e => { if (e.target.id === "overlay") closeModal(); });
 
 async function openDeploy(appName, taskName = "deploy") {
   const a = state.apps.find(x => x.name === appName);
