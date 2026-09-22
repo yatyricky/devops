@@ -1,208 +1,62 @@
-# devops — xlgbis / kids-ledger 统一运维仓库（Ansible + Semaphore UI）
+# devops-console
 
-用一套标准化工具替代原 xlgbis `devops/*.js` 自研脚本与 kids-ledger `deploy.ps1`，覆盖：
+轻量 DevOps 控制台：**SSH 推送式部署引擎 + 单文件 Web GUI + 类型化可视化工作流**。部署逻辑全部配置化——`workflows/<name>.json` 描述一个应用的全部任务（deploy / rollback / status / apply-config / 任意自定义），GUI 上用卡片式步骤编辑器组装（像 ComfyUI：每个步骤是一个原子能力，有带类型的参数与产出物）。
 
-| 功能 | 旧实现（xlgbis） | 旧实现（kids-ledger） | 本仓库 |
-|---|---|---|---|
-| 服务器状态审计 | `ls_ops/bs_ops --audit` | 无 | `audit.yml`（检查项 1:1 移植 + Semaphore 定时巡检） |
-| 状态一览 | `ls_ops/bs_ops --status` | 无 | `status.yml` |
-| 前端 构建+打包+部署+回滚 | `deploy_client.js/sh` | 无（dist 随包） | `deploy.yml -e target=client` / `rollback.yml` |
-| 服务端 打包+部署+安装+回滚 | `deploy_server.js/sh` | `deploy.ps1`（覆盖式，无回滚） | `deploy.yml -e target=server` / `site=kl` / `rollback.yml` |
-| nginx/frp/systemd 配置下发 | `--apply-config` + apply 脚本 | 手工 | `apply-config.yml`（幂等模板渲染） |
-| 新服务器初始化 | 已删除的 install_ls/bs | 手工 | `provision.yml`（分段开关） |
-| GUI | 无 | 无 | Semaphore UI（http://localhost:3000） |
+单文件 Express 服务器 + 单文件原生 JS 前端（无构建、无框架、无 TypeScript）、4 个直接依赖、`node index` 直接运行。GUI 是唯一入口，没有第二套等价界面。
 
-相比旧脚本的新增能力：**部署后健康检查 + 失败自动回滚**、**旧 release 自动清理（保留最近 5 份）**、**密钥全部走 ansible-vault**、**prod 环境强制 `-e force=yes` 门槛**、**修复 `bs_apply_config.sh` nginx -t 失败不真恢复 / `|| true` 吞错的缺陷**。
+## 核心特性
 
-两个项目仓库**不被本工具修改**：源码从 `/mnt/c/Users/yatyr/workspace/{xlgbis,kids-ledger}` 只读拷贝到 WSL 临时目录构建；配置模板已平移到本仓库成为唯一事实源。
+- **类型化数据流工作流**：线性步骤列表，无 DAG；每个步骤声明带类型的产出物（`archivePath(path)`、`uploadedTo(remote_path)`…），每个参数是带类型的输入槽——**文件产出物不能被当字符串入参**，引用类型不匹配在编辑器里选不出来、保存时编译期校验兜底。9 种原子能力：`git.checkout / env.write / shell / archive / upload / remote / template.push / vars.set / log`。
+- **模板随应用仓库版本管理**：nginx/frp/systemd 配置放在各自应用仓库的 `deploy/` 目录，工作流用 `template.push` 配置模板路径 + 参数，渲染后推送。
+- **部署语义**：`releases/<ref>-<hash>-<time>` 不可变目录 + `current` 符号链接切换 + systemd/nginx 重载 + 健康检查，天然可回滚（秒级切链，不重新构建）。
+- **无 CI 触发器**：所有部署由人在 GUI 手动触发；**prod 环境必须输入应用名二次确认**（runner 内置门禁兜底）；dry-run 只打印计划、绝不连接服务器。
+- **安全**：SSH 主机指纹 SHA256 锁定（timingSafeEqual）、env 机密文件不入 git 且 GUI 永不显示其值、任务串行执行、全量审计（`.runs/audit.jsonl`）。
+- 无容器、无 WSL、无云依赖；内存占用 ~150MB。
 
----
+## 快速开始
+
+```bash
+npm install
+
+# 1) 新建应用：GUI 右上角「＋ 新建工作流」（SPA 预设或空白），
+#    或参考 workflows/kids-ledger.json / xlgbis-*.json / spa.example.json 手写
+#    nginx/frp 等模板放应用仓库的 deploy/ 目录
+
+# 2) 填 env：envs/<应用名>.env（创建工作流成功后会弹出样例内容）
+#    REMOTE_HOST_FINGERPRINT 先留空，跑一次「状态」任务取指纹再填回
+
+# 3) 启动 GUI（默认 http://127.0.0.1:3010，自动打开浏览器）
+node index.js          # 或双击 start.cmd
+
+# 4) 卡片上先 dry-run 预览完整执行计划，再真实部署；prod 需输入应用名确认
+```
+
+内置四个工作流应用：**kids-ledger**（全栈：构建 + 服务器装依赖 + systemd + 健康检查）、**xlgbis-ls / xlgbis-bs**（前端+服务端+frp 隧道，各 6 个任务）、以及你在 GUI 里创建的任意应用。
 
 ## 目录结构
 
 ```
-devops/
-├── ansible.cfg               # host_key_checking=True（保留指纹校验策略）
-├── deploy.yml                # 统一部署入口（构建在 WSL，发布到服务器）
-├── rollback.yml              # 回滚入口
-├── audit.yml                 # 只读审计巡检
-├── status.yml                # 服务状态 + 当前版本一览
-├── apply-config.yml          # nginx/frp/systemd 配置下发
-├── provision.yml             # 新服务器初始化（分段开关）
-├── inventory/
-│   ├── hosts.yml             # ★ 主机清单（占位，填真实值）
-│   └── group_vars/
-│       ├── all/vars.yml      # 源码路径、release 保留数等全局参数
-│       ├── all/vault.example.yml  # ★ 密钥模板（复制为 vault.yml 并加密）
-│       ├── ls.yml / bs.yml / kl.yml  # 站点参数（对应原 env schema）
-├── roles/audit/              # 审计检查项（原 ops_common.js）
-├── tasks/
-│   ├── build/                # 控制机构建：版本号 / 前端 / 服务端 / kids-ledger
-│   ├── deploy/               # 服务器发布：解压校验 → 装依赖 → 切链 → 健康检查 → 自动回滚 → 清理
-│   ├── rollback/             # 回滚
-│   └── config/               # apply-config 的三个站点任务
-├── templates/                # nginx 站点 / systemd unit / frp toml / 运行时 .env（Jinja2）
-├── files/ls/                 # 503 页面与静态 unit
-└── semaphore/                # Semaphore UI 安装与配置脚本
+├─ index.js               # 服务器：扁平路由 + 静态托管 + SSE-over-POST 流式日志 + 工作流 CRUD API
+├─ engine/
+│  ├─ workflow.js         # 核心：类型化数据流（步骤注册表 + 编译期类型校验 + 执行器）
+│  ├─ registry.js         # 应用注册中心：加载 workflows/*.json → 标准 manifest
+│  ├─ presets.js          # SPA / 空白 预设生成器（GUI「＋ 新建工作流」）
+│  ├─ ssh.js              # node-ssh + Windows agent 命名管管道 + 指纹锁定
+│  ├─ env.js              # .env 解析 + schema 校验
+│  ├─ render.js           # {{KEY}} 模板渲染（未解析即报错）
+│  ├─ exec.js tarball.js gitops.js release.js
+│  └─ runner.js           # 串行任务队列 + 日志采集 + .runs/ 持久化 + 审计 + prod 门禁
+├─ workflows/             # 应用定义（JSON 工作流；*.example.json 与 _ 前缀不加载）
+├─ public/index.html      # 单文件前端（卡片式类型插槽编辑器 + 原生 JS）
+├─ envs/                  # 环境文件（gitignored；只有 *.example.env 入库）
+├─ .runs/                 # 任务历史 + 日志 JSON + audit.jsonl（gitignored）
+└─ docs/                  # architecture / operations / workflow-schema
 ```
 
----
-
-## 接入步骤（一次性）
-
-以下命令均在 **WSL（Ubuntu-24.04）** 内、本仓库根目录执行（`cd /mnt/c/Users/yatyr/workspace/devops`）。
-
-### 1. 填主机清单 `inventory/hosts.yml`
-
-把占位主机（`ls-test` / `bs-prod` / `kl-prod`…）的注释值填实。每组变量：
-
-- `ansible_host` / `ansible_user`：SSH 地址与用户（须具备 NOPASSWD sudo，同旧体系）
-- `xlgbis_env: test|prod`：环境标识（对应旧 `SERVER_TYPE`）
-- `deploy_dir`：旧 `DEPLOY_DIR`（如 `/opt/xlgbis-biz`）
-- bs 主机额外需要 `bsi`（frp 子域名 + JWT 字段）
-- kl 主机：`kl_deploy_dir`（默认 `/opt/kids-ledger`）、可选 `kl_domain`
-
-### 2. 站点参数 `inventory/group_vars/{ls,bs,kl}.yml`
-
-已按旧 env schema 预填示例值（`domain.com` 等），改成真实值即可；键名与旧 env 键一一对应（有注释）。
-
-### 3. 初始化 vault（密钥）
+## 验证
 
 ```bash
-cp inventory/group_vars/all/vault.example.yml inventory/group_vars/all/vault.yml
-vi inventory/group_vars/all/vault.yml      # 填真实值：frp token、JWT_SECRET、QYWX_SECRET、DB_URL、kl tokens
-ansible-vault encrypt inventory/group_vars/all/vault.yml
-echo '你的vault密码' > ~/.vault-pass && chmod 600 ~/.vault-pass   # ansible.cfg 已指向它
+npm run verify    # 引擎自检：渲染/env/打包/release 校验 + 工作流类型校验 + dry-run 端到端断言
 ```
 
-`vault.yml` 已被 .gitignore 排除；所有密钥不再出现在任何脚本/模板/制品的明文日志里（下发均 `no_log` 或 0600 落盘）。
-
-### 4. SSH 密钥与指纹
-
-```bash
-# WSL 内生成专用部署密钥（或复制现有私钥），并把公钥追加到各服务器 authorized_keys
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ''
-# 首次连接导入主机指纹（host_key_checking=True 拒绝未知主机，与旧体系 TOFU+指纹 pin 一致）
-ssh <ansible_user>@<host> true
-```
-
-### 5. 验证连通
-
-```bash
-ansible all -m ping            # 全部主机
-ansible bs-test -m ping        # 单台
-```
-
----
-
-## 日常使用
-
-### CLI（WSL 内）
-
-> **重要**：仓库在 `/mnt/c`（WSL 视角为世界可写目录），ansible 会忽略 `./ansible.cfg`。
-> 请始终使用包装器 `./ap`（它通过 `ANSIBLE_CONFIG` 显式指定配置）；ad-hoc 命令手动
-> `export ANSIBLE_CONFIG=/mnt/c/Users/yatyr/workspace/devops/ansible.cfg`。
-
-```bash
-# 审计（只读；FAIL 项会导致非零退出）
-./ap audit.yml [-l ls-test]
-
-# 状态一览
-./ap status.yml
-
-# 部署（env 缺省 test；prod 必须 -e force=yes）
-./ap deploy.yml -e "site=ls target=client env=test"
-./ap deploy.yml -e "site=ls target=server env=test"
-./ap deploy.yml -e "site=bs target=client env=test"
-./ap deploy.yml -e "site=bs target=server env=test"
-./ap deploy.yml -e "site=kl"
-
-# 回滚（previous = 按时间排序的上一版；或指定完整 release 名，用 status.yml 查）
-./ap rollback.yml -e "site=bs target=server release=previous"
-./ap rollback.yml -e "site=kl release=previous"
-
-# 配置下发（改了 templates/ 后；prod 需 -e force=yes）
-./ap apply-config.yml -l bs-test
-
-# 新服务器初始化（见文件头注释的分段开关）
-./ap provision.yml -l bs-test
-
-# 连通性（ad-hoc）
-export ANSIBLE_CONFIG=$PWD/ansible.cfg
-ansible all -m ping
-```
-
-版本号规则与旧脚本一致：`{ref}-{git 短 hash}[-dirty]-{UTC 时间戳}`，取自**项目工作区当前 HEAD**——本工具不做 `git checkout`（避免动你的工作区）；要部署其他 ref，先在项目仓库自行 checkout。
-
-### GUI（Semaphore UI，http://localhost:3000）
-
-已在 WSL 内安装并配置完成（Semaphore v2.19.12，systemd 服务 `semaphore`，随 WSL 启动）。
-
-- 登录：**admin / ChangeMe_123**（⚠ 首次登录后立即在 UI 里改密码）
-- 项目 `devops` 已建好：Key=none（沿用 nef 的 `~/.ssh`）、仓库=本仓库本地路径直读、
-  Inventory=`inventory/hosts.yml`、Environment 已注入 `ANSIBLE_CONFIG` 与 vault 密码
-- 三个任务模板：**deploy**（参数 `site/target/env`）、**rollback**（参数 `release`）、
-  **audit**（挂每日 08:00 定时巡检，FAIL 会在 UI 标红）
-- 运行前可在模板参数框临时改 `-e` 参数（如 `force=yes`、`site=bs target=server`）
-
-重装/重配方法：
-
-```bash
-bash semaphore/install.sh      # 装二进制 + systemd 服务 + 管理员（幂等）
-bash semaphore/configure.sh    # 建/补全项目、模板、定时（幂等，API 字段已按 v2.19 实测）
-```
-
-注意：inventory 还是占位主机时，在 UI 里跑 deploy/audit 会对着不存在的目标连接超时并失败——
-这是预期行为；填好真实主机后即为正式可用。
-
----
-
-## 服务器目录布局（与旧脚本兼容，可随时切回手工）
-
-```
-$DEPLOY_DIR/                     # xlgbis ls/bs
-├── client -> client-release/<release>   # 前端当前版（nginx root）
-├── client-build/                # 上传/解压临时区（用后即清）
-├── client-release/<release>/    # 历史版本（自动只保留最近 5 份）
-├── server -> server-release/<release>/<server_dir>   # 服务端当前版（systemd WorkingDirectory）
-├── server-build/
-└── server-release/<release>/{login-server|biz-server}/,packages/
-
-/opt/kids-ledger/                # kids-ledger（新布局）
-├── current -> releases/<release>
-├── releases/<release>/          # dist+server+shared+start.sh；内含 data → shared/data 软链
-└── shared/data/ledger.db        # SQLite 数据在 release 之外，升级/回滚不丢数据
-```
-
----
-
-## 真机验收清单（接入后逐项执行）
-
-1. **审计对齐**：`ansible-playbook audit.yml`，对照旧 `ls_ops/bs_ops --audit` 输出——检查项一致、结论一致、无误报。
-2. **状态对齐**：`ansible-playbook status.yml`，与旧 `--status` 显示的 服务 active + 当前 release 一致。
-3. **客户端部署（无行为变化）**：`deploy.yml -e "site=ls target=client env=test"`——服务器多出一个新 release、`client` 链接切换、nginx reload、健康检查 200。
-4. **服务端部署（无行为变化）**：`deploy.yml -e "site=ls target=server env=test"`——pnpm install 完成、`server` 链接切换、服务重启后 active、`/api/healthz` 200（biz 用端口探活）。
-5. **回滚演练**：`rollback.yml -e "site=ls target=server release=previous"`——切回旧 release、服务 active、健康检查通过。
-6. **切回最新**：再次执行第 4 步。
-7. **配置幂等**：`apply-config.yml -l <host> --check --diff`（或跑两遍）——第二遍应全部 `changed=0` 或仅时间戳类变化；`nginx -t` 通过。
-8. **kids-ledger**：`deploy.yml -e "site=kl"` → `rollback.yml -e "site=kl release=previous"` → 再部署；确认 `shared/data/ledger.db` 在回滚后仍在且应用可登录。
-9. **Semaphore**：UI 里把 3/4/5 步各点一遍，确认输出与 CLI 一致；看 audit 定时任务次日是否产生历史记录。
-
----
-
-## 与旧体系的差异说明
-
-- **prod 门槛**：旧 `refuseProdCi`（CI 禁 prod）→ `xlgbis_env=prod` 的部署/配置下发必须 `-e force=yes`。
-- **健康检查**：旧脚本部署完只 `systemctl status` 打印 → 现在 uri/wait_for 实测，失败**自动切回上一版**再报错。
-- **release 清理**：旧脚本从不清理 → 自动保留最近 `release_keep`（默认 5）份。
-- **.env 处理**：旧 `deploy_server.sh` 把完整 env 明文写进渲染脚本落盘 → 现在 `.env` 直接以 0600 写入 release，制品 tarball 以外不落明文（tarball 传输后即删，与旧一致）。
-- **kids-ledger**：由"覆盖解压 + 手工收尾"升级为 release + 回滚；`config.json` 从 vault 渲染（不再打包 `config.example.json` 弱默认口令）；`data/` 移出 release（`shared/data`），升级回滚不丢账目数据；nginx/systemd 配置纳入 `apply-config.yml`。
-- **frpc.service 模板**：原文件硬编码 `User=frp`，现改为 `frp_user` 变量（修复配置漂移）；`ls_apply_config.sh` 硬编码 `opfrp` 的历史问题同样收敛到变量。
-- **不做的事**：不动两个项目仓库的任何文件；不跑 `prisma db push`（数据库 schema 仍由你在开发机手工执行）；不管理 Let's Encrypt 泛域名证书签发（需 DNS 验证，见 provision.yml 尾部提示）。
-
-## 已知注意事项
-
-- **同组多台同环境主机**：构建任务 `run_once` 取 inventory 中第一台匹配主机触发；同组同 env 多台时部署会串行下发同一制品（行为正确，只是构建只跑一次）。
-- **服务器 node/pnpm**：`deploy_server` 的 `pnpm install` 通过 `bash -l` 执行，兼容旧服务器 nvm 安装的 node；新服务器建议用 `provision.yml`（装到 `/usr/local/bin`，与 systemd unit 的路径一致）。
-- **WSL 网络**：WSL 处于 NAT 模式且 Windows 配了本地代理时，代理不会自动镜像进 WSL；若 pnpm/npm 下载慢，可在 WSL 内自行设置代理或换镜像（构建临时目录用完即删，不影响项目仓库）。
-- **首次部署到全新目录**：`client-build`/`server-build` 等目录会自动创建；但 nginx 站点、systemd unit、frp 依赖 `apply-config.yml` 与 `provision.yml` 先行。
+详见 [docs/workflow-schema.md](docs/workflow-schema.md)（类型系统与步骤参考）、[docs/architecture.md](docs/architecture.md)（架构）和 [docs/operations.md](docs/operations.md)（运维手册）。

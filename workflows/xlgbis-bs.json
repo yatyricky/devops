@@ -1,0 +1,115 @@
+{
+  "name": "xlgbis-bs",
+  "title": "xlgbis 业务站（内网主机：biz-client + biz-server + frpc）",
+  "description": "SvelteKit SPA + Fastify 业务服务；本地 nginx 只听 127.0.0.1，frpc 隧道以 <BSI>.domain.com 对外",
+  "repoDir": "C:/Users/yatyr/workspace/xlgbis",
+  "envFile": "xlgbis-bs.env",
+  "params": {
+    "clientDir": "biz-client",
+    "serverDir": "biz-server",
+    "serviceName": "xlgbis-biz"
+  },
+  "envSchema": {
+    "SERVER_TYPE": "test",
+    "REMOTE_HOST": "host.example.com",
+    "REMOTE_USER": "deploy",
+    "REMOTE_HOST_FINGERPRINT": "",
+    "DEPLOY_DIR": "/opt/xlgbis-biz",
+    "BSI": "bs1",
+    "FRPS_SERVER_ADDR": "login.domain.com",
+    "FRPS_BIND_PORT": 9999,
+    "FRP_TOKEN_PATH": "/etc/frp/frp_token",
+    "LOCAL_NGINX_WEB_ROOT": "/opt/xlgbis-biz/client",
+    "BIZ_APP_PORT": 3000,
+    "FRP_USER": "frp",
+    "WEB_SERVER_USER": "opbiz",
+    "DEBUG": true,
+    "PORT": 3000,
+    "UPLOAD_DIR": "a_secure_dir",
+    "JWT_SECRET": "a_jwt_secret",
+    "JWT_KID": "v1",
+    "DB_URL": "http://db",
+    "DB_SU_ACCQYWX": "superuser",
+    "LOGIN_URL": "",
+    "URL_OA_SERVER": "",
+    "LOG_LEVEL": "info"
+  },
+  "workflows": {
+    "deploy-client": {
+      "steps": [
+        { "type": "git.checkout", "ref": "{{ref}}" },
+        { "type": "env.write", "file": "{{clientDir}}/.env", "pairs": { "VITE_VERSION": "{{versionId}}", "VITE_LOGIN_URL": "{{LOGIN_URL}}", "VITE_URL_OA_SERVER": "{{URL_OA_SERVER}}", "VITE_LOG_LEVEL": "{{LOG_LEVEL}}" } },
+        { "type": "shell", "command": "pnpm -C {{clientDir}} install --frozen-lockfile", "title": "安装依赖" },
+        { "type": "shell", "command": "pnpm -C {{clientDir}} build", "title": "构建" },
+        { "type": "archive", "source": "{{repoDir}}/{{clientDir}}/build" },
+        { "type": "remote", "command": "mkdir -p {{DEPLOY_DIR}}/client-build {{DEPLOY_DIR}}/client-release/{{releaseName}}" },
+        { "type": "upload", "from": "{{archivePath}}", "to": "{{DEPLOY_DIR}}/client-build/{{archiveName}}" },
+        { "type": "remote", "command": "tar -xzf {{DEPLOY_DIR}}/client-build/{{archiveName}} -C {{DEPLOY_DIR}}/client-release/{{releaseName}} && rm {{DEPLOY_DIR}}/client-build/{{archiveName}} && test -f {{DEPLOY_DIR}}/client-release/{{releaseName}}/index.html", "title": "解压并校验入口" },
+        { "type": "remote", "command": "chown -R {{WEB_SERVER_USER}}:{{WEB_SERVER_USER}} {{DEPLOY_DIR}}/client-release/{{releaseName}}", "sudo": true },
+        { "type": "remote", "command": "ln -sfn {{DEPLOY_DIR}}/client-release/{{releaseName}} {{DEPLOY_DIR}}/client" },
+        { "type": "remote", "command": "systemctl reload nginx || nginx -s reload", "sudo": true, "title": "重载本地 nginx" },
+        { "type": "remote", "command": "bash -lc 'cd {{DEPLOY_DIR}}/client-release && ls -1 | sort | head -n -5 | xargs -r rm -rf --'", "sudo": true, "title": "清理旧 release（保留 5 个）" }
+      ]
+    },
+    "rollback-client": {
+      "steps": [
+        { "type": "remote", "command": "test -d {{DEPLOY_DIR}}/client-release/{{release}} || { echo 'release not found: {{release}}'; exit 1; }" },
+        { "type": "remote", "command": "test -f {{DEPLOY_DIR}}/client-release/{{release}}/index.html || { echo 'missing index.html'; exit 1; }" },
+        { "type": "remote", "command": "ln -sfn {{DEPLOY_DIR}}/client-release/{{release}} {{DEPLOY_DIR}}/client" },
+        { "type": "remote", "command": "systemctl reload nginx || nginx -s reload", "sudo": true }
+      ]
+    },
+    "deploy-server": {
+      "steps": [
+        { "type": "git.checkout", "ref": "{{ref}}" },
+        { "type": "env.write", "file": "{{serverDir}}/.env", "pairs": { "DEBUG": "{{DEBUG}}", "PORT": "{{PORT}}", "UPLOAD_DIR": "{{UPLOAD_DIR}}", "JWT_SECRET": "{{JWT_SECRET}}", "BSI": "{{BSI}}", "JWT_KID": "{{JWT_KID}}", "DB_URL": "{{DB_URL}}", "DB_SU_ACCQYWX": "{{DB_SU_ACCQYWX}}" } },
+        { "type": "archive", "entries": ["{{serverDir}}", "packages/common"], "excludes": ["node_modules", "build", ".svelte-kit"] },
+        { "type": "remote", "command": "mkdir -p {{DEPLOY_DIR}}/server-build {{DEPLOY_DIR}}/server-release/{{releaseName}}" },
+        { "type": "upload", "from": "{{archivePath}}", "to": "{{DEPLOY_DIR}}/server-build/{{archiveName}}" },
+        { "type": "remote", "command": "tar -xzf {{DEPLOY_DIR}}/server-build/{{archiveName}} -C {{DEPLOY_DIR}}/server-build/{{releaseName}} && rm {{DEPLOY_DIR}}/server-build/{{archiveName}} && test -f {{DEPLOY_DIR}}/server-build/{{releaseName}}/{{serverDir}}/src/index.js && test -f {{DEPLOY_DIR}}/server-build/{{releaseName}}/{{serverDir}}/.env && test -f {{DEPLOY_DIR}}/server-build/{{releaseName}}/packages/common/package.json", "title": "解压并校验布局" },
+        { "type": "remote", "command": "bash -lc 'pnpm -C {{DEPLOY_DIR}}/server-build/{{releaseName}}/{{serverDir}} install --prod --frozen-lockfile || pnpm -C {{DEPLOY_DIR}}/server-build/{{releaseName}}/{{serverDir}} install --prod --no-frozen-lockfile'", "title": "安装生产依赖" },
+        { "type": "remote", "command": "bash -lc 'pnpm -C {{DEPLOY_DIR}}/server-build/{{releaseName}}/packages/common install --prod --frozen-lockfile || pnpm -C {{DEPLOY_DIR}}/server-build/{{releaseName}}/packages/common install --prod --no-frozen-lockfile'", "title": "安装 common 依赖" },
+        { "type": "remote", "command": "chmod -R o-w {{DEPLOY_DIR}}/server-build/{{releaseName}} && chown -R {{WEB_SERVER_USER}}:{{WEB_SERVER_USER}} {{DEPLOY_DIR}}/server-build/{{releaseName}}", "sudo": true, "title": "权限修正" },
+        { "type": "remote", "command": "rm -rf {{DEPLOY_DIR}}/server-release/{{releaseName}} && mv {{DEPLOY_DIR}}/server-build/{{releaseName}} {{DEPLOY_DIR}}/server-release/{{releaseName}}", "sudo": true, "title": "移入 release 目录" },
+        { "type": "remote", "command": "systemctl stop {{serviceName}} || true", "sudo": true },
+        { "type": "remote", "command": "ln -sfn {{DEPLOY_DIR}}/server-release/{{releaseName}}/{{serverDir}} {{DEPLOY_DIR}}/server" },
+        { "type": "remote", "command": "systemctl daemon-reload; systemctl reset-failed {{serviceName}} || true; systemctl restart {{serviceName}}", "sudo": true },
+        { "type": "remote", "command": "bash -lc 'for i in $(seq 1 10); do systemctl is-active --quiet {{serviceName}} && (echo > /dev/tcp/127.0.0.1/{{PORT}}) 2>/dev/null && echo healthy && exit 0; sleep 2; done; echo port probe failed; exit 1'", "sudo": true, "title": "等待 active + 端口探活" },
+        { "type": "remote", "command": "bash -lc 'cd {{DEPLOY_DIR}}/server-release && ls -1 | sort | head -n -5 | xargs -r rm -rf --'", "sudo": true, "title": "清理旧 release（保留 5 个）" }
+      ]
+    },
+    "rollback-server": {
+      "steps": [
+        { "type": "remote", "command": "test -d {{DEPLOY_DIR}}/server-release/{{release}}/{{serverDir}} || { echo 'release not found: {{release}}'; exit 1; }" },
+        { "type": "remote", "command": "test -f {{DEPLOY_DIR}}/server-release/{{release}}/{{serverDir}}/src/index.js && test -f {{DEPLOY_DIR}}/server-release/{{release}}/{{serverDir}}/.env || { echo 'release layout incomplete'; exit 1; }" },
+        { "type": "remote", "command": "systemctl stop {{serviceName}} || true", "sudo": true },
+        { "type": "remote", "command": "ln -sfn {{DEPLOY_DIR}}/server-release/{{release}}/{{serverDir}} {{DEPLOY_DIR}}/server" },
+        { "type": "remote", "command": "systemctl daemon-reload; systemctl reset-failed {{serviceName}} || true; systemctl restart {{serviceName}}", "sudo": true },
+        { "type": "remote", "command": "bash -lc 'for i in $(seq 1 10); do systemctl is-active --quiet {{serviceName}} && exit 0; sleep 2; done; echo service not active; exit 1'", "sudo": true, "title": "等待 active" }
+      ]
+    },
+    "status": {
+      "mutates": false,
+      "steps": [
+        { "type": "remote", "command": "systemctl is-active frpc || true" },
+        { "type": "remote", "command": "systemctl is-active nginx || true" },
+        { "type": "remote", "command": "systemctl is-active {{serviceName}} || true" },
+        { "type": "remote", "command": "readlink -f {{DEPLOY_DIR}}/client || true" },
+        { "type": "remote", "command": "readlink -f {{DEPLOY_DIR}}/server || true" },
+        { "type": "remote", "command": "ls -1t {{DEPLOY_DIR}}/client-release 2>/dev/null | head -5" },
+        { "type": "remote", "command": "ls -1t {{DEPLOY_DIR}}/server-release 2>/dev/null | head -5" },
+        { "type": "remote", "command": "df -h {{DEPLOY_DIR}} | tail -1" }
+      ]
+    },
+    "apply-config": {
+      "steps": [
+        { "type": "remote", "command": "mkdir -p {{DEPLOY_DIR}}/ops /etc/frp /etc/nginx/sites-available /etc/nginx/sites-enabled" },
+        { "type": "template.push", "template": "deploy/bs/nginx-site", "to": "{{DEPLOY_DIR}}/ops/nginx-site" },
+        { "type": "template.push", "template": "deploy/bs/frpc.toml", "to": "{{DEPLOY_DIR}}/ops/frpc.toml" },
+        { "type": "template.push", "template": "deploy/bs/frpc.service", "to": "{{DEPLOY_DIR}}/ops/frpc.service" },
+        { "type": "template.push", "template": "deploy/bs/xlgbis-biz.service", "to": "{{DEPLOY_DIR}}/ops/xlgbis-biz.service" },
+        { "type": "remote", "sudo": true, "command": "install -m 644 {{DEPLOY_DIR}}/ops/frpc.toml /etc/frp/frpc.toml && install -m 644 {{DEPLOY_DIR}}/ops/frpc.service /etc/systemd/system/frpc.service && install -m 644 {{DEPLOY_DIR}}/ops/xlgbis-biz.service /etc/systemd/system/{{serviceName}}.service && systemctl daemon-reload && systemctl enable frpc {{serviceName}} >/dev/null && systemctl restart frpc && systemctl restart {{serviceName}} && install -m 644 {{DEPLOY_DIR}}/ops/nginx-site /etc/nginx/sites-available/xlgbis && ln -sf /etc/nginx/sites-available/xlgbis /etc/nginx/sites-enabled/xlgbis && nginx -t && systemctl reload nginx && echo 'apply-config done'" }
+      ]
+    }
+  }
+}

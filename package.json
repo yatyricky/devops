@@ -1,0 +1,17 @@
+{
+  "name": "devops-console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "轻量 DevOps 控制台：SSH 推送式部署引擎 + 单文件 Web GUI",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "verify": "node tools/verify-dryrun.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "node-ssh": "^13.2.1",
+    "tar": "^7.4.4"
+  }
+}

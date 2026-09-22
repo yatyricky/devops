@@ -1,0 +1,69 @@
+{
+  "name": "kids-ledger",
+  "title": "家庭账本（Fastify + SQLite + Vue 3）",
+  "description": "Vue3 SPA 由 Fastify 单进程托管；SQLite 数据与 config.json 通过 state/ 目录跨发布保留",
+  "repoDir": "C:/Users/yatyr/workspace/kids-ledger",
+  "envFile": "kids-ledger.env",
+  "params": {
+    "installCommand": "pnpm install --frozen-lockfile",
+    "buildCommand": "pnpm build"
+  },
+  "envSchema": {
+    "SERVER_TYPE": "test",
+    "REMOTE_HOST": "host.example.com",
+    "REMOTE_USER": "deploy",
+    "REMOTE_HOST_FINGERPRINT": "",
+    "DEPLOY_DIR": "/opt/kids-ledger",
+    "DOMAIN": "kl.example.com",
+    "SERVICE_NAME": "kids-ledger",
+    "SERVICE_USER": "www-data",
+    "APP_PORT": 3050,
+    "NODE_BIN": "/usr/bin/node"
+  },
+  "workflows": {
+    "deploy": {
+      "steps": [
+        { "type": "git.checkout", "ref": "{{ref}}" },
+        { "type": "shell", "command": "{{installCommand}}", "title": "安装依赖" },
+        { "type": "shell", "command": "{{buildCommand}}", "title": "构建（vite）" },
+        { "type": "archive", "entries": ["server", "shared", "dist", "package.json", "package-lock.json"], "excludes": ["node_modules"] },
+        { "type": "remote", "command": "mkdir -p {{DEPLOY_DIR}}/build {{DEPLOY_DIR}}/releases {{DEPLOY_DIR}}/state/data {{DEPLOY_DIR}}/releases/{{releaseName}}" },
+        { "type": "upload", "from": "{{archivePath}}", "to": "{{DEPLOY_DIR}}/build/{{archiveName}}" },
+        { "type": "remote", "command": "tar -xzf {{DEPLOY_DIR}}/build/{{archiveName}} -C {{DEPLOY_DIR}}/releases/{{releaseName}} && rm {{DEPLOY_DIR}}/build/{{archiveName}}", "title": "解压 release" },
+        { "type": "remote", "command": "bash -lc 'cd {{DEPLOY_DIR}}/releases/{{releaseName}} && (pnpm install --prod --frozen-lockfile || pnpm install --prod --no-frozen-lockfile)'", "title": "服务器安装生产依赖" },
+        { "type": "remote", "command": "chmod +x {{DEPLOY_DIR}}/releases/{{releaseName}}/start.sh && ln -sfn {{DEPLOY_DIR}}/state/data {{DEPLOY_DIR}}/releases/{{releaseName}}/data && { [ -f {{DEPLOY_DIR}}/state/config.json ] && ln -sfn {{DEPLOY_DIR}}/state/config.json {{DEPLOY_DIR}}/releases/{{releaseName}}/config.json || true; }", "title": "start.sh 可执行 + 持久数据软链" },
+        { "type": "remote", "command": "chown -R {{SERVICE_USER}}:{{SERVICE_USER}} {{DEPLOY_DIR}}/releases/{{releaseName}}", "sudo": true, "title": "修正属主" },
+        { "type": "remote", "command": "ln -sfn {{DEPLOY_DIR}}/releases/{{releaseName}} {{DEPLOY_DIR}}/current", "title": "切换 current 软链" },
+        { "type": "remote", "command": "bash -lc 'systemctl restart {{SERVICE_NAME}} && for i in $(seq 1 10); do systemctl is-active --quiet {{SERVICE_NAME}} && curl -fsS http://127.0.0.1:{{APP_PORT}}/ >/dev/null 2>&1 && echo healthy && exit 0; sleep 2; done; echo healthcheck failed; exit 1'", "sudo": true, "title": "重启服务 + 健康检查" },
+        { "type": "remote", "command": "bash -lc 'cd {{DEPLOY_DIR}}/releases && ls -1 | grep -v \"\\.tgz$\" | sort | head -n -5 | xargs -r rm -rf --'", "sudo": true, "title": "清理旧 release（保留 5 个）" }
+      ]
+    },
+    "rollback": {
+      "steps": [
+        { "type": "remote", "command": "test -d {{DEPLOY_DIR}}/releases/{{release}} || { echo 'release not found: {{release}}'; exit 1; }" },
+        { "type": "remote", "command": "test -f {{DEPLOY_DIR}}/releases/{{release}}/server/index.js && test -f {{DEPLOY_DIR}}/releases/{{release}}/start.sh && test -f {{DEPLOY_DIR}}/releases/{{release}}/dist/index.html || { echo 'release layout incomplete'; exit 1; }", "title": "校验 release 布局" },
+        { "type": "remote", "command": "ln -sfn {{DEPLOY_DIR}}/releases/{{release}} {{DEPLOY_DIR}}/current" },
+        { "type": "remote", "command": "bash -lc 'systemctl restart {{SERVICE_NAME}} && for i in $(seq 1 10); do systemctl is-active --quiet {{SERVICE_NAME}} && curl -fsS http://127.0.0.1:{{APP_PORT}}/ >/dev/null 2>&1 && echo healthy && exit 0; sleep 2; done; echo healthcheck failed; exit 1'", "sudo": true, "title": "重启服务 + 健康检查" }
+      ]
+    },
+    "status": {
+      "mutates": false,
+      "steps": [
+        { "type": "remote", "command": "systemctl is-active {{SERVICE_NAME}} || true" },
+        { "type": "remote", "command": "readlink -f {{DEPLOY_DIR}}/current || true" },
+        { "type": "remote", "command": "ls -1t {{DEPLOY_DIR}}/releases 2>/dev/null | head -8" },
+        { "type": "remote", "command": "df -h {{DEPLOY_DIR}} | tail -1" },
+        { "type": "remote", "command": "{{NODE_BIN}} -v 2>/dev/null || node -v" },
+        { "type": "remote", "command": "curl -s -o /dev/null -w 'local http status: %{http_code}\\n' http://127.0.0.1:{{APP_PORT}}/ || true" }
+      ]
+    },
+    "apply-config": {
+      "steps": [
+        { "type": "remote", "command": "mkdir -p {{DEPLOY_DIR}}/ops /etc/nginx/sites-available /etc/nginx/sites-enabled" },
+        { "type": "template.push", "template": "deploy/nginx-site.conf", "to": "{{DEPLOY_DIR}}/ops/nginx-site.conf" },
+        { "type": "template.push", "template": "deploy/kids-ledger.service", "to": "{{DEPLOY_DIR}}/ops/kids-ledger.service" },
+        { "type": "remote", "sudo": true, "command": "install -m 644 {{DEPLOY_DIR}}/ops/nginx-site.conf /etc/nginx/sites-available/{{app}} && ln -sf /etc/nginx/sites-available/{{app}} /etc/nginx/sites-enabled/{{app}} && install -m 644 {{DEPLOY_DIR}}/ops/kids-ledger.service /etc/systemd/system/{{SERVICE_NAME}}.service && systemctl daemon-reload && nginx -t && systemctl reload nginx && echo 'apply-config done'" }
+      ]
+    }
+  }
+}
