@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DevOps 控制台</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #10141a; color: #d7dee8;
+      font: 14px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100%"></div>
+  <script>
+    window.__errs = [];
+    window.addEventListener("error", e => window.__errs.push(String(e.message).slice(0, 300)));
+    window.addEventListener("unhandledrejection", e => window.__errs.push("P:" + String(e.reason).slice(0, 300)));
+    const _ce = console.error;
+    console.error = (...a) => { window.__errs.push("C:" + a.map(String).join(" ").slice(0, 300)); _ce(...a); };
+    // ResizeObserver 探针 + 失效兜底：部分内嵌 webview 不投递 RO 回调，
+    // 若 800ms 内零回调则启用 250ms 轮询对比尺寸并手动触发（正常浏览器零开销）。
+    window.__roObserve = [];
+    window.__roFire = 0;
+    const _RO = window.ResizeObserver;
+    const _targets = new Map();
+    window.ResizeObserver = class extends _RO {
+      constructor(cb) {
+        super((entries, obs) => { window.__roFire++; cb(entries, obs); });
+        this._cb = cb;
+      }
+      observe(t) {
+        window.__roObserve.push(String(t.className).slice(0, 40));
+        _targets.set(t, { cb: this._cb, last: null });
+        super.observe(t);
+      }
+      unobserve(t) { _targets.delete(t); super.unobserve(t); }
+      disconnect() { for (const [t, v] of _targets) if (v.cb === this._cb) _targets.delete(t); super.disconnect(); }
+    };
+    setTimeout(() => {
+      if (window.__roFire > 0) return;
+      setInterval(() => {
+        for (const [t, v] of _targets) {
+          const w = t.offsetWidth, h = t.offsetHeight;
+          if (v.last === null) {
+            // RO 语义：初次观察即回调一次
+            v.last = { w, h };
+            try { v.cb([{ target: t, contentRect: { width: w, height: h, x: 0, y: 0, top: 0, left: 0 } }], null); } catch { /* 忽略 */ }
+            continue;
+          }
+          if (v.last.w !== w || v.last.h !== h) {
+            v.last = { w, h };
+            try { v.cb([{ target: t, contentRect: { width: w, height: h, x: 0, y: 0, top: 0, left: 0 } }], null); } catch { /* 忽略 */ }
+          }
+        }
+      }, 250);
+    }, 800);
+  </script>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

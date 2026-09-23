@@ -1,39 +1,30 @@
 #!/usr/bin/env node
 /**
- * DevOps 控制台服务器（单文件 Express + 扁平路由 + SSE-over-POST 流式日志）。
- * 启动：node index.js（或 start.cmd）。默认绑定 127.0.0.1:3010，见 local-config.json。
+ * DevOps 控制台服务器：工作流（节点图）注册 + 任务队列 + SSE 流式日志 + 静态前端。
+ * 启动：node index.js（或 start.cmd）。默认 127.0.0.1:3010，见 local-config.json。
  */
 import express from "express";
+import fs from "fs";
 import path from "path";
 import url from "url";
 import child_process from "child_process";
-import { loadLocalConfig } from "./engine/config.js";
-import { loadApps } from "./engine/registry.js";
-import { enqueueTask, getRun, listRuns, getCurrentJob, ENVS_DIR } from "./engine/runner.js";
+import { loadUiConfig, rememberWorkflow, forgetWorkflow } from "./engine/config.js";
+import { loadWorkflows, findWorkflow } from "./engine/registry.js";
+import { nodeTypesMeta } from "./engine/nodes/index.js";
+import { loadWorkflow, validateWorkflow } from "./engine/workflow.js";
+import { enqueueWorkflowTask, listRuns, getRun, getCurrentJob, ENVS_DIR as ROOT_ENVS } from "./engine/runner.js";
 import { rawParse } from "./engine/env.js";
 import { getRefs } from "./engine/gitops.js";
-import { compileWorkflowApp, describeSteps } from "./engine/workflow.js";
-import { buildSpaPreset, buildBlankPreset } from "./engine/presets.js";
-import fs from "fs";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
-const cfg = loadLocalConfig();
+const cfg = loadUiConfig();
 const HOST = process.env.DEVOPS_HOST || cfg.host || "127.0.0.1";
 const PORT = Number(process.env.DEVOPS_PORT || cfg.port || 3010);
 const TOKEN = String(process.env.DEVOPS_TOKEN || cfg.token || "");
 
-const WORKFLOWS_DIR = path.join(__dirname, "workflows");
-// 工作流配置文件名白名单（防路径穿越）；_ 前缀与 *.example.json 不会被加载。
-const WF_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/;
-
-let apps = await loadApps();
-async function reloadApps() {
-    apps = await loadApps();
-}
-
 const app = express();
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({ limit: "2mb" })); // 保存整张图
 
 // ── 认证：配置了 token 才启用；值不落日志 ────
 app.use("/api", (req, res, next) => {
@@ -42,139 +33,92 @@ app.use("/api", (req, res, next) => {
     return res.status(401).json({ error: "unauthorized（在设置里填 token）" });
 });
 
-// ── 应用清单 ────
-app.get("/api/apps", (req, res) => {
-    const list = Object.values(apps).map(m => {
-        const envPath = path.join(ENVS_DIR, m.envFile || "");
-        const envExists = m.envFile ? fs.existsSync(envPath) : false;
+// ── 工作流 ────
+app.get("/api/workflows", (req, res) => {
+    res.json(loadWorkflows().map(w => {
+        if (!w.doc) return { path: w.path, error: w.error };
+        // 首个 env.file 节点的 SERVER_TYPE（GUI 徽标与 prod 门禁提示）
         let serverType = "";
-        if (envExists) {
-            try { serverType = rawParse(envPath).SERVER_TYPE ?? ""; } catch { /* 读不了就当未知 */ }
+        const envNode = (w.doc.tasks && Object.values(w.doc.tasks).flatMap(t => t.path)
+            ? Object.values(w.doc.tasks).flatMap(t => t.path)
+            : w.doc.nodes.map(n => n.id))
+            .map(id => w.doc.nodes.find(n => n.id === id))
+            .find(n => n?.type === "env.file" && n.data?.envFile);
+        if (envNode) {
+            const fp = path.isAbsolute(envNode.data.envFile) ? envNode.data.envFile : path.join(ROOT_ENVS, envNode.data.envFile);
+            try { serverType = rawParse(fp).SERVER_TYPE ?? ""; } catch { /* 未知 */ }
         }
         return {
-            name: m.name,
-            title: m.title,
-            description: m.description,
-            repoDir: m.repoDir,
-            envFile: m.envFile,
-            envExists,
+            path: w.path,
+            name: w.doc.name,
+            title: w.doc.title,
+            repoDir: w.doc.repoDir,
             serverType,
-            source: m.source || "js",
-            configPath: m.configPath,
-            configFile: m.configPath ? path.basename(m.configPath) : undefined,
-            tasks: Object.entries(m.tasks).map(([name, t]) => ({ name, mutates: /** @type {any} */(t).mutates })),
+            tasks: Object.entries(w.doc.tasks).map(([name, t]) => ({ name, label: /** @type {any} */(t).label, mutates: /** @type {any} */(t).mutates })),
         };
-    });
-    res.json(list);
+    }));
 });
 
-// ── git refs（部署弹窗的 ref 选择）────
-app.get("/api/apps/:app/refs", async (req, res) => {
-    const m = apps[req.params.app];
-    if (!m) return res.status(404).json({ error: "app not found" });
+/** 打开磁盘任意位置的 workflow（记住路径到 local-config）。 */
+app.post("/api/workflows/open", (req, res) => {
+    const fp = String(req.body?.path || "").trim();
+    if (!fp) return res.status(400).json({ error: "path required" });
     try {
-        res.json(await getRefs(m.repoDir, { log: () => {} }));
-    } catch (err) {
-        res.status(500).json({ error: `读取 refs 失败: ${err.message}` });
+        const doc = loadWorkflow(fp);
+        rememberWorkflow(fp);
+        res.json({ path: path.resolve(fp), doc });
+    } catch (e) {
+        res.status(400).json({ error: e.message });
     }
 });
 
-// ── 工作流配置（配置驱动应用的 CRUD；写盘前先试编译校验，写完立即 reloadApps）────
-/** @param {string} file */
-const validWorkflowFile = (file) => WF_FILE_RE.test(file) && !file.startsWith("_") && !file.endsWith(".example.json");
-
-app.get("/api/workflows", (req, res) => {
-    if (!fs.existsSync(WORKFLOWS_DIR)) return res.json([]);
-    const list = fs.readdirSync(WORKFLOWS_DIR)
-        .filter(validWorkflowFile)
-        .sort()
-        .map(f => {
-            try {
-                return { file: f, name: JSON.parse(fs.readFileSync(path.join(WORKFLOWS_DIR, f), "utf8")).name ?? f.replace(/\.json$/, "") };
-            } catch {
-                return { file: f, name: f.replace(/\.json$/, ""), broken: true };
-            }
-        });
-    res.json(list);
-});
-
-app.get("/api/workflows/:file", (req, res) => {
-    const file = req.params.file;
-    if (!validWorkflowFile(file)) return res.status(400).json({ error: "invalid workflow file name" });
-    const fp = path.join(WORKFLOWS_DIR, file);
-    if (!fs.existsSync(fp)) return res.status(404).json({ error: "workflow not found" });
+/** 保存（写盘前全量校验；新建/另存为也走这里——存放路径由前端弹窗确认）。 */
+app.post("/api/workflows/save", (req, res) => {
+    const fp = String(req.body?.path || "").trim();
+    const doc = req.body?.doc;
+    if (!fp || !doc) return res.status(400).json({ error: "path/doc required" });
+    const problems = validateWorkflow(doc);
+    if (problems.length) return res.status(400).json({ error: `校验失败:\n  - ${problems.join("\n  - ")}` });
     try {
-        res.json({ file, json: JSON.parse(fs.readFileSync(fp, "utf8")) });
-    } catch (err) {
-        res.status(500).json({ error: `读取失败: ${err.message}` });
+        fs.mkdirSync(path.dirname(fp), { recursive: true });
+        fs.writeFileSync(fp, JSON.stringify(doc, null, 2), "utf8");
+        rememberWorkflow(fp);
+        res.json({ ok: true, path: path.resolve(fp) });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
-// 从预设新建（spa = SPA 静态站点；blank = 空白工作流，步骤自己组装）
-app.post("/api/workflows", async (req, res) => {
-    const { preset, ...fields } = req.body || {};
-    let built;
-    try {
-        if (preset === "spa") built = buildSpaPreset(fields);
-        else if (preset === "blank") built = buildBlankPreset(fields);
-        else return res.status(400).json({ error: `unknown preset: ${preset}（可用: spa, blank）` });
-    } catch (err) {
-        return res.status(400).json({ error: err.message });
-    }
-    const file = `${built.json.name}.json`;
-    const fp = path.join(WORKFLOWS_DIR, file);
-    if (fs.existsSync(fp)) return res.status(409).json({ error: `workflows/${file} 已存在` });
-    try {
-        compileWorkflowApp(built.json, fp);
-    } catch (err) {
-        return res.status(400).json({ error: `工作流校验失败: ${err.message}` });
-    }
-    fs.mkdirSync(WORKFLOWS_DIR, { recursive: true });
-    fs.writeFileSync(fp, JSON.stringify(built.json, null, 2) + "\n", "utf8");
-    await reloadApps();
-    res.json({ ok: true, file, envExample: built.envExample });
-});
-
-app.put("/api/workflows/:file", async (req, res) => {
-    const file = req.params.file;
-    if (!validWorkflowFile(file)) return res.status(400).json({ error: "invalid workflow file name" });
-    const json = req.body?.json;
-    try {
-        compileWorkflowApp(json, path.join(WORKFLOWS_DIR, file));
-    } catch (err) {
-        return res.status(400).json({ error: `工作流校验失败: ${err.message}` });
-    }
-    fs.mkdirSync(WORKFLOWS_DIR, { recursive: true });
-    fs.writeFileSync(path.join(WORKFLOWS_DIR, file), JSON.stringify(json, null, 2) + "\n", "utf8");
-    await reloadApps();
-    res.json({ ok: true, file });
-});
-
-app.delete("/api/workflows/:file", async (req, res) => {
-    const file = req.params.file;
-    if (!validWorkflowFile(file)) return res.status(400).json({ error: "invalid workflow file name" });
-    const fp = path.join(WORKFLOWS_DIR, file);
-    if (!fs.existsSync(fp)) return res.status(404).json({ error: "workflow not found" });
-    fs.unlinkSync(fp);
-    await reloadApps();
+/** 从最近列表移除（不删文件）。 */
+app.post("/api/workflows/forget", (req, res) => {
+    forgetWorkflow(String(req.body?.path || ""));
     res.json({ ok: true });
 });
 
-// ── 步骤元数据（GUI 步骤编辑器的原子能力清单 + 类型）────
-app.get("/api/step-types", (req, res) => {
-    res.json(describeSteps());
+// ── 节点类型注册表（前端动态渲染节点/插槽/检查器表单的唯一事实源）────
+app.get("/api/node-types", (req, res) => {
+    res.json(nodeTypesMeta());
+});
+
+// ── git refs（部署弹窗选 ref）────
+app.post("/api/refs", async (req, res) => {
+    try {
+        const wf = findWorkflow(String(req.body?.workflow || ""));
+        res.json(await getRefs(wf.doc.repoDir, { log: () => {} }));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
 });
 
 // ── 任务 ────
-app.post("/api/jobs", async (req, res) => {
-    const { app: appName, task, ...options } = req.body || {};
-    const m = apps[appName];
-    if (!m) return res.status(404).json({ error: `app not found: ${appName}` });
+app.post("/api/jobs", (req, res) => {
+    const { workflow: wfRef, task, ...options } = req.body || {};
     try {
-        const { id } = await enqueueTask(m, task, options);
+        const wf = findWorkflow(String(wfRef || ""));
+        const { id } = enqueueWorkflowTask(wf.doc, wf.path, String(task), options);
         res.json({ id });
-    } catch (err) {
-        res.status(400).json({ error: err.message });
+    } catch (e) {
+        res.status(400).json({ error: e.message });
     }
 });
 
@@ -188,13 +132,12 @@ app.get("/api/jobs/:id", (req, res) => {
     res.json(run);
 });
 
-// 当前正在跑的任务（顶栏指示灯）
 app.get("/api/current", (req, res) => {
     const cur = getCurrentJob();
     res.json(cur ? { app: cur.app, task: cur.task, id: cur.id } : null);
 });
 
-// ── SSE-over-POST：流式推送任务日志────
+// ── SSE-over-POST：流式推送任务日志（心跳保活；必须监听 res 的 close）────
 app.post("/api/jobs/:id/stream", (req, res) => {
     const id = req.params.id;
     if (!getRun(id)) return res.status(404).json({ error: "job not found" });
@@ -233,21 +176,22 @@ app.post("/api/jobs/:id/stream", (req, res) => {
 
     timer = setInterval(tick, 300);
     tick();
-    // 心跳：任务长时间无输出（如 git fetch / npm ci）时保持连接不被中间层掐断
     heartbeat = setInterval(() => { try { res.write(": ping\n\n"); } catch { /* 连接已断 */ } }, 10_000);
-    // 注意：必须监听 res 而不是 req 的 close——POST body 被 express.json 消费后 req 就 close 了，
-    // 而此时 SSE 响应还在流式输出中。
     res.on("close", () => { stop(); clearInterval(heartbeat); });
 });
 
-// ── 静态前端 ────
-app.use(express.static(path.join(__dirname, "public")));
+// ── 静态前端（web/dist = Svelte Flow 画布构建产物）────
+const webDist = path.join(__dirname, "web", "dist");
+if (fs.existsSync(webDist)) {
+    app.use(express.static(webDist));
+} else {
+    console.log("[devops-console] web/dist 不存在——前端未构建。构建：npm -C web install && npm -C web run build");
+}
 
 app.listen(PORT, HOST, () => {
     const urlStr = `http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`;
-    console.log(`[devops-console] ${urlStr}  (apps: ${Object.keys(apps).join(", ") || "none"})`);
-    console.log(`[devops-console] token auth: ${TOKEN ? "on" : "off"}；机密 env 文件只在 envs/ 目录，本服务不读取其值用于展示`);
-    // 非显式指定端口时自动打开浏览器
+    console.log(`[devops-console] ${urlStr}`);
+    console.log(`[devops-console] token auth: ${TOKEN ? "on" : "off"}；工作流 = local-config.workflows + 仓库 workflows/`);
     if (!process.env.DEVOPS_PORT && !process.env.DEVOPS_NO_OPEN && process.platform === "win32") {
         child_process.exec(`start "" "${urlStr}"`, () => { /* 打开失败无妨 */ });
     }

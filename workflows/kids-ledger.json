@@ -1,68 +1,1000 @@
 {
   "name": "kids-ledger",
   "title": "家庭账本（Fastify + SQLite + Vue 3）",
-  "description": "Vue3 SPA 由 Fastify 单进程托管；SQLite 数据与 config.json 通过 state/ 目录跨发布保留",
+  "version": 1,
   "repoDir": "C:/Users/yatyr/workspace/kids-ledger",
-  "envFile": "kids-ledger.env",
-  "params": {
-    "installCommand": "pnpm install --frozen-lockfile",
-    "buildCommand": "pnpm build"
-  },
-  "envSchema": {
-    "SERVER_TYPE": "test",
-    "REMOTE_HOST": "host.example.com",
-    "REMOTE_USER": "deploy",
-    "REMOTE_HOST_FINGERPRINT": "",
-    "DEPLOY_DIR": "/opt/kids-ledger",
-    "DOMAIN": "kl.example.com",
-    "SERVICE_NAME": "kids-ledger",
-    "SERVICE_USER": "www-data",
-    "APP_PORT": 3050,
-    "NODE_BIN": "/usr/bin/node"
-  },
-  "workflows": {
+  "nodes": [
+    {
+      "id": "env1",
+      "type": "env.file",
+      "position": [
+        40,
+        300
+      ],
+      "data": {
+        "envFile": "kids-ledger.env",
+        "schema": {
+          "SERVER_TYPE": "test",
+          "REMOTE_HOST": "host.example.com",
+          "REMOTE_USER": "deploy",
+          "REMOTE_HOST_FINGERPRINT": "",
+          "REMOTE_KEY_FILE": "",
+          "DEPLOY_DIR": "/opt/kids-ledger",
+          "DOMAIN": "kl.example.com",
+          "SERVICE_NAME": "kids-ledger",
+          "SERVICE_USER": "www-data",
+          "APP_PORT": 3050,
+          "NODE_BIN": "/usr/bin/node"
+        }
+      }
+    },
+    {
+      "id": "inRef",
+      "type": "task.input",
+      "position": [
+        40,
+        100
+      ],
+      "data": {
+        "name": "ref",
+        "label": "Git ref（空 = HEAD）",
+        "fallback": ""
+      }
+    },
+    {
+      "id": "git1",
+      "type": "git.ref",
+      "position": [
+        300,
+        300
+      ],
+      "data": {
+        "repoDir": "C:/Users/yatyr/workspace/kids-ledger",
+        "prefix": "kids-ledger"
+      }
+    },
+    {
+      "id": "build1",
+      "type": "cmd.exec",
+      "position": [
+        560,
+        300
+      ],
+      "data": {
+        "commands": "pnpm install --frozen-lockfile\npnpm build"
+      }
+    },
+    {
+      "id": "stage1",
+      "type": "stage.copy",
+      "position": [
+        820,
+        300
+      ],
+      "data": {
+        "entries": [
+          {
+            "from": "server",
+            "to": "server"
+          },
+          {
+            "from": "shared",
+            "to": "shared"
+          },
+          {
+            "from": "dist",
+            "to": "dist"
+          },
+          {
+            "from": "start.sh",
+            "to": "start.sh"
+          },
+          {
+            "from": "package.json",
+            "to": "package.json"
+          },
+          {
+            "from": "package-lock.json",
+            "to": "package-lock.json"
+          }
+        ],
+        "excludes": [
+          "node_modules"
+        ]
+      }
+    },
+    {
+      "id": "pack1",
+      "type": "tar.pack",
+      "position": [
+        1080,
+        300
+      ],
+      "data": {
+        "entries": [
+          "server",
+          "shared",
+          "dist",
+          "start.sh",
+          "package.json",
+          "package-lock.json"
+        ],
+        "prefix": "kids-ledger"
+      }
+    },
+    {
+      "id": "ssh1",
+      "type": "ssh.session",
+      "position": [
+        40,
+        700
+      ],
+      "data": {}
+    },
+    {
+      "id": "fieldDD",
+      "type": "field.get",
+      "position": [
+        300,
+        980
+      ],
+      "data": {
+        "key": "DEPLOY_DIR"
+      }
+    },
+    {
+      "id": "fieldSU",
+      "type": "field.get",
+      "position": [
+        420,
+        1060
+      ],
+      "data": {
+        "key": "SERVICE_USER"
+      }
+    },
+    {
+      "id": "fieldSN",
+      "type": "field.get",
+      "position": [
+        300,
+        900
+      ],
+      "data": {
+        "key": "SERVICE_NAME"
+      }
+    },
+    {
+      "id": "fmtCur",
+      "type": "string.format",
+      "position": [
+        560,
+        980
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/current"
+      }
+    },
+    {
+      "id": "fmtUp",
+      "type": "string.format",
+      "position": [
+        1080,
+        440
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/build/{{name}}"
+      }
+    },
+    {
+      "id": "pre1",
+      "type": "ssh.exec",
+      "position": [
+        1340,
+        300
+      ],
+      "data": {
+        "command": "mkdir -p {{env.DEPLOY_DIR}}/build {{env.DEPLOY_DIR}}/releases {{env.DEPLOY_DIR}}/state/data",
+        "useSudo": true
+      }
+    },
+    {
+      "id": "up1",
+      "type": "ssh.upload",
+      "position": [
+        1600,
+        300
+      ],
+      "data": {}
+    },
+    {
+      "id": "ext1",
+      "type": "remote.extract",
+      "position": [
+        1860,
+        300
+      ],
+      "data": {
+        "expect": [
+          "server/index.js",
+          "start.sh",
+          "dist/index.html",
+          "shared/palettes.js"
+        ]
+      }
+    },
+    {
+      "id": "deps1",
+      "type": "ssh.exec",
+      "position": [
+        2120,
+        300
+      ],
+      "data": {
+        "command": "cd {{rel}} && (pnpm install --prod --frozen-lockfile || pnpm install --prod --no-frozen-lockfile)",
+        "useSudo": true,
+        "loginShell": true
+      }
+    },
+    {
+      "id": "link1",
+      "type": "ssh.exec",
+      "position": [
+        2380,
+        300
+      ],
+      "data": {
+        "command": "chmod +x {{rel}}/start.sh && ln -sfn {{env.DEPLOY_DIR}}/state/data {{rel}}/data && { [ -f {{env.DEPLOY_DIR}}/state/config.json ] && ln -sfn {{env.DEPLOY_DIR}}/state/config.json {{rel}}/config.json || true; }",
+        "useSudo": true,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "chown1",
+      "type": "remote.chown",
+      "position": [
+        2640,
+        300
+      ],
+      "data": {}
+    },
+    {
+      "id": "linkCur",
+      "type": "remote.symlink",
+      "position": [
+        2900,
+        300
+      ],
+      "data": {}
+    },
+    {
+      "id": "svc1",
+      "type": "remote.service",
+      "position": [
+        3160,
+        300
+      ],
+      "data": {
+        "action": "restart"
+      }
+    },
+    {
+      "id": "hc1",
+      "type": "ssh.exec",
+      "position": [
+        3420,
+        300
+      ],
+      "data": {
+        "command": "for i in $(seq 1 10); do systemctl is-active --quiet {{env.SERVICE_NAME}} && curl -fsS http://127.0.0.1:{{env.APP_PORT}}/ >/dev/null 2>&1 && echo healthy && exit 0; sleep 2; done; echo healthcheck failed; exit 1",
+        "useSudo": false,
+        "loginShell": true
+      }
+    },
+    {
+      "id": "clean1",
+      "type": "ssh.exec",
+      "position": [
+        3680,
+        300
+      ],
+      "data": {
+        "command": "cd {{env.DEPLOY_DIR}}/releases && ls -1 | grep -v \"\\.tgz$\" | sort | head -n -5 | xargs -r rm -rf --",
+        "useSudo": true,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "inRel",
+      "type": "task.input",
+      "position": [
+        1340,
+        700
+      ],
+      "data": {
+        "name": "release",
+        "label": "目标 release 名（见 status 输出）",
+        "fallback": ""
+      }
+    },
+    {
+      "id": "fmtRel",
+      "type": "string.format",
+      "position": [
+        1600,
+        700
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/releases/{{rel}}"
+      }
+    },
+    {
+      "id": "chk1",
+      "type": "ssh.exec",
+      "position": [
+        1860,
+        700
+      ],
+      "data": {
+        "command": "test -d {{env.DEPLOY_DIR}}/releases/{{rel}} || { echo 'release not found: {{rel}}'; exit 1; }",
+        "useSudo": false,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "chk2",
+      "type": "ssh.exec",
+      "position": [
+        2120,
+        700
+      ],
+      "data": {
+        "command": "test -f {{env.DEPLOY_DIR}}/releases/{{rel}}/server/index.js && test -f {{env.DEPLOY_DIR}}/releases/{{rel}}/start.sh && test -f {{env.DEPLOY_DIR}}/releases/{{rel}}/dist/index.html || { echo 'release layout incomplete'; exit 1; }",
+        "useSudo": false,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "symlinkR",
+      "type": "remote.symlink",
+      "position": [
+        2380,
+        700
+      ],
+      "data": {}
+    },
+    {
+      "id": "st1",
+      "type": "ssh.exec",
+      "position": [
+        1340,
+        980
+      ],
+      "data": {
+        "command": "systemctl is-active {{env.SERVICE_NAME}} || true\nreadlink -f {{env.DEPLOY_DIR}}/current || true\nls -1t {{env.DEPLOY_DIR}}/releases 2>/dev/null | head -8\ndf -h {{env.DEPLOY_DIR}} | tail -1\n{{env.NODE_BIN}} -v 2>/dev/null || node -v\ncurl -s -o /dev/null -w 'local http status: %{http_code}\\n' http://127.0.0.1:{{env.APP_PORT}}/ || true",
+        "useSudo": false,
+        "loginShell": true
+      }
+    },
+    {
+      "id": "mkOps",
+      "type": "ssh.exec",
+      "position": [
+        1340,
+        1240
+      ],
+      "data": {
+        "command": "mkdir -p {{env.DEPLOY_DIR}}/ops /etc/nginx/sites-available /etc/nginx/sites-enabled",
+        "useSudo": true,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "ngR",
+      "type": "template.render",
+      "position": [
+        1600,
+        1160
+      ],
+      "data": {
+        "template": "./tpl/kids-ledger/nginx-site.conf",
+        "outputName": "nginx-site.conf"
+      }
+    },
+    {
+      "id": "fmtOpsNg",
+      "type": "string.format",
+      "position": [
+        1600,
+        1080
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/nginx-site.conf"
+      }
+    },
+    {
+      "id": "ngU",
+      "type": "ssh.upload",
+      "position": [
+        1860,
+        1160
+      ],
+      "data": {}
+    },
+    {
+      "id": "svcR",
+      "type": "template.render",
+      "position": [
+        1600,
+        1400
+      ],
+      "data": {
+        "template": "./tpl/kids-ledger/kids-ledger.service",
+        "outputName": "kids-ledger.service"
+      }
+    },
+    {
+      "id": "fmtOpsSvc",
+      "type": "string.format",
+      "position": [
+        1600,
+        1480
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/kids-ledger.service"
+      }
+    },
+    {
+      "id": "svcU",
+      "type": "ssh.upload",
+      "position": [
+        1860,
+        1400
+      ],
+      "data": {}
+    },
+    {
+      "id": "installOps",
+      "type": "ssh.exec",
+      "position": [
+        2120,
+        1240
+      ],
+      "data": {
+        "command": "install -m 644 {{ng}} /etc/nginx/sites-available/{{env.DOMAIN}}.conf && ln -sf /etc/nginx/sites-available/{{env.DOMAIN}}.conf /etc/nginx/sites-enabled/{{env.DOMAIN}}.conf && install -m 644 {{svc}} /etc/systemd/system/{{env.SERVICE_NAME}}.service && systemctl daemon-reload && nginx -t && systemctl reload nginx && echo 'apply-config done'",
+        "useSudo": true,
+        "loginShell": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "inRef",
+      "target": "git1",
+      "sourceHandle": "value",
+      "targetHandle": "ref"
+    },
+    {
+      "id": "e2",
+      "source": "git1",
+      "target": "build1",
+      "sourceHandle": "repoDir",
+      "targetHandle": "cwd"
+    },
+    {
+      "id": "e3",
+      "source": "git1",
+      "target": "stage1",
+      "sourceHandle": "repoDir",
+      "targetHandle": "root"
+    },
+    {
+      "id": "e4",
+      "source": "stage1",
+      "target": "pack1",
+      "sourceHandle": "dir",
+      "targetHandle": "dir"
+    },
+    {
+      "id": "e5",
+      "source": "git1",
+      "target": "pack1",
+      "sourceHandle": "releaseName",
+      "targetHandle": "name"
+    },
+    {
+      "id": "e6",
+      "source": "env1",
+      "target": "ssh1",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e10",
+      "source": "env1",
+      "target": "fieldDD",
+      "sourceHandle": "env",
+      "targetHandle": "obj"
+    },
+    {
+      "id": "e11",
+      "source": "env1",
+      "target": "fieldSU",
+      "sourceHandle": "env",
+      "targetHandle": "obj"
+    },
+    {
+      "id": "e12",
+      "source": "env1",
+      "target": "fieldSN",
+      "sourceHandle": "env",
+      "targetHandle": "obj"
+    },
+    {
+      "id": "e13",
+      "source": "env1",
+      "target": "fmtCur",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e20",
+      "source": "env1",
+      "target": "pre1",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e21",
+      "source": "ssh1",
+      "target": "pre1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e22",
+      "source": "env1",
+      "target": "fmtUp",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e23",
+      "source": "pack1",
+      "target": "fmtUp",
+      "sourceHandle": "archiveName",
+      "targetHandle": "name"
+    },
+    {
+      "id": "e24",
+      "source": "ssh1",
+      "target": "up1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e25",
+      "source": "pack1",
+      "target": "up1",
+      "sourceHandle": "archive",
+      "targetHandle": "local"
+    },
+    {
+      "id": "e26",
+      "source": "fmtUp",
+      "target": "up1",
+      "sourceHandle": "value",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e27",
+      "source": "ssh1",
+      "target": "ext1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e28",
+      "source": "up1",
+      "target": "ext1",
+      "sourceHandle": "remoteFile",
+      "targetHandle": "archive"
+    },
+    {
+      "id": "e29",
+      "source": "git1",
+      "target": "ext1",
+      "sourceHandle": "releaseName",
+      "targetHandle": "releaseName"
+    },
+    {
+      "id": "e30",
+      "source": "fieldDD",
+      "target": "ext1",
+      "sourceHandle": "value",
+      "targetHandle": "baseDir"
+    },
+    {
+      "id": "e31",
+      "source": "ssh1",
+      "target": "deps1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e33",
+      "source": "ext1",
+      "target": "deps1",
+      "sourceHandle": "releasePath",
+      "targetHandle": "rel"
+    },
+    {
+      "id": "e34",
+      "source": "ssh1",
+      "target": "link1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e35",
+      "source": "env1",
+      "target": "link1",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e36",
+      "source": "ext1",
+      "target": "link1",
+      "sourceHandle": "releasePath",
+      "targetHandle": "rel"
+    },
+    {
+      "id": "e37",
+      "source": "ssh1",
+      "target": "chown1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e38",
+      "source": "ext1",
+      "target": "chown1",
+      "sourceHandle": "releasePath",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e39",
+      "source": "fieldSU",
+      "target": "chown1",
+      "sourceHandle": "value",
+      "targetHandle": "user"
+    },
+    {
+      "id": "e40",
+      "source": "ssh1",
+      "target": "linkCur",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e41",
+      "source": "ext1",
+      "target": "linkCur",
+      "sourceHandle": "releasePath",
+      "targetHandle": "target"
+    },
+    {
+      "id": "e42",
+      "source": "fmtCur",
+      "target": "linkCur",
+      "sourceHandle": "value",
+      "targetHandle": "link"
+    },
+    {
+      "id": "e43",
+      "source": "ssh1",
+      "target": "svc1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e44",
+      "source": "fieldSN",
+      "target": "svc1",
+      "sourceHandle": "value",
+      "targetHandle": "name"
+    },
+    {
+      "id": "e45",
+      "source": "ssh1",
+      "target": "hc1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e46",
+      "source": "env1",
+      "target": "hc1",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e47",
+      "source": "ssh1",
+      "target": "clean1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e48",
+      "source": "env1",
+      "target": "clean1",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e50",
+      "source": "env1",
+      "target": "fmtRel",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e51",
+      "source": "inRel",
+      "target": "fmtRel",
+      "sourceHandle": "value",
+      "targetHandle": "rel"
+    },
+    {
+      "id": "e52",
+      "source": "ssh1",
+      "target": "chk1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e53",
+      "source": "env1",
+      "target": "chk1",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e54",
+      "source": "inRel",
+      "target": "chk1",
+      "sourceHandle": "value",
+      "targetHandle": "rel"
+    },
+    {
+      "id": "e55",
+      "source": "ssh1",
+      "target": "chk2",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e56",
+      "source": "env1",
+      "target": "chk2",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e57",
+      "source": "inRel",
+      "target": "chk2",
+      "sourceHandle": "value",
+      "targetHandle": "rel"
+    },
+    {
+      "id": "e58",
+      "source": "ssh1",
+      "target": "symlinkR",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e59",
+      "source": "fmtRel",
+      "target": "symlinkR",
+      "sourceHandle": "value",
+      "targetHandle": "target"
+    },
+    {
+      "id": "e60",
+      "source": "fmtCur",
+      "target": "symlinkR",
+      "sourceHandle": "value",
+      "targetHandle": "link"
+    },
+    {
+      "id": "e70",
+      "source": "ssh1",
+      "target": "st1",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e71",
+      "source": "env1",
+      "target": "st1",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e80",
+      "source": "ssh1",
+      "target": "mkOps",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e81",
+      "source": "env1",
+      "target": "mkOps",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e82",
+      "source": "env1",
+      "target": "ngR",
+      "sourceHandle": "env",
+      "targetHandle": "vars"
+    },
+    {
+      "id": "e83",
+      "source": "env1",
+      "target": "fmtOpsNg",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e84",
+      "source": "ssh1",
+      "target": "ngU",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e85",
+      "source": "ngR",
+      "target": "ngU",
+      "sourceHandle": "file",
+      "targetHandle": "local"
+    },
+    {
+      "id": "e86",
+      "source": "fmtOpsNg",
+      "target": "ngU",
+      "sourceHandle": "value",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e87",
+      "source": "env1",
+      "target": "svcR",
+      "sourceHandle": "env",
+      "targetHandle": "vars"
+    },
+    {
+      "id": "e88",
+      "source": "env1",
+      "target": "fmtOpsSvc",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e89",
+      "source": "ssh1",
+      "target": "svcU",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e90",
+      "source": "svcR",
+      "target": "svcU",
+      "sourceHandle": "file",
+      "targetHandle": "local"
+    },
+    {
+      "id": "e91",
+      "source": "fmtOpsSvc",
+      "target": "svcU",
+      "sourceHandle": "value",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e92",
+      "source": "ssh1",
+      "target": "installOps",
+      "sourceHandle": "ssh",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e93",
+      "source": "env1",
+      "target": "installOps",
+      "sourceHandle": "env",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e94",
+      "source": "ngU",
+      "target": "installOps",
+      "sourceHandle": "remoteFile",
+      "targetHandle": "ng"
+    },
+    {
+      "id": "e95",
+      "source": "svcU",
+      "target": "installOps",
+      "sourceHandle": "remoteFile",
+      "targetHandle": "svc"
+    }
+  ],
+  "tasks": {
     "deploy": {
-      "steps": [
-        { "type": "git.checkout", "ref": "{{ref}}" },
-        { "type": "shell", "command": "{{installCommand}}", "title": "安装依赖" },
-        { "type": "shell", "command": "{{buildCommand}}", "title": "构建（vite）" },
-        { "type": "archive", "entries": ["server", "shared", "dist", "package.json", "package-lock.json"], "excludes": ["node_modules"] },
-        { "type": "remote", "command": "mkdir -p {{DEPLOY_DIR}}/build {{DEPLOY_DIR}}/releases {{DEPLOY_DIR}}/state/data {{DEPLOY_DIR}}/releases/{{releaseName}}" },
-        { "type": "upload", "from": "{{archivePath}}", "to": "{{DEPLOY_DIR}}/build/{{archiveName}}" },
-        { "type": "remote", "command": "tar -xzf {{DEPLOY_DIR}}/build/{{archiveName}} -C {{DEPLOY_DIR}}/releases/{{releaseName}} && rm {{DEPLOY_DIR}}/build/{{archiveName}}", "title": "解压 release" },
-        { "type": "remote", "command": "bash -lc 'cd {{DEPLOY_DIR}}/releases/{{releaseName}} && (pnpm install --prod --frozen-lockfile || pnpm install --prod --no-frozen-lockfile)'", "title": "服务器安装生产依赖" },
-        { "type": "remote", "command": "chmod +x {{DEPLOY_DIR}}/releases/{{releaseName}}/start.sh && ln -sfn {{DEPLOY_DIR}}/state/data {{DEPLOY_DIR}}/releases/{{releaseName}}/data && { [ -f {{DEPLOY_DIR}}/state/config.json ] && ln -sfn {{DEPLOY_DIR}}/state/config.json {{DEPLOY_DIR}}/releases/{{releaseName}}/config.json || true; }", "title": "start.sh 可执行 + 持久数据软链" },
-        { "type": "remote", "command": "chown -R {{SERVICE_USER}}:{{SERVICE_USER}} {{DEPLOY_DIR}}/releases/{{releaseName}}", "sudo": true, "title": "修正属主" },
-        { "type": "remote", "command": "ln -sfn {{DEPLOY_DIR}}/releases/{{releaseName}} {{DEPLOY_DIR}}/current", "title": "切换 current 软链" },
-        { "type": "remote", "command": "bash -lc 'systemctl restart {{SERVICE_NAME}} && for i in $(seq 1 10); do systemctl is-active --quiet {{SERVICE_NAME}} && curl -fsS http://127.0.0.1:{{APP_PORT}}/ >/dev/null 2>&1 && echo healthy && exit 0; sleep 2; done; echo healthcheck failed; exit 1'", "sudo": true, "title": "重启服务 + 健康检查" },
-        { "type": "remote", "command": "bash -lc 'cd {{DEPLOY_DIR}}/releases && ls -1 | grep -v \"\\.tgz$\" | sort | head -n -5 | xargs -r rm -rf --'", "sudo": true, "title": "清理旧 release（保留 5 个）" }
+      "label": "部署",
+      "mutates": true,
+      "path": [
+        "env1",
+        "git1",
+        "build1",
+        "stage1",
+        "pack1",
+        "ssh1",
+        "pre1",
+        "up1",
+        "ext1",
+        "deps1",
+        "link1",
+        "chown1",
+        "linkCur",
+        "svc1",
+        "hc1",
+        "clean1"
       ]
     },
     "rollback": {
-      "steps": [
-        { "type": "remote", "command": "test -d {{DEPLOY_DIR}}/releases/{{release}} || { echo 'release not found: {{release}}'; exit 1; }" },
-        { "type": "remote", "command": "test -f {{DEPLOY_DIR}}/releases/{{release}}/server/index.js && test -f {{DEPLOY_DIR}}/releases/{{release}}/start.sh && test -f {{DEPLOY_DIR}}/releases/{{release}}/dist/index.html || { echo 'release layout incomplete'; exit 1; }", "title": "校验 release 布局" },
-        { "type": "remote", "command": "ln -sfn {{DEPLOY_DIR}}/releases/{{release}} {{DEPLOY_DIR}}/current" },
-        { "type": "remote", "command": "bash -lc 'systemctl restart {{SERVICE_NAME}} && for i in $(seq 1 10); do systemctl is-active --quiet {{SERVICE_NAME}} && curl -fsS http://127.0.0.1:{{APP_PORT}}/ >/dev/null 2>&1 && echo healthy && exit 0; sleep 2; done; echo healthcheck failed; exit 1'", "sudo": true, "title": "重启服务 + 健康检查" }
+      "label": "回滚",
+      "mutates": true,
+      "path": [
+        "env1",
+        "ssh1",
+        "chk1",
+        "chk2",
+        "symlinkR",
+        "svc1",
+        "hc1"
       ]
     },
     "status": {
+      "label": "状态",
       "mutates": false,
-      "steps": [
-        { "type": "remote", "command": "systemctl is-active {{SERVICE_NAME}} || true" },
-        { "type": "remote", "command": "readlink -f {{DEPLOY_DIR}}/current || true" },
-        { "type": "remote", "command": "ls -1t {{DEPLOY_DIR}}/releases 2>/dev/null | head -8" },
-        { "type": "remote", "command": "df -h {{DEPLOY_DIR}} | tail -1" },
-        { "type": "remote", "command": "{{NODE_BIN}} -v 2>/dev/null || node -v" },
-        { "type": "remote", "command": "curl -s -o /dev/null -w 'local http status: %{http_code}\\n' http://127.0.0.1:{{APP_PORT}}/ || true" }
+      "path": [
+        "env1",
+        "ssh1",
+        "st1"
       ]
     },
     "apply-config": {
-      "steps": [
-        { "type": "remote", "command": "mkdir -p {{DEPLOY_DIR}}/ops /etc/nginx/sites-available /etc/nginx/sites-enabled" },
-        { "type": "template.push", "template": "deploy/nginx-site.conf", "to": "{{DEPLOY_DIR}}/ops/nginx-site.conf" },
-        { "type": "template.push", "template": "deploy/kids-ledger.service", "to": "{{DEPLOY_DIR}}/ops/kids-ledger.service" },
-        { "type": "remote", "sudo": true, "command": "install -m 644 {{DEPLOY_DIR}}/ops/nginx-site.conf /etc/nginx/sites-available/{{app}} && ln -sf /etc/nginx/sites-available/{{app}} /etc/nginx/sites-enabled/{{app}} && install -m 644 {{DEPLOY_DIR}}/ops/kids-ledger.service /etc/systemd/system/{{SERVICE_NAME}}.service && systemctl daemon-reload && nginx -t && systemctl reload nginx && echo 'apply-config done'" }
+      "label": "应用配置",
+      "mutates": true,
+      "path": [
+        "env1",
+        "ssh1",
+        "mkOps",
+        "ngR",
+        "ngU",
+        "svcR",
+        "svcU",
+        "installOps"
       ]
     }
   }

@@ -1,0 +1,40 @@
+[Unit]
+Description=XLGBIS Login (SSO gateway)
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User={{WEB_SERVER_USER}}
+Group={{WEB_SERVER_USER}}
+Restart=on-failure
+RestartSec=5s
+WorkingDirectory={{DEPLOY_DIR}}/server
+ExecStart=/usr/local/bin/node ./src/index.js
+LimitNOFILE=1048576
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+ReadWritePaths={{DEPLOY_DIR}}
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=multi-user.target

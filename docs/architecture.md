@@ -3,67 +3,76 @@
 ## 定位
 
 对同类框架的 SPA/server 应用做**统一的人工触发部署**：不在目标机装 agent、不用容器、不依赖云。
-本工具是"自研轻量 Ansible"：清单描述应用，引擎负责传输与编排，远端脚本保证幂等与可回滚。
+部署流程以**节点图工作流**表达：图 = 能力，路径 = 任务，编辑器即运维界面。
 
-## 三层结构
+## 分层
 
 ```
-GUI（public/index.html，单文件原生 JS；卡片式类型插槽编辑器）
-        │  fetch + SSE-over-POST（流式日志）
-runner（engine/runner.js）——串行队列、日志采集、.runs/ 持久化、audit.jsonl、prod 门禁
+GUI（web/：Svelte 5 + Svelte Flow 画布，Vite 构建为 web/dist）
+        │  fetch + SSE-over-POST 流式日志（断流自动降级轮询）
+CLI（cli.js：run/list/tasks，与 GUI 完全同一引擎）
         │
-workflows/*.json（应用唯一来源）→ engine/registry.js 加载 → engine/workflow.js 编译
-        │（编译期：结构校验 + 类型化数据流校验；运行期：线性步骤执行器）
-engine：ssh(指纹锁定) / env(schema) / render({{KEY}}) / tarball / gitops / release
+runner（engine/runner.js）
+        串行队列 · .runs/<id>.json 持久化 · audit.jsonl · prod 门禁 ·
+        副作用收尾（git 恢复 / 远端临时文件清理 / 会话关闭）
+        │
+workflow 执行器（engine/workflow.js）
+        图校验（类型/悬空边/多边同输入/环依赖/前向依赖）→
+        任务路径执行（主路径按序；输入经边解析，依赖闭包自动先执行侧挂节点）
+        │
+节点注册表（engine/nodes/：input / build / remote / util，22 种）
+        每个节点 = 元数据（输入/输出插槽与类型、widget 表单定义、动态插槽规则）+ run(ctx, node, inputs)
+        │
+引擎原语（engine/ssh|env|render|tarball|gitops|exec）
 ```
 
 关键决策：
 
-1. **GUI 唯一入口**：没有 CLI 等价物，不维护第二套界面；部署逻辑 100% 在 workflows/*.json 里声明式可审计。
-2. **类型化数据流**：步骤产出物与参数槽位都有类型（string/path/remote_path/bash/...），引用不兼容在编译期直接拒绝——部署流水线里最常见的类别错误（把文件当字符串、引用尚未产出的变量、拼错产出名）在保存时就被拦截，而不是部署到一半才炸。
-3. **线性、无 DAG**：部署是严格顺序过程；数据流用"引用更早步骤的产出物"表达，不引入分支/并行复杂度。
-2. **任务串行**：全局一个队列，杜绝两个部署并发写同一目标机。
-3. **prod 门禁在 runner 兜底**：`SERVER_TYPE=prod` + 变更类任务必须携带 `confirmProd === 应用名`，GUI 只是采集这个确认的界面；dry-run 不变更状态，免门禁。
-4. **机密不出本地**：env 文件在 `envs/`（gitignored），GUI 只显示路径；审计与任务记录只存 `confirmProd: "(typed)"`，不落任何机密值。
+1. **CLI-first**：GUI 与 CLI 是同一 runner 的两个前端。部署逻辑 100% 在 workflow.json + 节点执行器里，可审计、可脱离 GUI 运行。
+2. **任务串行**：全局一个队列，杜绝并发部署写同一目标机。
+3. **prod 门禁在 runner 兜底**：任务 `mutates` + 任一路径上 env 的 `SERVER_TYPE=prod` → 必须携带 `confirmProd === 工作流名`；GUI 弹窗与 CLI 交互只是采集确认的两种方式；dry-run 免门禁。
+4. **机密不出本地**：env 值只在内存；日志掩码 `SECRET/TOKEN/PASSWORD/PASSPHRASE=***`；审计只记 `confirmProd: "(typed)"`。
+5. **类型即契约**：连线两端类型必须匹配（any 输入兜底）；校验发生在 GUI 连线时、保存写盘前、CLI 加载时三处，规则同源（engine/types.js 是唯一事实源，前端 types.js 是其镜像）。
 
-## 部署语义（与 xlgbis 原版对照）
+## 执行语义（重要）
 
-一次 deploy：
+- **主路径按序执行**：数组顺序即副作用顺序；相邻节点不强制有边（如 deps → symlink 纯顺序）。
+- **输入经边解析**：来源是"已执行"节点——主路径中更早的节点，或其**依赖闭包自动先执行**的侧挂节点（field.get/string.format/template.render 等 helper 从侧挂取值汇入主链）。
+- **前向依赖拒绝**：节点的输入依赖主路径中更晚的节点 → 运行时报错（dry-run 同样拦截）。
+- **任务结束收尾**（等价原 bash 脚本的 trap）：git 工作树恢复（逆序）→ 远端上传的临时文件删除 → SSH 会话关闭。
 
-1. `git fetch` → 校验工作树干净 → 可选 checkout 指定 ref（结束后恢复原分支）；
-2. 本地构建（kids-ledger: `npm ci && vite build`；xlgbis client: `pnpm build`；xlgbis server: 暂存源码+packages/common）；
-3. tar.gz 打包（LF、portable）；
-4. SSH 上传（node-ssh，agent 认证 + SHA256 主机指纹 timingSafeEqual 锁定）；
-5. 上传渲染后的远端脚本并 `bash -l` 执行（无论成败都删除远端脚本）；
-6. 远端脚本：解压校验 → 服务器上装生产依赖 →（kids-ledger）data/config.json 符号链接到 `state/` 持久目录 →
-   `releases/<ref>-<hash>-<time>/` 不可变目录 → `current`/`server`/`client` 符号链接切换 → systemd 重启 / nginx reload；
-7. 回滚 = 符号链接指回旧 release + 重启，不重新构建。
+## 远端原子性（remote.extract）
 
-xlgbis 的 `deploy_client.sh` / `deploy_server.sh` / `ls_apply_config.sh` / `bs_apply_config.sh` / 全部 nginx、systemd、frp 模板
-已**原样转写**进 `templates/xlgbis/`（仅将 LS apply 脚本硬编码的 frp 用户参数化为 `{{FRP_USER}}`），
-env 键位 schema 抄录自 `ls_ops.js` / `bs_ops.js` / `RequiredEnv.js` / `Config.js`——本工具不 import xlgbis 仓库任何代码。
+原幂等 bash 脚本的 release 语义拆为节点后收敛在 `remote.extract` 内保持单体原子性：
 
-kids-ledger 的数据保留方案：应用按 `__dirname` 解析 `data/` 与 `config.json`（解析到 release 真实路径），
-部署脚本在每个 release 内幂等创建 `data → $DEPLOY_DIR/state/data`、`config.json → $DEPLOY_DIR/state/config.json` 符号链接，
-应用代码零改动。
+```
+rm -rf <releases>/.<name>.tmp
+mkdir -p <releases>/.<name>.tmp
+tar -xzf <archive> -C .<name>.tmp
+test -f <expect...>          ← 逐个校验，失败即清 .tmp 并抛错
+rm -rf <releases>/<name>     ← 幂等（同名重发布）
+mv .<name>.tmp <releases>/<name>   ← 原子发布
+输出 releasePath 供后续节点（deps/chown/symlink）使用
+```
 
-## 如何新增一个应用
+失败清理（解压校验失败清 .tmp、上传的归档任务结束即删）由节点 + runner 收尾共同承担。
 
-只有一种方式——工作流 JSON：
+## 前端要点
 
-1. GUI 右上角「＋ 新建工作流」（SPA 预设表单或空白工作流），或手写 `workflows/<name>.json`；
-2. 「✎ 编辑工作流」在卡片编辑器里组装步骤：每个步骤选原子能力、填参数槽（手动输入或引用更早步骤的类型化产出物）、增删排序；
-3. nginx/frp/systemd 模板放应用仓库的 `deploy/` 目录，用 `{{ENV_KEY}}` 占位，工作流里用 `template.push` 推送；
-4. 创建 `envs/<name>.env`（创建工作流成功时有样例内容）；
-5. GUI 卡片上先 dry-run 预览完整计划，再真实部署。步骤类型、类型系统与产出物参考见 [workflow-schema.md](workflow-schema.md)。
+- Svelte Flow 1.x：`onnodeclick` 回调参数是 `{ event, node }` 对象；`nodes/edges` 需 bind；**所有更新用替换式**（`nodes = [...nodes, x]`），原地 push 与直接改节点 data 会与库的内部回写打架。
+- 任务路径高亮存独立 store（`ui.pathHighlight`），不写入节点对象——避免与 SvelteFlow 的测量回写形成写读循环。
+- **ResizeObserver 兜底**：部分内嵌 webview 不投递 RO 回调（实测纯 RO 对照也 0 次），index.html 里有 polyfill：800ms 内零回调则切换 250ms 轮询对比尺寸并手动触发回调（含首次观察即回调的 RO 语义）；正常浏览器零开销。
+- `/api/node-types` 是节点元数据唯一来源：画布节点组件、插槽颜色、检查器表单全部据此动态渲染；`ssh.exec` 等的动态插槽由 widget 文本里的 `{{name}}` / `{{obj.key}}` 占位符生成。
 
-## 依赖（全部 4 个）
+## 新增一个节点类型
 
-`express ^5`（HTTP+静态）、`node-ssh`（SSH/SFTP，Windows 命名管管道 agent）、`tar`（打包）、`dotenv`（env 解析）。
+1. `engine/nodes/<分类>.js` 追加定义：`type/title/category/color/inputs/outputs/widgets/dynamicInputs?/run(ctx, node, inputs)`；
+2. `run` 里区分 `ctx.dryRun`（打印计划，无副作用）；需要收尾的副作用用 `ctx.registerGitRestore / trackRemoteFile / registerSession` 登记；
+3. 重启服务器（注册表启动时加载）；GUI 调色板与检查器自动出现新节点。
 
-## 已知边界
+## 新增一个应用工作流
 
-- xlgbis 原仓库的 `devops/` JS 脚本保持可用（过渡期双轨）；其内部的耦合缺陷（deploy_server.js 副作用导入、
-  packages/common 双用途、env-usage.json 退出遥测、失效 dev 脚本）**另开任务修复**，本工具已从设计上规避（不 import 应用代码）。
-- 完整安全审计（xlgbis `--audit` 的 sshd/ufw/证书等检查）未迁移；status 提供服务/端口/磁盘/node 版本概览。
-- GUI 的 SSE 流在任务长时间静默时可能被中间层掐断，前端会自动降级为轮询补齐日志（已实现）。
+1. GUI「新建」→ 弹窗确认存放路径（任意位置，自动记住）→ 空白图起步；
+2. 拖入 `env.file` + `ssh.session` + 需要的构建/远端节点，连线；
+3. 「定义任务」按序点击节点 → 命名 → 保存；重复定义 deploy/rollback/status；
+4. CLI 对照：`node cli.js run <名或路径> deploy --dry-run`。

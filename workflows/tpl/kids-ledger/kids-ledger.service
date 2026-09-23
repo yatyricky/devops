@@ -1,0 +1,22 @@
+[Unit]
+Description=kids-ledger 家庭账本 ({{DOMAIN}})
+After=network.target
+
+[Service]
+Type=simple
+User={{SERVICE_USER}}
+WorkingDirectory={{DEPLOY_DIR}}/current
+Environment=PORT={{APP_PORT}}
+ExecStart={{NODE_BIN}} server/index.js
+Restart=on-failure
+RestartSec=3
+
+# 轻量加固（应用只写 DEPLOY_DIR，监听 127.0.0.1）
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths={{DEPLOY_DIR}}
+
+[Install]
+WantedBy=multi-user.target

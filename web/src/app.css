@@ -1,0 +1,29 @@
+* { box-sizing: border-box; }
+:root {
+  --bg: #10141a; --panel: #171d26; --panel2: #1d2530; --line: #2a3442;
+  --fg: #d7dee8; --dim: #8a97a8; --accent: #4da3ff; --ok: #4cc38a;
+  --warn: #f5a623; --err: #ff6b6b;
+}
+button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #08131f; font-weight: 600; }
+button.danger { border-color: var(--err); color: var(--err); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+input, select, textarea { background: var(--panel2); border: 1px solid var(--line); color: var(--fg);
+  border-radius: 6px; padding: 4px 8px; font-size: 13px; width: 100%; }
+textarea { font: 12px/1.5 Consolas, monospace; }
+.badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+.badge.prod { color: var(--err); border-color: var(--err); }
+
+/* 画布节点 */
+.devnode { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  min-width: 170px; max-width: 260px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+.devnode.selected { border-color: var(--accent); }
+.devnode .head { padding: 4px 10px; border-radius: 8px 8px 0 0; font-weight: 600; color: #0b1220; }
+.devnode .body { padding: 6px 10px 8px; color: var(--fg); }
+.devnode .body .kv { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.devnode.onpath { outline: 2px dashed var(--warn); outline-offset: 2px; }
+.devnode .pathidx { position: absolute; top: -10px; left: -10px; background: var(--warn); color: #08131f;
+  border-radius: 999px; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 11px; }

@@ -1,7 +1,8 @@
 node_modules/
+web/node_modules/
+web/dist/
 .runs/
 .tmp/
 envs/*.env
 local-config.json
 *.tgz
-*.rendered.sh

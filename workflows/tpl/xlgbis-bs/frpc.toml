@@ -1,0 +1,17 @@
+serverAddr = "{{FRPS_SERVER_ADDR}}"
+serverPort = {{FRPS_BIND_PORT}}
+
+transport.tls.enable = true
+
+auth.method = "token"
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "{{FRP_TOKEN_PATH}}"
+
+# Single proxy per Sx: exposes local nginx (:80) under <LOCAL_ENV_ID>.<FRPS_SUBDOMAIN_HOST>
+[[proxies]]
+name = "{{BSI}}-http"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 80
+subdomain = "{{BSI}}"
+transport.useEncryption = true

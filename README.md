@@ -1,62 +1,82 @@
 # devops-console
 
-轻量 DevOps 控制台：**SSH 推送式部署引擎 + 单文件 Web GUI + 类型化可视化工作流**。部署逻辑全部配置化——`workflows/<name>.json` 描述一个应用的全部任务（deploy / rollback / status / apply-config / 任意自定义），GUI 上用卡片式步骤编辑器组装（像 ComfyUI：每个步骤是一个原子能力，有带类型的参数与产出物）。
+轻量 DevOps 控制台：**ComfyUI 式节点图工作流编辑器 + SSH 推送式部署引擎**。用可视化节点图编排 SPA/server 应用的部署/回滚/配置下发（当前内置 kids-ledger 与 xlgbis LS/BS 三个示例工作流）。
 
-单文件 Express 服务器 + 单文件原生 JS 前端（无构建、无框架、无 TypeScript）、4 个直接依赖、`node index` 直接运行。GUI 是唯一入口，没有第二套等价界面。
+- 前端：Svelte 5 + Svelte Flow（Vite 构建，暗色画布）
+- 引擎：Node.js，4 个直接依赖（express / node-ssh / tar / dotenv）
+- 无容器、无 agent、无云依赖；所有部署**人工触发**，prod 需输入工作流名确认
 
-## 核心特性
+## 核心概念
 
-- **类型化数据流工作流**：线性步骤列表，无 DAG；每个步骤声明带类型的产出物（`archivePath(path)`、`uploadedTo(remote_path)`…），每个参数是带类型的输入槽——**文件产出物不能被当字符串入参**，引用类型不匹配在编辑器里选不出来、保存时编译期校验兜底。9 种原子能力：`git.checkout / env.write / shell / archive / upload / remote / template.push / vars.set / log`。
-- **模板随应用仓库版本管理**：nginx/frp/systemd 配置放在各自应用仓库的 `deploy/` 目录，工作流用 `template.push` 配置模板路径 + 参数，渲染后推送。
-- **部署语义**：`releases/<ref>-<hash>-<time>` 不可变目录 + `current` 符号链接切换 + systemd/nginx 重载 + 健康检查，天然可回滚（秒级切链，不重新构建）。
-- **无 CI 触发器**：所有部署由人在 GUI 手动触发；**prod 环境必须输入应用名二次确认**（runner 内置门禁兜底）；dry-run 只打印计划、绝不连接服务器。
-- **安全**：SSH 主机指纹 SHA256 锁定（timingSafeEqual）、env 机密文件不入 git 且 GUI 永不显示其值、任务串行执行、全量审计（`.runs/audit.jsonl`）。
-- 无容器、无 WSL、无云依赖；内存占用 ~150MB。
+1. **一个 workflow = 一张节点图**（`workflow.json`，可放磁盘任意位置）
+2. **节点有严格类型化插槽**：`env / ssh / file / string / number / boolean / any`，类型不匹配的连线在编辑与保存时都会被拒绝
+3. **任务 = 图中一条路径**：如 `env → git → build → pack → upload → extract → deps → symlink → service`；也可短到 `env → ssh → symlink`（回滚）
+4. **env 文件、params、运行时输入都是节点**（`env.file` / `params` / `task.input`），与其余节点平权
+5. **SSH 命令节点支持动态插槽**：命令里写 `{{name}}` 生成 string 输入插槽、`{{env.KEY}}` 直连 env 节点取值，值自动 shell 引号包裹
 
 ## 快速开始
 
 ```bash
 npm install
+npm -C web install && npm -C web run build   # 构建画布前端
 
-# 1) 新建应用：GUI 右上角「＋ 新建工作流」（SPA 预设或空白），
-#    或参考 workflows/kids-ledger.json / xlgbis-*.json / spa.example.json 手写
-#    nginx/frp 等模板放应用仓库的 deploy/ 目录
+# 1) 复制环境文件并填写真实值
+cp envs/kids-ledger.example.env envs/kids-ledger.env
 
-# 2) 填 env：envs/<应用名>.env（创建工作流成功后会弹出样例内容）
-#    REMOTE_HOST_FINGERPRINT 先留空，跑一次「状态」任务取指纹再填回
+# 2) 启动（默认 http://127.0.0.1:3010）
+node index.js          # 或 start.cmd
 
-# 3) 启动 GUI（默认 http://127.0.0.1:3010，自动打开浏览器）
-node index.js          # 或双击 start.cmd
-
-# 4) 卡片上先 dry-run 预览完整执行计划，再真实部署；prod 需输入应用名确认
+# 3) 或纯 CLI（与 GUI 同一引擎）
+node cli.js list
+node cli.js tasks kids-ledger
+node cli.js run kids-ledger deploy --dry-run
+node cli.js run kids-ledger deploy --input ref=master     # prod 会要求输入工作流名
+node cli.js run kids-ledger rollback --input release=<name>
 ```
 
-内置四个工作流应用：**kids-ledger**（全栈：构建 + 服务器装依赖 + systemd + 健康检查）、**xlgbis-ls / xlgbis-bs**（前端+服务端+frp 隧道，各 6 个任务）、以及你在 GUI 里创建的任意应用。
+前端改动后需重新 `npm -C web run build`（引擎与 CLI 不受影响）。
+
+## 界面
+
+- **左栏**：节点调色板（输入 / 版本 / 构建 / 远端 / 工具），点击添加节点
+- **中间**：节点图画布（拖拽布线、类型色插槽、小地图、任务路径悬停高亮带序号）
+- **右栏**：节点检查器（按注册表元数据动态生成表单）
+- **任务栏**：按 workflow.json 的 tasks 渲染按钮；悬停高亮路径；点击运行（收集 task.input 输入 + prod 确认）；「定义任务」= 按执行顺序点击节点，把一条路径保存为任务
+- **底部**：日志抽屉（SSE 流式 + 断流轮询兜底，机密值打码）
+- **顶部**：工作流列表（local-config 最近打开 + 仓库自带 workflows/）、打开/新建（弹窗确认存放路径）/保存
 
 ## 目录结构
 
 ```
-├─ index.js               # 服务器：扁平路由 + 静态托管 + SSE-over-POST 流式日志 + 工作流 CRUD API
+├─ index.js               # 服务器：工作流注册 + 任务队列 + SSE 日志 + 静态托管 web/dist
+├─ cli.js                 # CLI 入口（与 GUI 共用 runner）
 ├─ engine/
-│  ├─ workflow.js         # 核心：类型化数据流（步骤注册表 + 编译期类型校验 + 执行器）
-│  ├─ registry.js         # 应用注册中心：加载 workflows/*.json → 标准 manifest
-│  ├─ presets.js          # SPA / 空白 预设生成器（GUI「＋ 新建工作流」）
-│  ├─ ssh.js              # node-ssh + Windows agent 命名管管道 + 指纹锁定
-│  ├─ env.js              # .env 解析 + schema 校验
-│  ├─ render.js           # {{KEY}} 模板渲染（未解析即报错）
-│  ├─ exec.js tarball.js gitops.js release.js
-│  └─ runner.js           # 串行任务队列 + 日志采集 + .runs/ 持久化 + 审计 + prod 门禁
-├─ workflows/             # 应用定义（JSON 工作流；*.example.json 与 _ 前缀不加载）
-├─ public/index.html      # 单文件前端（卡片式类型插槽编辑器 + 原生 JS）
-├─ envs/                  # 环境文件（gitignored；只有 *.example.env 入库）
-├─ .runs/                 # 任务历史 + 日志 JSON + audit.jsonl（gitignored）
-└─ docs/                  # architecture / operations / workflow-schema
+│  ├─ types.js            # 插槽类型规则（前后端同规则）
+│  ├─ nodes/              # 节点注册表：input/build/remote/util 四类 22 种
+│  ├─ workflow.js         # 图校验 + 任务路径执行器（依赖闭包拓扑）
+│  ├─ runner.js           # 串行队列/.runs 持久化/审计/prod 门禁/副作用收尾
+│  ├─ registry.js         # 工作流发现（local-config.workflows + 仓库 workflows/）
+│  └─ ssh.js env.js render.js tarball.js gitops.js exec.js config.js
+├─ workflows/             # 示例工作流 + tpl/ 配置模板（nginx/systemd/frp，随工作流自包含）
+├─ web/                   # Svelte 5 + Svelte Flow 前端（构建产物 web/dist）
+├─ envs/                  # 环境文件（gitignored，仅 *.example.env 入库）
+└─ tools/verify-dryrun.js # 引擎自检（12 项断言）
 ```
+
+## 节点类型（22 种）
+
+| 分类 | 节点 |
+|---|---|
+| 输入 | `env.file`（→env）、`params`（→any）、`task.input`（→string，运行时弹窗/CLI `--input` 收集） |
+| 版本 | `git.ref`（fetch+干净校验+checkout，任务结束自动恢复原分支） |
+| 构建 | `cmd.exec`、`write.env`、`stage.copy`（多源暂存+排除）、`tar.pack`、`template.render`（`./`=工作流目录） |
+| 远端 | `ssh.session`、`ssh.exec`（动态插槽）、`ssh.upload`（任务结束自动清理远端临时文件）、`remote.extract`（**原子**：.tmp 解压→expect 校验→mv 成正式 release）、`remote.deps`、`remote.chown`、`remote.symlink`、`remote.service`、`remote.check`（断言正则） |
+| 工具 | `field.get`（env/params 取单值）、`string.const`、`string.format`（动态插槽拼接）、`log.print`（预览端点） |
 
 ## 验证
 
 ```bash
-npm run verify    # 引擎自检：渲染/env/打包/release 校验 + 工作流类型校验 + dry-run 端到端断言
+node tools/verify-dryrun.js   # 类型/图校验/路径执行/掩码/prod 门禁 + 三工作流 dry-run 端到端
 ```
 
-详见 [docs/workflow-schema.md](docs/workflow-schema.md)（类型系统与步骤参考）、[docs/architecture.md](docs/architecture.md)（架构）和 [docs/operations.md](docs/operations.md)（运维手册）。
+详见 [docs/architecture.md](docs/architecture.md) 与 [docs/operations.md](docs/operations.md)。
