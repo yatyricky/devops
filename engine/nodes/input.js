@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 import { loadEnv, rawParse } from "../env.js";
 import { ROOT, ENVS_DIR } from "../runner.js";
@@ -67,6 +68,31 @@ export default [
             if (v === "") ctx.log(`[input] ${name} 未提供，使用空值`);
             else ctx.log(`[input] ${name} = ${v}`);
             return { value: String(v) };
+        },
+    },
+    {
+        type: "fs.path",
+        title: "输入路径",
+        category: "输入",
+        color: "#56b6c2",
+        pathStat: true,
+        outputValueKey: "path",
+        inputs: [],
+        outputs: [
+            { id: "dir", type: "folder" },
+            { id: "file", type: "file" },
+        ],
+        widgets: [{ key: "path", label: "路径", kind: "string", default: "", placeholder: "C:/...（绝对路径）" }],
+        async run(ctx, node) {
+            const p = String(node.data.path ?? "").trim();
+            if (!p) throw new Error("fs.path 未配置路径");
+            /** @type {import("fs").Stats} */
+            let st;
+            try { st = await fs.promises.stat(p); } catch { throw new Error(`fs.path 路径不存在: ${p}`); }
+            const isDir = st.isDirectory();
+            ctx.log(`[fs.path] ${p} → ${isDir ? "文件夹" : "文件"}（${st.size} B，mtime ${st.mtime.toISOString()}）`);
+            // 双插槽：只有与实际类型匹配的输出有值，另一个为 undefined
+            return { dir: isDir ? p : undefined, file: isDir ? undefined : p };
         },
     },
 ];

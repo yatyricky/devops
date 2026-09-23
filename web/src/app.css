@@ -18,11 +18,53 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 
 /* 画布节点 */
 .devnode { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-  min-width: 170px; max-width: 260px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+  min-width: 230px; max-width: 320px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
 .devnode.selected { border-color: var(--accent); }
-.devnode .head { padding: 4px 10px; border-radius: 8px 8px 0 0; font-weight: 600; color: #0b1220; }
+.devnode.error, .devnode.error.selected { border-color: var(--err);
+  box-shadow: 0 0 0 1.5px var(--err), 0 2px 10px rgba(229, 72, 72, .35); }
+.devnode .head { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px 8px 0 0; font-weight: 600; color: #0b1220; }
+.devnode .head .htitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devnode .head .del { display: none; border: none; background: rgba(0,0,0,.25); color: inherit;
+  padding: 0 4px; font-size: 11px; border-radius: 4px; line-height: 1.4; }
+.devnode:hover .head .del, .devnode.selected .head .del { display: inline-block; }
 .devnode .body { padding: 6px 10px 8px; color: var(--fg); }
-.devnode .body .kv { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.devnode .body .kv { position: relative; display: flex; align-items: center; color: var(--dim); }
+.devnode .body .kv.out { justify-content: flex-end; text-align: right; }
+.devnode .body .lbl { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.devnode .body .sep { border-top: 1px solid var(--line); margin: 4px 0; }
+.devnode .body .kv .svelte-flow__handle { width: 9px; height: 9px; }
+.devnode .body .kv.in .svelte-flow__handle { left: -11px; }  /* .body padding 10px + 卡片边框 1px，把手中心落在卡片边框上 */
+.devnode .body .kv.out .svelte-flow__handle { right: -11px; }
+.devnode .body .kv.ctl { border-top: 1px dashed var(--line); margin-top: 4px; padding-top: 3px; }
+.devnode .body .kv.ctl .seqsym { font-size: 10px; opacity: .85; }
+.devnode .body .kv.ctl .svelte-flow__handle { width: 8px; height: 8px; border-radius: 2px; }
+.devnode .body .kv.ctl .svelte-flow__handle-left { left: -11px; }
+.devnode .body .kv.ctl .svelte-flow__handle-right { right: -11px; }
+.svelte-flow__edge.seq .svelte-flow__edge-path { stroke: var(--warn); stroke-width: 1.2; stroke-dasharray: 3 4; opacity: .55; }
+
+/* 卡片内联编辑控件（原 Inspector 上卡片） */
+.devnode .body .wrow { display: block; margin-top: 6px; }
+.devnode .body .wlab { display: block; font-size: 10px; color: var(--dim); margin-bottom: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devnode .body input, .devnode .body select, .devnode .body textarea { font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+.devnode .body textarea { resize: vertical; line-height: 1.5; }
+.devnode .body .ckb { width: auto; }
+.devnode .body .tblwrap { display: block; }
+.devnode .body .trow { display: flex; gap: 3px; margin: 2px 0; align-items: center; }
+.devnode .body .trow .arr { color: var(--dim); flex: none; }
+.devnode .body .trow input { flex: 1; min-width: 0; }
+.devnode .body button.mini { padding: 1px 6px; font-size: 11px; flex: none; }
+.devnode .body .badges { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 3px; }
+.devnode .body .badge { font-size: 10px; padding: 0 6px; }
+.devnode .body .badge .rm { cursor: pointer; margin-left: 3px; }
+.devnode .body input.winvalid { border-color: var(--err); }
+.devnode .body .errline { display: block; color: var(--err); font-size: 11px; margin-top: 3px; }
+.devnode .body .stat { margin-top: 6px; border-top: 1px dashed var(--line); padding-top: 4px; }
+.devnode .body .stat .srow { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--dim); }
+.devnode .body .stat .srow b { color: var(--fg); font-weight: 500; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devnode .body .stat .srow b.bad { color: var(--err); }
+.devnode .body .stat .srow b.mono { font-family: Consolas, monospace; }
+
 .devnode.onpath { outline: 2px dashed var(--warn); outline-offset: 2px; }
 .devnode .pathidx { position: absolute; top: -10px; left: -10px; background: var(--warn); color: #08131f;
   border-radius: 999px; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;

@@ -1,7 +1,7 @@
 /** 与 engine/types.js 同规则的客户端镜像 + 动态插槽计算。 */
 
 export const TYPE_COLORS = {
-  env: "#4da3ff", ssh: "#ff9e64", file: "#4cc38a", string: "#c8d3f0",
+  env: "#4da3ff", ssh: "#ff9e64", file: "#4cc38a", folder: "#56b6c2", string: "#c8d3f0",
   number: "#e5c07b", boolean: "#c678dd", any: "#8a97a8",
 };
 

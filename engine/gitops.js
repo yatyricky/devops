@@ -95,3 +95,60 @@ export async function withDeployVersion(repoDir, options, callback, opts = {}) {
         }
     }
 }
+
+/**
+ * 节点图共用：部署取版一段式。fetch → 校验干净 → 可选 checkout（记录原 HEAD）→ 解析版本号。
+ * dry-run 不动工作树，只解析版本并声明意图。
+ * 返回 restore：需要恢复原分支时的清理函数（无需恢复为 null），由调用方决定注册到作用域还是任务级。
+ *
+ * @param {string} repoDir
+ * @param {string | undefined} refName
+ * @param {{ dryRun?: boolean, log?: (msg: string) => void }} [opts]
+ * @returns {Promise<{ versionId: string, buildTime: string, restore: (() => Promise<void>) | null }>}
+ */
+export async function resolveDeployVersion(repoDir, refName, opts = {}) {
+    const log = opts.log ?? (() => {});
+    const dryRun = !!opts.dryRun;
+
+    await cmd("git fetch --all", { cwd: repoDir, log: () => {} });
+    const clean = await isWorkingTreeClean(repoDir, { log: () => {} });
+    if (!clean && refName) throw new Error("Working tree is not clean, unable to deploy specified ref");
+
+    /** @type {{hash: string, name: string} | undefined} */
+    let ref;
+    if (clean && refName) {
+        const refs = await getRefs(repoDir, { log: () => {} });
+        ref = refs.find(r => r.name === refName);
+        if (!ref) throw new Error(`Ref not found: ${refName}`);
+    }
+
+    /** @type {string | undefined} */
+    let gitHash;
+    /** @type {string | undefined} */
+    let original;
+    if (dryRun) {
+        gitHash = ref ? ref.hash.slice(0, 7) : (await cmd("git rev-parse --short HEAD", { cwd: repoDir, log: () => {} })).trim();
+        log(`[dry-run] git: 将 checkout ${ref?.name ?? "HEAD"} 并在作用域结束/任务结束后恢复原分支`);
+    } else if (ref) {
+        try {
+            original = (await cmd("git symbolic-ref --quiet --short HEAD", { cwd: repoDir, log: () => {} })).trim();
+        } catch {
+            original = (await cmd("git rev-parse HEAD", { cwd: repoDir, log: () => {} })).trim();
+        }
+        await cmd(`git checkout ${ref.hash}`, { cwd: repoDir, log });
+        gitHash = (await cmd("git rev-parse --short HEAD", { cwd: repoDir, log: () => {} })).trim();
+    } else {
+        gitHash = (await cmd("git rev-parse --short HEAD", { cwd: repoDir, log: () => {} })).trim();
+    }
+
+    const safeRef = (ref?.name ?? "HEAD").replace(/[^A-Za-z0-9._-]/g, "_");
+    const versionId = `${safeRef}-${gitHash}${clean ? "" : "-dirty"}`;
+    const buildTime = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
+    const restore = original
+        ? async () => {
+            await cmd(`git checkout ${original}`, { cwd: repoDir, log });
+            log(`git: restored working copy: ${original}`);
+        }
+        : null;
+    return { versionId, buildTime, restore };
+}

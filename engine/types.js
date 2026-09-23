@@ -3,13 +3,14 @@
  * 规则：同型可连；任何类型可入 any 输入（env/params → template.render 的 vars 等）；
  * any 输出不可入具体类型输入（取具体值用 field.get）。
  */
-export const SOCKET_TYPES = ["env", "ssh", "file", "string", "number", "boolean", "any"];
+export const SOCKET_TYPES = ["env", "ssh", "file", "folder", "string", "number", "boolean", "any"];
 
 /** 插槽类型的显示色（前端同款映射，经 /api/node-types 下发）。 */
 export const TYPE_COLORS = {
     env: "#4da3ff",
     ssh: "#ff9e64",
     file: "#4cc38a",
+    folder: "#56b6c2",
     string: "#c8d3f0",
     number: "#e5c07b",
     boolean: "#c678dd",

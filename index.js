@@ -110,6 +110,46 @@ app.post("/api/refs", async (req, res) => {
     }
 });
 
+// ── 本地路径 stat（fs.path 节点卡片展示：权限/大小/修改时间）────
+app.post("/api/fs/stat", async (req, res) => {
+    const p = String(req.body?.path || "").trim();
+    if (!p) return res.json({ exists: false, error: "empty" });
+    try {
+        const st = await fs.promises.stat(p);
+        res.json({
+            exists: true,
+            isDir: st.isDirectory(),
+            size: st.size,
+            mtime: st.mtime.toISOString(),
+            mode: modeToString(st),
+        });
+    } catch (e) {
+        res.json({ exists: false, error: e.code ?? e.message });
+    }
+});
+
+/** stat.mode → "drwxrwxrwx" 风格字符串。Windows 下 libuv 不给执行位（目录 0666/0777 视实现），
+ *  按惯例目录有 r 即有 x，只读属性表现为去掉 w 位。 */
+function modeToString(st) {
+    const isDir = st.isDirectory();
+    let m = st.mode;
+    if (isDir) m |= ((m & 0o444) >> 2);   // r → x
+    const bit = (n, c) => (m & n ? c : "-");
+    const tri = shift => `${bit(4 << shift, "r")}${bit(2 << shift, "w")}${bit(1 << shift, "x")}`;
+    return (isDir ? "d" : "-") + tri(6) + tri(3) + tri(0);
+}
+
+// ── git refs（任意仓库目录；git.getRefs 卡片刷新用）────
+app.post("/api/git/refs", async (req, res) => {
+    const repoDir = String(req.body?.repoDir || "").trim();
+    if (!repoDir) return res.status(400).json({ error: "repoDir required" });
+    try {
+        res.json(await getRefs(repoDir, { log: () => {} }));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
 // ── 任务 ────
 app.post("/api/jobs", (req, res) => {
     const { workflow: wfRef, task, ...options } = req.body || {};

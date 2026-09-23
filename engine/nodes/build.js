@@ -3,7 +3,7 @@ import path from "path";
 import { cmd, writeLF, copyTree } from "../exec.js";
 import { compress, makeStageDir } from "../tarball.js";
 import { renderTemplateFile } from "../render.js";
-import { isWorkingTreeClean, getRefs } from "../gitops.js";
+import { resolveDeployVersion } from "../gitops.js";
 import { ROOT, TMP_DIR } from "../runner.js";
 
 /**
@@ -30,57 +30,59 @@ export default [
         async run(ctx, node, inputs) {
             const repoDir = node.data.repoDir;
             if (!repoDir || !fs.existsSync(repoDir)) throw new Error(`git.ref 仓库不存在: ${repoDir}`);
-            const log = ctx.log;
-            const refName = inputs.ref || undefined;
-
-            await cmd("git fetch --all", { cwd: repoDir, log: () => {} });
-            const clean = await isWorkingTreeClean(repoDir, { log: () => {} });
-            if (!clean && refName) throw new Error("Working tree is not clean, unable to deploy specified ref");
-
-            /** @type {{hash: string, name: string} | undefined} */
-            let ref;
-            if (clean && refName) {
-                const refs = await getRefs(repoDir, { log: () => {} });
-                ref = refs.find(r => r.name === refName);
-                if (!ref) throw new Error(`Ref not found: ${refName}`);
-            }
-
-            let gitHash;
-            if (ctx.dryRun) {
-                // dry-run：不 checkout（避免动工作树），只解析出版本号并声明意图
-                gitHash = ref ? ref.hash.slice(0, 7) : (await cmd("git rev-parse --short HEAD", { cwd: repoDir, log: () => {} })).trim();
-                log(`[dry-run] git: 将 checkout ${ref?.name ?? "HEAD"} 并在任务结束后恢复原分支`);
-            } else {
-                /** @type {string | undefined} */
-                let original;
-                if (ref) {
-                    try {
-                        original = (await cmd("git symbolic-ref --quiet --short HEAD", { cwd: repoDir, log: () => {} })).trim();
-                    } catch {
-                        original = (await cmd("git rev-parse HEAD", { cwd: repoDir, log: () => {} })).trim();
-                    }
-                    await cmd(`git checkout ${ref.hash}`, { cwd: repoDir, log });
-                }
-                gitHash = (await cmd("git rev-parse --short HEAD", { cwd: repoDir, log: () => {} })).trim();
-                if (original) {
-                    ctx.registerGitRestore(async () => {
-                        await cmd(`git checkout ${original}`, { cwd: repoDir, log });
-                        log(`git: restored working copy: ${original}`);
-                    });
-                }
-            }
-
-            const safeRef = (ref?.name ?? "HEAD").replace(/[^A-Za-z0-9._-]/g, "_");
-            const versionId = `${safeRef}-${gitHash}${clean ? "" : "-dirty"}`;
-            const buildTime = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
+            const { versionId, buildTime, restore } = await resolveDeployVersion(repoDir, inputs.ref || undefined, { dryRun: ctx.dryRun, log: ctx.log });
+            // git.ref 的作用域 = 整个任务：清理注册到任务级（finalize 逆序执行）
+            if (restore) ctx.registerGitRestore(restore);
             const prefix = node.data.prefix ? `${node.data.prefix}-` : "";
-            log(`git: version=${versionId} time=${buildTime}`);
-            return {
-                versionId,
-                buildTime,
-                releaseName: `${prefix}${versionId}-${buildTime}`,
-                repoDir,
-            };
+            ctx.log(`git: version=${versionId} time=${buildTime}`);
+            return { versionId, buildTime, releaseName: `${prefix}${versionId}-${buildTime}`, repoDir };
+        },
+    },
+    {
+        type: "git.checkout",
+        title: "切换分支",
+        category: "版本",
+        color: "#f07178",
+        inputs: [
+            { id: "repoDir", type: "folder", required: true },
+            { id: "ref", type: "string", required: true },
+        ],
+        outputs: [{ id: "original", type: "string" }],
+        widgets: [],
+        async run(ctx, node, inputs) {
+            const repoDir = inputs.repoDir;
+            if (!repoDir) throw new Error("git.checkout 未连接仓库目录");
+            const ref = String(inputs.ref ?? "").trim();
+            if (!ref) throw new Error("git.checkout 未配置 ref");
+            /** 切换前的 HEAD：分支名；detached 时为 hash */
+            let original;
+            try {
+                original = (await cmd("git symbolic-ref --quiet --short HEAD", { cwd: repoDir, log: () => {} })).toString().trim();
+            } catch {
+                original = (await cmd("git rev-parse HEAD", { cwd: repoDir, log: () => {} })).toString().trim();
+            }
+            if (ctx.dryRun) {
+                ctx.log(`[dry-run] git: 将 checkout ${ref}（当前 HEAD: ${original}）`);
+                return { original };
+            }
+            await cmd(`git checkout ${ref}`, { cwd: repoDir, log: ctx.log });
+            ctx.log(`[git.checkout] ${original} → ${ref}`);
+            return { original };
+        },
+    },
+    {
+        type: "git.getRefs",
+        title: "Git Refs",
+        category: "版本",
+        color: "#f07178",
+        refsPicker: true,
+        inputs: [{ id: "repoDir", type: "folder", required: true }],
+        outputs: [{ id: "ref", type: "string" }],
+        widgets: [],
+        async run(ctx, node) {
+            const ref = String(node.data.ref ?? "HEAD") || "HEAD";
+            ctx.log(`[git.getRefs] 输出 ref = ${ref}`);
+            return { ref };
         },
     },
     {

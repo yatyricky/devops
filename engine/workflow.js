@@ -13,7 +13,8 @@ import { ENVS_DIR } from "./runner.js";
  * - 主路径节点按数组顺序执行（顺序即副作用顺序；相邻节点不强制有边——纯顺序相邻如 deps→symlink 合法）；
  * - 节点输入经连线解析：来源是"已执行"节点——主路径中更早的节点，或其依赖闭包自动先执行的侧挂节点
  *   （field.get/string.format 等 helper 从侧挂取值汇入主链）；
- * - 输入若依赖主路径中更晚的节点 → 报错；环依赖 → 报错。
+ * - 输入若依赖主路径中更晚的节点 → 报错；环依赖 → 报错；
+ * - 顺序边（kind:"seq"，handle __seqOut→__seqIn）不是执行驱动，是顺序约束：同任务路径内两端必须保序（校验拦截）。
  */
 
 /**
@@ -66,6 +67,13 @@ export function validateWorkflow(doc) {
             problems.push(`边 ${e.id ?? "?"} 端点不存在: ${e.source} → ${e.target}`);
             continue;
         }
+        // 顺序边：无数据类型语义，仅校验保留 handle
+        if (e.kind === "seq") {
+            if (e.sourceHandle !== "__seqOut" || e.targetHandle !== "__seqIn") {
+                problems.push(`顺序边 ${e.id ?? "?"} 的 handle 非法（应为 __seqOut → __seqIn）`);
+            }
+            continue;
+        }
         const src = nodeById.get(e.source), tgt = nodeById.get(e.target);
         try {
             const outs = getOutputs(src);
@@ -82,10 +90,10 @@ export function validateWorkflow(doc) {
         }
     }
 
-    // 同一输入多条边（一个插槽只接一条线）
+    // 同一输入多条边（一个插槽只接一条线）；顺序边无插槽语义，不参与
     const seen = new Set();
     for (const e of doc.edges) {
-        if (!e.targetHandle) continue;
+        if (e.kind === "seq" || !e.targetHandle) continue;
         const k = `${e.target}.${e.targetHandle}`;
         if (seen.has(k)) problems.push(`输入 ${k} 接了多条连线`);
         seen.add(k);
@@ -100,6 +108,18 @@ export function validateWorkflow(doc) {
         if (dups.length) problems.push(`任务 ${name} 路径含重复节点: ${[...new Set(dups)].join(", ")}`);
         if (t.mutates === undefined) problems.push(`任务 ${name} 缺少 mutates 标记`);
         if (t.label === undefined) problems.push(`任务 ${name} 缺少 label`);
+    }
+
+    // 顺序边与任务路径顺序一致性：同路径内源必须早于目标
+    for (const e of doc.edges) {
+        if (e.kind !== "seq") continue;
+        for (const [name, t] of Object.entries(doc.tasks)) {
+            if (!Array.isArray(t.path)) continue;
+            const si = t.path.indexOf(e.source), ti = t.path.indexOf(e.target);
+            if (si !== -1 && ti !== -1 && si > ti) {
+                problems.push(`顺序边 ${e.source} → ${e.target} 与任务 ${name} 的路径顺序矛盾（位置 ${si} → ${ti}）`);
+            }
+        }
     }
     return problems;
 }

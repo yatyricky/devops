@@ -1,10 +1,10 @@
 <script>
+  import { getContext, setContext } from "svelte";
   import { SvelteFlow, Background, Controls, MiniMap } from "@xyflow/svelte";
   import { api } from "./api.js";
   import { canConnect, effectiveInputs, genId } from "./types.js";
   import { ui } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
-  import Inspector from "./Inspector.svelte";
   import Palette from "./Palette.svelte";
   import LogDrawer from "./LogDrawer.svelte";
 
@@ -15,7 +15,6 @@
   let name = $state(""), title = $state(""), repoDir = $state("");
   let nodes = $state([]), edges = $state([]), tasks = $state({});
   let dirty = $state(false);
-  let selectedId = $state(null);
   let toast = $state("");
   let busyText = $state("空闲");
   let hoverPath = $state(/** @type {string[] | null} */ (null));
@@ -28,9 +27,26 @@
 
   const typeMap = $derived(ui.nodeTypesMap);
   const components = $derived(Object.fromEntries(Object.keys(typeMap).map(t => [t, DevNode])));
-  let selectedNode = $derived(nodes.find(n => n.id === selectedId) ?? null);
-  let selectedMeta = $derived(selectedNode ? typeMap[selectedNode.type] : null);
   let currentEntry = $derived(wfList.find(w => w.path === currentPath));
+  let selectedNodeIds = $derived(new Set(nodes.filter(n => n.selected).map(n => n.id)));
+
+  // 节点卡片经 context 拿编辑/删除回调与连线查询（xyflow 自建组件树，props 传不进节点组件）
+  setContext("devnode-actions", {
+    ondata: onData,
+    ondelete: deleteNode,
+    isConnected(nodeId, handleId) {
+      return edges.some(e => e.source === nodeId && e.sourceHandle === handleId);
+    },
+    /** 编辑期解析某输入连线的当前值：源节点按 outputValueKey（缺省 sourceHandle 名）取 data 字段 */
+    resolveInput(nodeId, handleId) {
+      const e = edges.find(e => e.target === nodeId && e.targetHandle === handleId);
+      if (!e) return undefined;
+      const src = nodes.find(n => n.id === e.source);
+      if (!src) return undefined;
+      const key = typeMap[src.type]?.outputValueKey ?? e.sourceHandle;
+      return src.data?.[key];
+    },
+  });
 
   function showToast(msg) { toast = msg; setTimeout(() => (toast = ""), 3000); }
 
@@ -65,16 +81,16 @@
       position: { x: n.position[0], y: n.position[1] },
       data: { ...n.data, __type: n.type },
     }));
-    edges = (doc.edges ?? []).map(e => ({ ...e, animated: true }));
+    edges = (doc.edges ?? []).map(e => ({ ...e, ...(e.kind === "seq" ? { class: "seq" } : {}) }));
     tasks = doc.tasks ?? {};
-    selectedId = null; hoverPath = null; definer = null;
+    hoverPath = null; definer = null;
     ignoreDirtyUntil = Date.now() + 1000;
   }
   function toDoc() {
     return {
       name, title, version: 1, repoDir,
       nodes: nodes.map(n => ({ id: n.id, type: n.type, position: [Math.round(n.position.x), Math.round(n.position.y)], data: stripDecor(n.data) })),
-      edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle })),
+      edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, ...(e.kind ? { kind: e.kind } : {}) })),
       tasks: JSON.parse(JSON.stringify(tasks)),
     };
   }
@@ -119,36 +135,47 @@
     nodes = [...nodes, { id, type: meta.type, position: { x: 120 + (nodes.length % 6) * 40, y: 120 + Math.floor(nodes.length / 6) * 60 }, data }];
     dirty = true;
   }
-  function onData(key, value) {
-    if (!selectedNode) return;
-    const nextData = { ...selectedNode.data, [key]: value };
-    // 动态插槽变更 → 清理指向已消失 handle 的边
-    const meta = typeMap[selectedNode.type];
+  /** @param {string} nodeId @param {string} key @param {any} value 卡片编辑 → 更新节点 data；动态插槽变更时清理失效边 */
+  function onData(nodeId, key, value) {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const nextData = { ...node.data, [key]: value };
+    const meta = typeMap[node.type];
     const valid = new Set(effectiveInputs(meta, nextData).map(i => i.id));
-    const kept = edges.filter(e => e.target !== selectedNode.id || valid.has(e.targetHandle));
-    nodes = nodes.map(n => (n.id === selectedNode.id ? { ...n, data: nextData } : n));
+    const kept = edges.filter(e => e.target !== node.id || valid.has(e.targetHandle));
+    nodes = nodes.map(n => (n.id === nodeId ? { ...n, data: nextData } : n));
     if (kept.length !== edges.length) edges = kept;
     dirty = true;
   }
   function deleteNode(id) {
     nodes = nodes.filter(n => n.id !== id);
     edges = edges.filter(e => e.source !== id && e.target !== id);
-    if (selectedId === id) selectedId = null;
     dirty = true;
   }
-  /** @param {{ event: any, node: any }} m */
+  /** @param {{ event: any, node: any }} m 定义任务模式下点选节点；其余选中交给 xyflow */
   function onNodeClick({ node }) {
-    if (!node) return;
-    if (definer) {
-      if (!definer.path.includes(node.id)) definer.path = [...definer.path, node.id];
-      return;
+    if (!node || !definer) return;
+    // 点击节点入路径，并沿唯一顺序后继自动追加链条（遇分叉/已在路径中即停）
+    let cur = node.id;
+    const add = [];
+    while (cur && !definer.path.includes(cur) && !add.includes(cur)) {
+      add.push(cur);
+      const succ = edges.filter(e => e.kind === "seq" && e.source === cur).map(e => e.target);
+      cur = succ.length === 1 ? succ[0] : null;
     }
-    selectedId = node.id;
+    if (add.length) definer.path = [...definer.path, ...add];
   }
   /** @param {any} p 连线参数 */
   function onConnect(p) {
     const src = nodes.find(n => n.id === p.source), tgt = nodes.find(n => n.id === p.target);
     if (!src || !tgt || src === tgt) return;
+    // 顺序边：无类型语义，只查重
+    if (p.sourceHandle === "__seqOut" && p.targetHandle === "__seqIn") {
+      if (edges.some(e => e.kind === "seq" && e.source === p.source && e.target === p.target)) { showToast("顺序连线已存在"); return; }
+      edges = [...edges, { id: genId("e"), source: p.source, target: p.target, sourceHandle: "__seqOut", targetHandle: "__seqIn", kind: "seq", class: "seq" }];
+      dirty = true;
+      return;
+    }
     const sMeta = typeMap[src.type], tMeta = typeMap[tgt.type];
     if (!sMeta || !tMeta) return;
     const outs = sMeta.outputs ?? [];
@@ -158,11 +185,13 @@
     if (!o || !i) return;
     if (!canConnect(o.type, i.type)) { showToast(`类型不兼容：${o.type} → ${i.type}`); return; }
     if (edges.some(e => e.target === tgt.id && e.targetHandle === i.id)) { showToast(`输入 ${tgt.id}.${i.id} 已有连线`); return; }
-    edges = [...edges, { id: genId("e"), source: p.source, target: p.target, sourceHandle: o.id, targetHandle: i.id, animated: true }];
+    edges = [...edges, { id: genId("e"), source: p.source, target: p.target, sourceHandle: o.id, targetHandle: i.id }];
     dirty = true;
   }
-  function onNodesDelete() { dirty = true; }
-  function onEdgesDelete() { dirty = true; }
+  /** @param {{ nodes: any[], edges: any[] }} m xyflow 内置删除键（DEL/Backspace）触发 */
+  function onDelete({ nodes: delNodes, edges: delEdges }) {
+    if (delNodes.length || delEdges.length) dirty = true;
+  }
   function onMoveEnd() { if (Date.now() > ignoreDirtyUntil) dirty = true; }
 
   // ── 路径高亮（悬停任务 / 定义任务）────
@@ -170,6 +199,15 @@
   $effect(() => {
     const p = activePath ?? [];
     ui.pathHighlight = Object.fromEntries(p.map((id, i) => [id, i + 1]));
+  });
+
+  // 连线动画跟随选中：仅与选中节点相连（或被选中）的数据边播放虚线动画；顺序边恒为静态。
+  // EdgeWrapper 只响应 edge 对象引用变化，因此必须整组替换对象，不能就地改属性。
+  $effect(() => {
+    const anim = e => e.kind !== "seq" && (selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target) || !!e.selected);
+    if (edges.some(e => !!e.animated !== anim(e))) {
+      edges = edges.map(e => ({ ...e, animated: anim(e) }));
+    }
   });
 
   // ── 任务运行 ────
@@ -252,15 +290,14 @@
   </div>
 
   <div class="main">
-    <Palette {metas} onadd={addNode} />
     <div class="canvas">
       <SvelteFlow
         bind:nodes bind:edges
         nodeTypes={components}
         onnodeclick={onNodeClick}
         onconnect={onConnect}
-        onnodesdelete={onNodesDelete}
-        onedgesdelete={onEdgesDelete}
+        ondelete={onDelete}
+        deleteKey={["Backspace", "Delete"]}
         onmoveend={onMoveEnd}
         fitView
         minZoom={0.15} maxZoom={2}
@@ -270,6 +307,8 @@
         <Controls />
         <MiniMap nodeColor={n => typeMap[n.type]?.color ?? "#8a97a8"} pannable zoomable />
       </SvelteFlow>
+
+      <Palette {metas} onadd={addNode} />
 
       {#if definer}
         <div class="definer">
@@ -286,9 +325,6 @@
         </div>
       {/if}
     </div>
-    <aside class="right">
-      <Inspector node={selectedNode} meta={selectedMeta} ondata={onData} ondelete={deleteNode} />
-    </aside>
   </div>
 
   <LogDrawer bind:this={logRef} />
@@ -351,7 +387,6 @@
   .mini { padding: 2px 7px; font-size: 11px; }
   .main { flex: 1; display: flex; min-height: 0; }
   .canvas { flex: 1; position: relative; min-width: 0; }
-  .right { width: 300px; flex: none; border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
   .definer { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 10; background: var(--panel);
     border: 1px solid var(--warn); border-radius: 10px; padding: 10px 14px; font-size: 13px; }
   .definer .chips { margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px; }

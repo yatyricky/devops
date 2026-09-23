@@ -98,6 +98,155 @@ await test("路径执行: 输入依赖主路径更晚节点 → 运行时报错"
     );
 });
 
+// ── 顺序边 ────
+await test("图校验: 顺序边 handle 非法 / 与任务路径顺序矛盾被拒", () => {
+    const doc = {
+        name: "q",
+        nodes: [
+            { id: "a", type: "log.print", position: [0, 0], data: {} },
+            { id: "b", type: "log.print", position: [100, 0], data: {} },
+        ],
+        edges: [{ id: "s1", kind: "seq", source: "a", sourceHandle: "__seqOut", target: "b", targetHandle: "__seqIn" }],
+        tasks: { t: { label: "t", mutates: false, path: ["a", "b"] } },
+    };
+    assert.strictEqual(validateWorkflow(doc).length, 0, "保序顺序边应通过");
+    const bad = validateWorkflow({ ...doc, tasks: { t: { label: "t", mutates: false, path: ["b", "a"] } } });
+    assert.ok(bad.some(p => p.includes("顺序矛盾")), bad.join("; "));
+    const badHandle = validateWorkflow({ ...doc, edges: [{ id: "s1", kind: "seq", source: "a", sourceHandle: "value", target: "b", targetHandle: "__seqIn" }] });
+    assert.ok(badHandle.some(p => p.includes("handle 非法")), badHandle.join("; "));
+});
+
+// ── git.checkout 切换分支 ────
+await test("注册表: git.checkout 输入 folder/string、输出 original(string)", () => {
+    const d = NODE_TYPES["git.checkout"];
+    assert.ok(d, "git.checkout 已注册");
+    assert.deepStrictEqual(d.inputs.map(i => [i.id, i.type]), [["repoDir", "folder"], ["ref", "string"]]);
+    assert.deepStrictEqual(d.outputs.map(o => [o.id, o.type]), [["original", "string"]]);
+});
+
+await test("git.checkout 执行: 切换输出 original；original 链式切回；未知 ref 拒绝", async () => {
+    const { executeTask } = await import("../engine/workflow.js");
+    const os = await import("os");
+    const fsp = await import("fs/promises");
+    const execFileSync = (await import("child_process")).execFileSync;
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "gco-"));
+    const sh = c => execFileSync(c, { cwd: dir, shell: true, stdio: "pipe" });
+    sh("git init");
+    sh("git config user.email t@t");
+    sh("git config user.name t");
+    fs.writeFileSync(path.join(dir, "f.txt"), "x");
+    sh("git add .");
+    sh("git commit -m init");
+    sh("git branch v1");
+    const mainBranch = execFileSync("git rev-parse --abbrev-ref HEAD", { cwd: dir, encoding: "utf8", shell: true }).trim();
+    try {
+        const doc = {
+            name: "gco-t",
+            nodes: [
+                { id: "p", type: "fs.path", position: [0, 0], data: { path: dir } },
+                { id: "c1", type: "git.checkout", position: [0, 0], data: {} },
+                { id: "c2", type: "git.checkout", position: [0, 0], data: {} },
+                { id: "ref1", type: "string.const", position: [0, 0], data: { value: "v1" } },
+                { id: "ref2", type: "string.const", position: [0, 0], data: { value: mainBranch } },
+            ],
+            edges: [
+                { id: "e0", source: "p", sourceHandle: "dir", target: "c1", targetHandle: "repoDir" },
+                { id: "e1", source: "p", sourceHandle: "dir", target: "c2", targetHandle: "repoDir" },
+                { id: "e2", source: "ref1", sourceHandle: "value", target: "c1", targetHandle: "ref" },
+                { id: "s1", kind: "seq", source: "c1", sourceHandle: "__seqOut", target: "c2", targetHandle: "__seqIn" },
+                { id: "e3", source: "c1", sourceHandle: "original", target: "c2", targetHandle: "ref" },
+            ],
+            tasks: { t: { label: "t", mutates: false, path: ["p", "c1", "c2"] } },
+        };
+        const lines = [];
+        // 真实执行（非 dry-run）：临时仓库，验证真正 checkout 与链式切回
+        await executeTask({ log: m => lines.push(String(m)), dryRun: false, inputs: {}, mask: s => s }, doc, "t");
+        const text = lines.join("\n");
+        assert.ok(text.includes(`[git.checkout] ${mainBranch} → v1`), "切换到 v1", text);
+        assert.ok(text.includes(`[git.checkout] v1 → ${mainBranch}`), "经 original 链式切回", text);
+
+        await assert.rejects(
+            () => executeTask(
+                { log: () => {}, dryRun: true, inputs: {}, mask: s => s },
+                { ...doc, nodes: [...doc.nodes, { id: "bad", type: "git.checkout", position: [0, 0], data: {} }], edges: [...doc.edges, { id: "e4", source: "ref2", sourceHandle: "value", target: "bad", targetHandle: "ref" }], tasks: { t: { label: "t", mutates: false, path: ["bad"] } } },
+                "t",
+            ),
+            /未连接仓库目录|not a git repository|did not match|unknown revision/i,
+        );
+    } finally {
+        await fsp.rm(dir, { recursive: true, force: true });
+    }
+});
+
+// ── fs.path 输入路径节点 ────
+await test("注册表: fs.path 输出 folder/file 双插槽；folder 类型连线规则", () => {
+    const d = NODE_TYPES["fs.path"];
+    assert.ok(d, "fs.path 已注册");
+    assert.deepStrictEqual(d.outputs.map(o => o.type), ["folder", "file"]);
+    assert.ok(canConnect("folder", "folder"), "folder→folder");
+    assert.ok(canConnect("folder", "any"), "folder→any");
+    assert.ok(!canConnect("folder", "string"), "folder 不静默转 string");
+    assert.ok(!canConnect("file", "folder"), "file/folder 严格区分");
+});
+
+await test("fs.path 执行: 文件夹/文件分别从 dir/file 输出；路径不存在抛错", async () => {
+    const { executeTask } = await import("../engine/workflow.js");
+    const os = await import("os");
+    const fsp = await import("fs/promises");
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "fspath-"));
+    const fp = path.join(dir, "a.txt");
+    await fsp.writeFile(fp, "hello");
+    try {
+        const doc = {
+            name: "fs-t",
+            nodes: [
+                { id: "pd", type: "fs.path", position: [0, 0], data: { path: dir } },
+                { id: "pf", type: "fs.path", position: [0, 0], data: { path: fp } },
+                { id: "miss", type: "fs.path", position: [0, 0], data: { path: path.join(dir, "missing") } },
+            ],
+            edges: [],
+            tasks: { t: { label: "t", mutates: false, path: ["pd", "pf"] } },
+        };
+        /** @type {string[]} */
+        const lines = [];
+        await executeTask({ log: m => lines.push(String(m)), dryRun: true, inputs: {}, mask: s => s }, doc, "t");
+        const text = lines.join("\n");
+        assert.ok(text.includes("→ 文件夹"), "目录识别", text);
+        assert.ok(text.includes("→ 文件"), "文件识别", text);
+        await assert.rejects(
+            () => executeTask({ log: () => {}, dryRun: true, inputs: {}, mask: s => s }, { ...doc, tasks: { t: { label: "t", mutates: false, path: ["miss"] } } }, "t"),
+            /路径不存在/,
+        );
+    } finally {
+        await fsp.rm(dir, { recursive: true, force: true });
+    }
+});
+
+// ── git.getRefs ────
+await test("注册表: git.getRefs 输入 folder、输出 string、refsPicker 标志", () => {
+    const d = NODE_TYPES["git.getRefs"];
+    assert.ok(d?.refsPicker, "refsPicker 标志");
+    assert.deepStrictEqual(d.inputs, [{ id: "repoDir", type: "folder", required: true }]);
+    assert.strictEqual(d.outputs[0].id, "ref");
+    assert.strictEqual(d.outputs[0].type, "string");
+});
+
+await test("git.getRefs 执行: 输出所选 ref", async () => {
+    const { executeTask } = await import("../engine/workflow.js");
+    const doc = {
+        name: "refs-t",
+        nodes: [
+            { id: "p", type: "fs.path", position: [0, 0], data: { path: path.resolve(__dirname, "..") } },
+            { id: "g", type: "git.getRefs", position: [0, 0], data: { ref: "v1.0" } },
+        ],
+        edges: [{ id: "e", source: "p", sourceHandle: "dir", target: "g", targetHandle: "repoDir" }],
+        tasks: { t: { label: "t", mutates: false, path: ["p", "g"] } },
+    };
+    const lines = [];
+    await executeTask({ log: m => lines.push(String(m)), dryRun: true, inputs: {}, mask: s => s }, doc, "t");
+    assert.ok(lines.some(l => l.includes("ref = v1.0")), lines.join("\n"));
+});
+
 // ── 掩码 ────
 await test("日志掩码: SECRET/TOKEN/PASSWORD 值打码", () => {
     assert.strictEqual(maskLine("JWT_SECRET=abc123 xyz"), "JWT_SECRET=*** xyz");
@@ -107,8 +256,12 @@ await test("日志掩码: SECRET/TOKEN/PASSWORD 值打码", () => {
 
 // ── 三个迁移工作流 ────
 const rows = loadWorkflows();
-assert.strictEqual(rows.filter(w => w.doc).length, 3, "应加载 3 个工作流");
-await test("工作流: 三个节点图加载校验通过", () => {});
+assert.ok(rows.length >= 3 && rows.every(w => w.doc),
+    "全部注册工作流应加载通过: " + rows.filter(w => !w.doc).map(w => `${w.path}: ${w.error}`).join("; "));
+for (const n of ["kids-ledger", "xlgbis-ls", "xlgbis-bs"]) {
+    assert.ok(findWorkflow(n)?.doc, `${n} 应加载成功`);
+}
+await test("工作流: 全部注册工作流加载校验通过（含三个迁移工作流）", () => {});
 
 /**
  * @param {string} wfName

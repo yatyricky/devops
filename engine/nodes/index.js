@@ -58,6 +58,9 @@ export function nodeTypesMeta() {
         inputs: d.inputs ?? [],
         outputs: d.outputs ?? [],
         widgets: d.widgets ?? [],
+        ...(d.pathStat ? { pathStat: true } : {}),
+        ...(d.refsPicker ? { refsPicker: true } : {}),
+        ...(d.outputValueKey ? { outputValueKey: d.outputValueKey } : {}),
         ...(d.dynamicInputs ? { dynamicInputs: d.dynamicInputs } : {}),
     }));
 }
