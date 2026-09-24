@@ -44,10 +44,11 @@ function substitute(text, inputs) {
 export default [
     {
         type: "ssh.session",
+        desc: "建立 SSH 会话（SHA256 指纹锁定，agent/私钥认证），输出 ssh 供全部远端节点使用。",
         title: "SSH 会话",
         category: "远端",
         color: "#ff9e64",
-        inputs: [{ id: "env", type: "env", required: true }],
+        inputs: [{ id: "env", type: "struct", required: true }],
         outputs: [{ id: "ssh", type: "ssh" }],
         widgets: [],
         async run(ctx, node, inputs) {
@@ -68,6 +69,7 @@ export default [
     },
     {
         type: "ssh.exec",
+        desc: "远端逐行执行命令：{{name}} 占位符自动生成输入口，值自动安全加引号；sudo 与登录 shell 可开关。",
         title: "SSH 命令",
         category: "远端",
         color: "#ff9e64",
@@ -96,6 +98,7 @@ export default [
     },
     {
         type: "ssh.upload",
+        desc: "上传本机文件到远端路径；登记 trap——任务结束无论成败都删除远端文件。",
         title: "上传文件",
         category: "远端",
         color: "#ff9e64",
@@ -119,6 +122,7 @@ export default [
     },
     {
         type: "remote.extract",
+        desc: "原子解压发布：解压到隐藏 .tmp → 逐个校验 expect → mv 成正式 release；失败自清 .tmp。",
         title: "原子解压发布",
         category: "远端",
         color: "#ff9e64",
@@ -177,6 +181,7 @@ export default [
     },
     {
         type: "remote.deps",
+        desc: "在远端目录安装生产依赖（npm ci --omit=dev 或 pnpm install --prod）。",
         title: "安装生产依赖",
         category: "远端",
         color: "#ff9e64",
@@ -202,6 +207,7 @@ export default [
     },
     {
         type: "remote.chown",
+        desc: "递归修改远端路径属主（sudo 可关）。",
         title: "修改属主",
         category: "远端",
         color: "#ff9e64",
@@ -221,6 +227,7 @@ export default [
     },
     {
         type: "remote.symlink",
+        desc: "远端 ln -sfn 切换符号链接（发布/回滚的核心动作）。",
         title: "符号链接切换",
         category: "远端",
         color: "#ff9e64",
@@ -240,6 +247,7 @@ export default [
     },
     {
         type: "remote.service",
+        desc: "systemd 动作：restart 附带 daemon-reload + reset-failed + 状态查看；失败即任务失败。",
         title: "systemd 服务",
         category: "远端",
         color: "#ff9e64",
@@ -281,6 +289,7 @@ export default [
     },
     {
         type: "remote.check",
+        desc: "远端只读命令 + 断言正则：对合并输出做匹配，不匹配即任务失败（如版本预检）。",
         title: "只读检查",
         category: "远端",
         color: "#ff9e64",

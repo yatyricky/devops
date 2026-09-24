@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * 节点图模型自检：类型系统/图校验/路径执行器/prod 门禁/掩码 + 三个迁移工作流的 dry-run 端到端断言。
- * 全绿输出 OK；任一断言失败非零退出。
- * 三个工作流的 deploy dry-run 会真实 git fetch 对应仓库（只读）。
+ * 节点图模型自检：类型系统/图校验/任务子图（选点 → DAG）/并发调度/prod 门禁（struct）/掩码
+ * + struct 构造析构与动态出口断言。全绿输出 OK；任一断言失败非零退出。
+ * 旧 wf 已存档 workflows/_attic/（等重写），本套件自带 fixture，不依赖 envs/。
  */
 import assert from "assert";
 import path from "path";
 import url from "url";
 import { canConnect } from "../engine/types.js";
 import { validateWorkflow } from "../engine/workflow.js";
-import { NODE_TYPES, getInputs } from "../engine/nodes/index.js";
-import { loadWorkflows, findWorkflow } from "../engine/registry.js";
-import { enqueueWorkflowTask, getRun, maskLine, ENVS_DIR } from "../engine/runner.js";
+import { NODE_TYPES, getInputs, getOutputs } from "../engine/nodes/index.js";
+import { loadWorkflows } from "../engine/registry.js";
+import { enqueueWorkflowTask, getRun, maskLine, ROOT } from "../engine/runner.js";
 import fs from "fs";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
@@ -25,14 +25,15 @@ async function test(name, fn) {
 }
 
 // ── 类型系统 ────
-await test("类型: 同型可连，env→any 放行，any→具体/跨具体类型拒绝", () => {
-    assert.ok(canConnect("env", "env"));
-    assert.ok(canConnect("env", "any"));
+await test("类型: 同型可连，struct→any 放行，any→具体/跨具体类型拒绝", () => {
+    assert.ok(canConnect("struct", "struct"));
+    assert.ok(canConnect("struct", "any"));
     assert.ok(canConnect("string", "any"));
     assert.ok(!canConnect("any", "string"), "any 输出不可入 string 输入");
-    assert.ok(!canConnect("string", "env"), "string 不可入 env");
+    assert.ok(!canConnect("string", "struct"), "string 不可入 struct");
     assert.ok(!canConnect("file", "string"), "file/string 严格区分");
-    assert.ok(!canConnect("ssh", "env"));
+    assert.ok(!canConnect("ssh", "struct"));
+    assert.ok(!canConnect("string", "number"), "number 输入只收 number");
 });
 
 // ── 节点注册表 ────
@@ -290,10 +291,10 @@ await test("git.checkout 执行: 切换输出 original；original 链式切回�
 });
 
 // ── fs.path 输入路径节点 ────
-await test("注册表: fs.path 输出 folder/file 双插槽；folder 类型连线规则", () => {
+await test("注册表: fs.path 动态出口标志 + folder 类型连线规则", () => {
     const d = NODE_TYPES["fs.path"];
     assert.ok(d, "fs.path 已注册");
-    assert.deepStrictEqual(d.outputs.map(o => o.type), ["folder", "file"]);
+    assert.strictEqual(d.dynamicOutputs, "fsPath", "动态出口规则");
     assert.ok(canConnect("folder", "folder"), "folder→folder");
     assert.ok(canConnect("folder", "any"), "folder→any");
     assert.ok(!canConnect("folder", "string"), "folder 不静默转 string");
@@ -368,7 +369,7 @@ await test("git.getRefs 执行: 输出所选 ref", async () => {
             { id: "g", type: "git.getRefs", position: [0, 0], data: { ref: "v1.0" } },
         ],
         edges: [{ id: "e", source: "p", sourceHandle: "dir", target: "g", targetHandle: "repoDir" }],
-        tasks: { t: { label: "t", mutates: false, path: ["p", "g"] } },
+        tasks: { t: { label: "t", mutates: false, nodes: ["p", "g"] } },
     };
     const lines = [];
     await executeTask({ log: m => lines.push(String(m)), dryRun: true, inputs: {}, mask: s => s }, doc, "t");
@@ -382,96 +383,107 @@ await test("日志掩码: SECRET/TOKEN/PASSWORD 值打码", () => {
     assert.strictEqual(maskLine("DOMAIN=x"), "DOMAIN=x");
 });
 
-// ── 三个迁移工作流 ────
-const rows = loadWorkflows();
-assert.ok(rows.length >= 3 && rows.every(w => w.doc),
-    "全部注册工作流应加载通过: " + rows.filter(w => !w.doc).map(w => `${w.path}: ${w.error}`).join("; "));
-for (const n of ["kids-ledger", "xlgbis-ls", "xlgbis-bs"]) {
-    assert.ok(findWorkflow(n)?.doc, `${n} 应加载成功`);
-}
-await test("工作流: 全部注册工作流加载校验通过（含三个迁移工作流）", () => {});
+// ── struct 构造/析构 + 动态出口 ────
+const structMake = { id: "m", type: "struct.make", position: [0, 0], data: { fields: [
+    { key: "SERVER_TYPE", type: "string", value: "prod" },
+    { key: "PORT", type: "number", value: "3000" },
+] } };
 
-// ── env fixture：缺失时按 env.file 节点 schema 生成占位（envs/ 已 gitignore；真实值请自行替换）────
-function ensureEnvFixture(wfName) {
-    const wf = findWorkflow(wfName);
-    const envNode = wf.doc.nodes.find(n => n.type === "env.file" && n.data?.envFile);
-    if (!envNode) return;
-    const fp = path.isAbsolute(envNode.data.envFile) ? envNode.data.envFile : path.join(ENVS_DIR, envNode.data.envFile);
-    if (fs.existsSync(fp)) return;
-    const schema = envNode.data.schema ?? {};
-    // kids-ledger 用 prod：prod 门禁断言依赖它
-    const serverType = wfName === "kids-ledger" ? "prod" : "test";
-    const lines = [
-        "# verify 占位 env（自动生成，仅支撑 dry-run；真实值请自行填写）",
-        `SERVER_TYPE=${serverType}`,
-        ...Object.entries(schema).filter(([k]) => k !== "SERVER_TYPE").map(([k, v]) => `${k}=${v}`),
-    ];
-    fs.mkdirSync(path.dirname(fp), { recursive: true });
-    fs.writeFileSync(fp, lines.join("\n") + "\n", "utf8");
-    console.log(`  [fixture] 生成占位 ${fp}（SERVER_TYPE=${serverType}）`);
-}
-for (const n of ["kids-ledger", "xlgbis-ls", "xlgbis-bs"]) ensureEnvFixture(n);
-
-/**
- * @param {string} wfName
- * @param {string} task
- * @param {Record<string, string>} [inputs]
- * @returns {Promise<any>} run
- */
-async function runDry(wfName, task, inputs = {}) {
-    const wf = findWorkflow(wfName);
-    const { id } = enqueueWorkflowTask(wf.doc, wf.path, task, { dryRun: true, inputs });
-    for (;;) {
-        const run = getRun(id);
-        if (run && (run.status === "ok" || run.status === "failed")) return run;
-        await new Promise(r => setTimeout(r, 150));
-    }
-}
-
-const klDeploy = await runDry("kids-ledger", "deploy");
-await test("kids-ledger deploy dry-run: 成功且计划含关键远端命令", () => {
-    assert.strictEqual(klDeploy.status, "ok", klDeploy.error);
-    const text = klDeploy.logLines.map(l => l.msg).join("\n");
-    assert.ok(text.includes("pnpm install --frozen-lockfile"), "本地构建");
-    assert.ok(text.includes("sudo -n tar -xzf"), "原子解压");
-    assert.ok(text.includes("state/data"), "持久数据软链");
-    assert.ok(text.includes("healthcheck"), "健康检查");
-    assert.ok(text.includes("head -n -5"), "保留 5 个 release");
-    assert.ok(!/\{\{\w+/.test(text.replace(/dry-run] .*生成输入插槽.*/g, "")) || true);
+await test("注册表: struct.make fieldInputs 动态输入与 struct 输出", () => {
+    const inputs = getInputs(structMake);
+    assert.deepStrictEqual(inputs.map(i => `${i.id}:${i.type}:${i.required ? "必填" : "可选"}`), ["SERVER_TYPE:string:可选", "PORT:number:可选"]);
+    assert.deepStrictEqual(getOutputs(structMake), [{ id: "struct", type: "struct" }]);
+    assert.ok(NODE_TYPES["struct.make"].fieldInputs, "fieldInputs 标志");
 });
 
-const klApply = await runDry("kids-ledger", "apply-config");
-await test("kids-ledger apply-config dry-run: 模板渲染无残留占位符", () => {
-    assert.strictEqual(klApply.status, "ok", klApply.error);
-    const text = klApply.logLines.map(l => l.msg).join("\n");
-    const domain = fs.readFileSync(path.join(ENVS_DIR, "kids-ledger.env"), "utf8").match(/^DOMAIN=(.*)$/m)?.[1];
-    assert.ok(domain && text.includes(`server_name ${domain}`), `nginx 域名（${domain}）`);
-    assert.ok(text.includes("ExecStart=/usr/bin/node server/index.js"), "systemd 单元");
+await test("动态出口 fsPath: 合法文件夹/文件/不存在 三态", () => {
+    const dirDoc = { nodes: [{ id: "f", type: "fs.path", position: [0, 0], data: { path: ROOT } }], edges: [] };
+    assert.deepStrictEqual(getOutputs(dirDoc.nodes[0], dirDoc), [{ id: "dir", type: "folder" }]);
+    const fileDoc = { nodes: [{ id: "f", type: "fs.path", position: [0, 0], data: { path: path.join(ROOT, "package.json") } }], edges: [] };
+    assert.deepStrictEqual(getOutputs(fileDoc.nodes[0], fileDoc), [{ id: "file", type: "file" }]);
+    const noneDoc = { nodes: [{ id: "f", type: "fs.path", position: [0, 0], data: { path: "Z:/definitely-missing-xyz" } }], edges: [] };
+    assert.deepStrictEqual(getOutputs(noneDoc.nodes[0], noneDoc), []);
 });
 
-const lsServer = await runDry("xlgbis-ls", "deploy-server");
-await test("xlgbis-ls deploy-server dry-run: 暂存+服务端 env+双目录装依赖", () => {
-    assert.strictEqual(lsServer.status, "ok", lsServer.error);
-    const text = lsServer.logLines.map(l => l.msg).join("\n");
-    assert.ok(text.includes("login-server→login-server, packages/common→packages/common"), "暂存");
-    assert.ok(text.includes("pnpm install --prod --frozen-lockfile"), "服务器装依赖");
-    assert.ok(text.includes("server-release"), "兼容既有 server-release 布局");
+await test("动态出口 structSplit: 回溯上游构造器字段；未接线为空", () => {
+    const doc = {
+        nodes: [structMake, { id: "s", type: "struct.split", position: [0, 0], data: {} }],
+        edges: [{ id: "e", source: "m", target: "s", sourceHandle: "struct", targetHandle: "struct" }],
+    };
+    assert.deepStrictEqual(getOutputs(doc.nodes[1], doc), [
+        { id: "SERVER_TYPE", type: "string" },
+        { id: "PORT", type: "number" },
+    ]);
+    assert.deepStrictEqual(getOutputs(doc.nodes[1], { nodes: doc.nodes, edges: [] }), []);
 });
 
-const bsRollback = await runDry("xlgbis-bs", "rollback-client", { release: "test-rel-1" });
-await test("xlgbis-bs rollback-client dry-run: release 输入贯通到软链", () => {
-    assert.strictEqual(bsRollback.status, "ok", bsRollback.error);
-    const text = bsRollback.logLines.map(l => l.msg).join("\n");
-    assert.ok(text.includes("client-release/test-rel-1"), "release 名注入");
-    assert.ok(text.includes("systemctl reload"), "nginx reload");
+await test("struct 执行: 连线字段覆盖手填值 + number 类型矫正", async () => {
+    const { executeTask } = await import("../engine/workflow.js");
+    const doc = {
+        name: "st", nodes: [
+            { id: "c", type: "string.const", position: [0, 0], data: { value: "wired" } },
+            { id: "m", type: "struct.make", position: [0, 0], data: { fields: [
+                { key: "a", type: "string", value: "manual" },
+                { key: "n", type: "number", value: "5" },
+            ] } },
+            { id: "s", type: "struct.split", position: [0, 0], data: {} },
+            { id: "p", type: "log.print", position: [0, 0], data: {} },
+            { id: "p2", type: "log.print", position: [0, 0], data: {} },
+        ],
+        edges: [
+            { id: "e1", source: "c", sourceHandle: "value", target: "m", targetHandle: "a" },
+            { id: "e2", source: "m", sourceHandle: "struct", target: "s", targetHandle: "struct" },
+            { id: "e3", source: "s", sourceHandle: "a", target: "p", targetHandle: "value" },
+            { id: "e4", source: "s", sourceHandle: "n", target: "p2", targetHandle: "value" },
+        ],
+        tasks: { t: { label: "t", mutates: false, nodes: ["c", "m", "s", "p", "p2"] } },
+    };
+    /** @type {string[]} */
+    const lines = [];
+    await executeTask({ log: m => lines.push(String(m)), dryRun: false, inputs: {}, mask: s => s }, doc, "t");
+    const text = lines.join("\n");
+    assert.ok(text.includes("wired"), "连线字段覆盖手填值", text);
+    assert.ok(!text.includes("manual"), "手填值应被覆盖", text);
+    assert.ok(lines.some(l => String(l).trim() === "5"), "number 字段经析构器输出后可取用", text);
 });
 
-// ── prod 门禁 ────
-await test("prod 门禁: 无 confirmProd 的变更任务被拒（dry-run 放行）", async () => {
-    const wf = findWorkflow("kids-ledger"); // envs/kids-ledger.env SERVER_TYPE=prod
-    assert.throws(() => enqueueWorkflowTask(wf.doc, wf.path, "deploy", {}), /Refusing to run deploy on prod/);
-    const { id } = enqueueWorkflowTask(wf.doc, wf.path, "deploy", { dryRun: true });
+await test("图校验: struct.make 字段 key 非法/重复/类型枚举被拒", () => {
+    const problems = validateWorkflow({
+        name: "t", nodes: [
+            { id: "m", type: "struct.make", position: [0, 0], data: { fields: [
+                { key: "ok", type: "string", value: "" },
+                { key: "ok", type: "string", value: "" },
+                { key: "bad key", type: "string", value: "" },
+                { key: "t", type: "object", value: "" },
+            ] } },
+        ],
+        edges: [],
+        tasks: {},
+    });
+    assert.match(problems.join("; "), /字段 key 重复/);
+    assert.match(problems.join("; "), /字段 key 非法/);
+    assert.match(problems.join("; "), /类型非法/);
+});
+
+await test("prod 门禁: struct SERVER_TYPE=prod 需确认（dry-run 放行）", () => {
+    const doc = {
+        name: "gate", nodes: [
+            structMake,
+            { id: "lg", type: "log.print", position: [0, 0], data: {} },
+        ],
+        edges: [{ id: "e", source: "m", sourceHandle: "struct", target: "lg", targetHandle: "value" }],
+        tasks: { deploy: { label: "deploy", mutates: true, nodes: ["m", "lg"] } },
+    };
+    assert.throws(
+        () => enqueueWorkflowTask(doc, path.join(ROOT, "gate.json"), "deploy", {}),
+        /Refusing to run deploy on prod/,
+    );
+    const { id } = enqueueWorkflowTask(doc, path.join(ROOT, "gate.json"), "deploy", { dryRun: true });
     assert.ok(getRun(id));
+});
+
+await test("注册表: 工作流加载器正常（旧 wf 已存档 _attic，等待重写）", () => {
+    assert.ok(Array.isArray(loadWorkflows()));
 });
 
 console.log(`\nOK: ${passed} 项断言全部通过`);

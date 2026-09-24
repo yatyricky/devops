@@ -9,9 +9,9 @@
 ## 核心概念
 
 1. **一个 workflow = 一张节点图**（`workflow.json`，可放磁盘任意位置）
-2. **节点有严格类型化插槽**：`env / ssh / file / string / number / boolean / any`，类型不匹配的连线在编辑与保存时都会被拒绝
-3. **任务 = 图中一条路径**：如 `env → git → build → pack → upload → extract → deps → symlink → service`；也可短到 `env → ssh → symlink`（回滚）
-4. **env 文件、params、运行时输入都是节点**（`env.file` / `params` / `task.input`），与其余节点平权
+2. **节点有严格类型化插槽**：`struct / ssh / file / folder / string / number / boolean / any`，类型不匹配的连线在编辑与保存时都会被拒绝
+3. **任务 = 从图中选出的节点子图**（顺序无关，构成 1 个或多个 DAG；独立分支并发执行）：如 `struct(env) → git → build → pack → upload → extract → deps → symlink → service`；回滚可短到 `struct → ssh → symlink`
+4. **Struct 构造器/析构器**：字段（key + 类型 + 值）直接定义在图里，每个字段生成同名输入口（连线后手填失效）；析构器按上游字段自动生成出口。**workflow JSON 本身即机密文件——放在安全处，勿提交公共仓库**
 5. **SSH 命令节点支持动态插槽**：命令里写 `{{name}}` 生成 string 输入插槽、`{{env.KEY}}` 直连 env 节点取值，值自动 shell 引号包裹
 
 ## 快速开始
@@ -20,8 +20,6 @@
 npm install
 npm -C web install && npm -C web run build   # 构建画布前端
 
-# 1) 复制环境文件并填写真实值
-cp envs/kids-ledger.example.env envs/kids-ledger.env
 
 # 2) 启动（默认 http://127.0.0.1:3010）
 node index.js          # 或 start.cmd

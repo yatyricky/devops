@@ -12,8 +12,7 @@ import { loadUiConfig, rememberWorkflow, forgetWorkflow } from "./engine/config.
 import { loadWorkflows, findWorkflow } from "./engine/registry.js";
 import { nodeTypesMeta } from "./engine/nodes/index.js";
 import { loadWorkflow, validateWorkflow } from "./engine/workflow.js";
-import { enqueueWorkflowTask, listRuns, getRun, getCurrentJob, ENVS_DIR as ROOT_ENVS } from "./engine/runner.js";
-import { rawParse } from "./engine/env.js";
+import { enqueueWorkflowTask, listRuns, getRun, getCurrentJob } from "./engine/runner.js";
 import { getRefs } from "./engine/gitops.js";
 import { expandHome } from "./engine/exec.js";
 
@@ -38,16 +37,13 @@ app.use("/api", (req, res, next) => {
 app.get("/api/workflows", (req, res) => {
     res.json(loadWorkflows().map(w => {
         if (!w.doc) return { path: w.path, error: w.error };
-        // 首个 env.file 节点的 SERVER_TYPE（GUI 徽标与 prod 门禁提示）
+        // 任务子图内 struct 构造器的 SERVER_TYPE 字段（GUI 徽标与 prod 门禁提示）
         let serverType = "";
         const taskNodeIds = Object.values(w.doc.tasks).flatMap(t => /** @type {any} */(t).nodes ?? /** @type {any} */(t).path ?? []);
-        const envNode = taskNodeIds
+        const svNode = taskNodeIds
             .map(id => w.doc.nodes.find(n => n.id === id))
-            .find(n => n?.type === "env.file" && n.data?.envFile);
-        if (envNode) {
-            const fp = path.isAbsolute(envNode.data.envFile) ? envNode.data.envFile : path.join(ROOT_ENVS, envNode.data.envFile);
-            try { serverType = rawParse(fp).SERVER_TYPE ?? ""; } catch { /* 未知 */ }
-        }
+            .find(n => n?.type === "struct.make" && (n.data?.fields ?? []).some(f => f.key === "SERVER_TYPE"));
+        if (svNode) serverType = String(svNode.data.fields.find(f => f.key === "SERVER_TYPE")?.value ?? "");
         return {
             path: w.path,
             name: w.doc.name,

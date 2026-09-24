@@ -13,6 +13,7 @@ import { ROOT, TMP_DIR } from "../runner.js";
 export default [
     {
         type: "git.ref",
+        desc: "在仓库上计算部署版本：fetch → 按需 checkout 指定 ref → 结束自动恢复原分支。输出版本号/构建时间/release 名。",
         title: "Git 版本",
         category: "版本",
         color: "#f07178",
@@ -40,6 +41,7 @@ export default [
     },
     {
         type: "git.checkout",
+        desc: "切换仓库到指定分支或 tag：输入 repoDir 与 ref，输出切换前的 HEAD（original），可用它链式切回。",
         title: "切换分支",
         category: "版本",
         color: "#f07178",
@@ -72,6 +74,7 @@ export default [
     },
     {
         type: "git.getRefs",
+        desc: "输出一个选定的 ref 名：卡片上点「刷新」拉取分支/tag 下拉来挑选，默认 HEAD。",
         title: "Git Refs",
         category: "版本",
         color: "#f07178",
@@ -87,6 +90,7 @@ export default [
     },
     {
         type: "cmd.exec",
+        desc: "在本机逐行执行命令（dry-run 只打印计划）。输出最后一条命令的 stdout。",
         title: "本地命令",
         category: "构建",
         color: "#4cc38a",
@@ -110,6 +114,7 @@ export default [
     },
     {
         type: "write.env",
+        desc: "把 env 结构按映射（文件键 ← env 键）写成 .env 文件，可注入 VERSION；输出文件路径。",
         title: "生成 .env",
         category: "构建",
         color: "#4cc38a",
@@ -144,6 +149,7 @@ export default [
     },
     {
         type: "stage.copy",
+        desc: "把若干条目复制到一次性暂存目录（按路径段排除），输出暂存目录供打包。",
         title: "暂存复制",
         category: "构建",
         color: "#4cc38a",
@@ -175,6 +181,7 @@ export default [
     },
     {
         type: "tar.pack",
+        desc: "把目录按条目打成 t.gz，输出归档路径与文件名（供上传）。",
         title: "打包 tgz",
         category: "构建",
         color: "#4cc38a",
@@ -208,6 +215,7 @@ export default [
     },
     {
         type: "template.render",
+        desc: "渲染 {{KEY}} 模板文件为渲染产物：\"./\" 相对工作流目录，绝对路径直用，其余相对应用仓库。",
         title: "渲染模板",
         category: "构建",
         color: "#4cc38a",

@@ -2,7 +2,7 @@
   import { getContext, setContext } from "svelte";
   import { SvelteFlow, Background, Controls, MiniMap } from "@xyflow/svelte";
   import { api } from "./api.js";
-  import { canConnect, effectiveInputs, genId, validateTaskSelection } from "./types.js";
+  import { canConnect, effectiveInputs, effectiveOutputs, genId, validateTaskSelection } from "./types.js";
   import { ui } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
   import Palette from "./Palette.svelte";
@@ -31,11 +31,25 @@
   let selectedNodeIds = $derived(new Set(nodes.filter(n => n.selected).map(n => n.id)));
 
   // 节点卡片经 context 拿编辑/删除回调与连线查询（xyflow 自建组件树，props 传不进节点组件）
+  let stats = $state(/** @type {Record<string, any>} */ ({}));
   setContext("devnode-actions", {
     ondata: onData,
     ondelete: deleteNode,
-    isConnected(nodeId, handleId) {
-      return edges.some(e => e.source === nodeId && e.sourceHandle === handleId);
+    /** fs.path 卡片 stat 结果上报（驱动动态出口与边的自动清理）。
+     *  幂等：值未变不更新——stat effect 与 xyflow 节点回写会互相触发，非幂等会造成无限渲染循环。 */
+    onstat(id, st) {
+      const prev = stats[id];
+      if (prev === st || (prev && st && prev.exists === st.exists && prev.isDir === st.isDir)) return;
+      stats = { ...stats, [id]: st };
+    },
+    /** 某输入口是否已连线（struct 字段口连线时隐藏手填控件） */
+    isWiredAsTarget(nodeId, handleId) {
+      return edges.some(e => e.kind !== "seq" && e.target === nodeId && e.targetHandle === handleId);
+    },
+    /** 某输入口的连线源节点（struct.split 回溯上游字段定义用） */
+    getSourceNode(nodeId, handleId) {
+      const e = edges.find(e => e.kind !== "seq" && e.target === nodeId && e.targetHandle === handleId);
+      return nodes.find(n => n.id === e?.source);
     },
     /** 编辑期解析某输入连线的当前值：源节点按 outputValueKey（缺省 sourceHandle 名）取 data 字段 */
     resolveInput(nodeId, handleId) {
@@ -212,6 +226,24 @@
     }
   });
 
+  // ── 动态出口：源节点的有效出口不含某边的 sourceHandle 时，该边自动消失 ────
+  // 例：fs.path 从文件夹改成文件/留空 → folder 出口上的连线随之断开。出口列表未知（[] 由规则明确给出）也删。
+  $effect(() => {
+    const dead = edges.filter(e => {
+      if (e.kind === "seq") return false;
+      const src = nodes.find(n => n.id === e.source);
+      const meta = typeMap[src?.data?.__type ?? src?.type];
+      if (!src || !meta) return false;
+      const outs = effectiveOutputs(meta, src.data, { stat: stats[e.source], edges, nodes, id: e.source });
+      return !outs.some(o => o.id === e.sourceHandle);
+    });
+    if (dead.length) {
+      edges = edges.filter(e => !dead.includes(e));
+      dirty = true;
+      showToast(`已断开 ${dead.length} 条连线（源节点出口已变化）`);
+    }
+  });
+
   // ── 任务运行 ────
   function openRun(taskName) {
     const t = tasks[taskName];
@@ -295,7 +327,9 @@
   </div>
 
   <div class="main">
-    <div class="canvas">
+  <div class="canvas">
+    <!-- key = 工作流路径：每次载入重挂画布，确保内嵌 webview 里节点测量必然完成（修 load 后节点不显示） -->
+    {#key currentPath}
       <SvelteFlow
         bind:nodes bind:edges
         nodeTypes={components}
@@ -312,6 +346,7 @@
         <Controls />
         <MiniMap nodeColor={n => typeMap[n.type]?.color ?? "#8a97a8"} pannable zoomable />
       </SvelteFlow>
+    {/key}
 
       <Palette {metas} onadd={addNode} />
 

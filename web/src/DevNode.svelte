@@ -1,20 +1,31 @@
 <script>
   import { getContext } from "svelte";
   import { Handle, Position } from "@xyflow/svelte";
-  import { TYPE_COLORS, effectiveInputs } from "./types.js";
+  import { TYPE_COLORS, effectiveInputs, effectiveOutputs, pathCheck } from "./types.js";
   import { api } from "./api.js";
   import { ui } from "./store.svelte.js";
 
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
-  const { ondata, ondelete, isConnected, resolveInput } = getContext("devnode-actions");
+  const { ondata, ondelete, onstat, isWiredAsTarget, getSourceNode, resolveInput } = getContext("devnode-actions");
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
   let hl = $derived(ui.pathHighlight[id]);
   let inputs = $derived(effectiveInputs(meta, data));
-  let outputs = $derived(meta?.outputs ?? []);
   let color = $derived(meta?.color ?? "#8a97a8");
   let onPath = $derived(hl === true);
+
+  // ── 动态出口：fsPath 按卡片 stat；structSplit 回溯上游字段定义 ────
+  let stat = $state(null);
+  let outputs = $derived.by(() => {
+    if (!meta) return [];
+    if (meta.dynamicOutputs === "fsPath") return effectiveOutputs(meta, data, { stat });
+    if (meta.dynamicOutputs === "structSplit") {
+      const src = getSourceNode?.(id, "struct");
+      return (src?.data?.fields ?? []).filter(f => f.key).map(f => ({ id: f.key, type: f.type ?? "string" }));
+    }
+    return meta.outputs ?? [];
+  });
 
   // ── widget 编辑（原 Inspector 逻辑上卡片）────
   /** @param {string} k @param {any} v */
@@ -45,15 +56,7 @@
   }
 
   // ── fs.path：路径校验（绝对路径或 ~ 开头，~ = 用户主目录）+ stat 展示 ────
-  function pathCheck(p) {
-    if (!p) return false;
-    const home = /^~(?:[\\/]|$)/.test(p);
-    if (!home && !/^(?:[a-zA-Z]:[\\/]|\\\\)/.test(p)) return false;
-    if (/[<>|"?*\x00-\x1f]/.test(p)) return false;
-    return home || !/[<>:"|?*\x00-\x1f]/.test(p.slice(2));
-  }
   let pathValid = $derived(meta?.pathStat ? pathCheck(String(data?.path ?? "").trim()) : true);
-  let stat = $state(null);
   let statErr = $state("");
   $effect(() => {
     if (!meta?.pathStat) return;
@@ -61,8 +64,17 @@
     stat = null; statErr = "";
     if (!p || !pathCheck(p)) return;
     const t = setTimeout(async () => {
-      try { stat = await api("/api/fs/stat", { method: "POST", body: JSON.stringify({ path: p }) }); }
-      catch (e) { statErr = e.message; }
+      try {
+        // 5s 超时：请求挂死时落到错误提示，不永久停留在「查询中」
+        const s = await api("/api/fs/stat", { method: "POST", body: JSON.stringify({ path: p }), signal: AbortSignal.timeout?.(5000) });
+        if (String(data?.path ?? "").trim() !== p) return; // 路径已变，丢弃过期响应
+        stat = s;
+        onstat?.(id, s);
+      } catch (e) {
+        if (String(data?.path ?? "").trim() !== p) return;
+        statErr = e?.name === "TimeoutError" ? "查询超时" : e.message;
+        onstat?.(id, null);
+      }
     }, 300);
     return () => clearTimeout(t);
   });
@@ -106,13 +118,23 @@
       if (statErr) return statErr;
       if (!stat) return "";
       if (!stat.exists) return "路径不存在";
-      if (stat.isDir && isConnected?.(id, "file")) return "当前为文件夹，但 file 出口已有连线";
-      if (!stat.isDir && isConnected?.(id, "dir")) return "当前为文件，但 dir 出口已有连线";
       return "";
     }
     if (meta?.refsPicker && refsErr) return refsErr;
     return "";
   });
+
+  // ── struct 字段行：值控件按类型变化；字段口连线后隐藏手填 ────
+  const numOk = v => String(v ?? "").trim() !== "" && Number.isFinite(Number(v));
+  /** @param {string} key @param {number} i @param {string} prop @param {any} v */
+  function setField(key, i, prop, v) { set(key, (get(key) ?? []).map((x, j) => j === i ? { ...x, [prop]: v } : x)); }
+  function fieldAdd(key) {
+    const k = String(newVals[key + "#k"] ?? "").trim();
+    if (!k || !/^\w+$/.test(k)) return;
+    const type = newVals[key + "#t"] ?? "string";
+    set(key, [...(get(key) ?? []), { key: k, type, value: type === "boolean" ? false : "" }]);
+    newVals[key + "#k"] = ""; newVals[key + "#t"] = "string";
+  }
 </script>
 
 <div class="devnode" class:selected class:onpath={onPath} class:error={!!cardError}>
@@ -120,6 +142,7 @@
     <span class="htitle">{meta?.title ?? data.__type}</span>
     <button class="del nodrag" title="删除节点" onclick={() => ondelete?.(id)}>✕</button>
   </div>
+  {#if meta?.desc}<div class="ndesc">{meta.desc}</div>{/if}
   <div class="body nowheel">
     {#each inputs as inp (inp.id)}
       <div class="kv in" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}` : undefined}>
@@ -197,6 +220,39 @@
               <span class="trow">
                 <input placeholder="新增条目" bind:value={newVals[w.key]} />
                 <button class="mini" onclick={() => listAdd(w.key)}>＋</button>
+              </span>
+            </span>
+          {:else if w.kind === "struct"}
+            <span class="tblwrap">
+              {#each get(w.key) ?? [] as f, i}
+                <span class="trow">
+                  <input class:winvalid={!/^\w+$/.test(f.key)} placeholder="key" value={f.key}
+                    onchange={e => setField(w.key, i, "key", e.target.value)} />
+                  <select value={f.type} onchange={e => setField(w.key, i, "type", e.target.value)}>
+                    <option value="string">string</option>
+                    <option value="number">number</option>
+                    <option value="boolean">boolean</option>
+                  </select>
+                  {#if isWiredAsTarget?.(id, f.key)}
+                    <span class="wired" title="已连线：该字段值来自上游">🔗</span>
+                  {:else if f.type === "boolean"}
+                    <input type="checkbox" class="ckb" checked={f.value ?? false}
+                      onchange={e => setField(w.key, i, "value", e.target.checked)} />
+                  {:else}
+                    <input class:winvalid={f.type === "number" && !numOk(f.value)} placeholder="值" value={f.value ?? ""}
+                      onchange={e => setField(w.key, i, "value", e.target.value)} />
+                  {/if}
+                  <button class="mini danger" onclick={() => set(w.key, (get(w.key) ?? []).filter((_, j) => j !== i))}>✕</button>
+                </span>
+              {/each}
+              <span class="trow">
+                <input placeholder="key" bind:value={newVals[w.key + "#k"]} />
+                <select bind:value={newVals[w.key + "#t"]}>
+                  <option value="string">string</option>
+                  <option value="number">number</option>
+                  <option value="boolean">boolean</option>
+                </select>
+                <button class="mini" onclick={() => fieldAdd(w.key)}>＋</button>
               </span>
             </span>
           {:else}

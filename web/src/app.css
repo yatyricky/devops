@@ -74,3 +74,8 @@ textarea { font: 12px/1.5 Consolas, monospace; }
   border: 1px solid var(--ok); color: var(--ok); border-radius: 4px; vertical-align: 1px; }
 
 .devnode.onpath { outline: 2px dashed var(--warn); outline-offset: 2px; }
+
+/* 节点类型描述（教程一句话，暗色小字） */
+.devnode .ndesc { padding: 4px 10px 0; font-size: 10px; color: var(--dim); line-height: 1.5; }
+
+.devnode .body .trow .wired { flex: none; font-size: 12px; }

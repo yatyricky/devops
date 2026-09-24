@@ -18,7 +18,7 @@
 **GUI**（`node index.js` → http://127.0.0.1:3010）：
 
 1. 顶部选择工作流（PROD 工作流有 ⚠ 标记）；
-2. 悬停任务按钮可在图上高亮将执行的路径（带序号）；先点开弹窗勾 **dry-run** 看完整计划；
+2. 悬停任务按钮可在图上高亮将执行的节点子图；先点开弹窗勾 **dry-run** 看完整计划；
 3. 正式运行：填 task.input 输入（如 ref / release）；PROD 需输入工作流名确认；
 4. 底部日志抽屉实时滚动，终态 成功/失败；右侧历史（.runs）可回放。
 
@@ -26,7 +26,7 @@
 
 ```bash
 node cli.js list
-node cli.js tasks kids-ledger                     # 查看每个任务的路径
+node cli.js tasks kids-ledger                     # 查看每个任务的节点集合
 node cli.js run kids-ledger deploy --dry-run
 node cli.js run kids-ledger deploy --input ref=master
 node cli.js run xlgbis-ls deploy-server --input ref=v1.2.0

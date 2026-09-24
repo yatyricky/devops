@@ -5,6 +5,7 @@
 export default [
     {
         type: "field.get",
+        desc: "从 any 结构里按字段名取值（输出 string）。字段不存在即报错，防静默空值。",
         title: "取字段",
         category: "工具",
         color: "#8a97a8",
@@ -21,6 +22,7 @@ export default [
     },
     {
         type: "string.const",
+        desc: "输出一个常量字符串。",
         title: "常量",
         category: "工具",
         color: "#c8d3f0",
@@ -33,6 +35,7 @@ export default [
     },
     {
         type: "string.format",
+        desc: "拼接字符串：模板里写 {{name}} 自动生成输入插槽，输出拼接结果。",
         title: "拼接字符串",
         category: "工具",
         color: "#c8d3f0",
@@ -57,6 +60,7 @@ export default [
     },
     {
         type: "log.print",
+        desc: "把输入值打印到任务日志（预览），不产生副作用。",
         title: "打印预览",
         category: "工具",
         color: "#8a97a8",

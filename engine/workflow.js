@@ -2,8 +2,6 @@ import fs from "fs";
 import path from "path";
 import { canConnect, coerce } from "./types.js";
 import { NODE_TYPES, getInputs, getOutputs } from "./nodes/index.js";
-import { loadEnv, rawParse } from "./env.js";
-import { ENVS_DIR } from "./runner.js";
 
 /**
  * workflow.json = 一张节点大图（nodes + edges，元图允许多条备选连线进同一输入）+ 若干命名任务。
@@ -86,6 +84,22 @@ export function validateWorkflow(doc) {
         if (!NODE_TYPES[n.type]) problems.push(`节点 ${n.id} 类型未知: ${n.type}`);
         if (!Array.isArray(n.position) || n.position.length !== 2) problems.push(`节点 ${n.id} 缺少 position [x,y]`);
         if (!n.data || typeof n.data !== "object") problems.push(`节点 ${n.id} 缺少 data 对象`);
+        // struct.make：字段定义合法性（key 供插槽/占位符使用，须为 \w 且唯一）
+        if (n.type === "struct.make" && Array.isArray(n.data.fields)) {
+            const seenKeys = new Set();
+            for (const f of n.data.fields) {
+                if (!f?.key || !/^\w+$/.test(f.key)) {
+                    problems.push(`节点 ${n.id}：字段 key 非法（需非空 \\w）: ${JSON.stringify(f?.key ?? "")}`);
+                } else if (seenKeys.has(f.key)) {
+                    problems.push(`节点 ${n.id}：字段 key 重复: ${f.key}`);
+                } else {
+                    seenKeys.add(f.key);
+                }
+                if (!["string", "number", "boolean"].includes(f?.type)) {
+                    problems.push(`节点 ${n.id}：字段 ${f?.key ?? "?"} 类型非法: ${f?.type}（可用 string/number/boolean）`);
+                }
+            }
+        }
     }
 
     const nodeById = new Map(doc.nodes.filter(n => n?.id).map(n => [n.id, n]));
@@ -103,7 +117,7 @@ export function validateWorkflow(doc) {
         }
         const src = nodeById.get(e.source), tgt = nodeById.get(e.target);
         try {
-            const outs = getOutputs(src);
+            const outs = getOutputs(src, doc);
             const inps = getInputs(tgt);
             const out = e.sourceHandle ? outs.find(o => o.id === e.sourceHandle) : outs[0];
             const inp = e.targetHandle ? inps.find(i => i.id === e.targetHandle) : inps[0];
@@ -185,7 +199,8 @@ export function validateWorkflow(doc) {
 }
 
 /**
- * 任务选中的 env（prod 门禁用；宽松——env 文件缺失/校验失败返回 null）。
+ * 任务选中节点的 SERVER_TYPE（prod 门禁用；来自 struct 构造器的 SERVER_TYPE 字段，
+ * 宽松——没定义或取不到返回 null）。
  * @param {any} doc
  * @param {string} taskName
  */
@@ -194,12 +209,13 @@ export function findTaskEnv(doc, taskName) {
     if (!task) return null;
     for (const id of task.nodes ?? task.path ?? []) {
         const node = doc.nodes.find(n => n.id === id);
-        if (node?.type !== "env.file" || !node.data?.envFile) continue;
-        try {
-            const fp = path.isAbsolute(node.data.envFile) ? node.data.envFile : path.join(ENVS_DIR, node.data.envFile);
-            if (node.data.schema && Object.keys(node.data.schema).length) return loadEnv(fp, node.data.schema);
-            return rawParse(fs.readFileSync(fp, "utf8"));
-        } catch { /* 宽松：门禁拿不到就当未知 */ }
+        if (node?.type !== "struct.make") continue;
+        const st = (node.data?.fields ?? []).find(f => f.key === "SERVER_TYPE");
+        if (st === undefined) continue;
+        /** @type {Record<string, any>} */
+        const env = {};
+        for (const f of node.data.fields) env[f.key] = f.value;
+        return env;
     }
     return null;
 }
@@ -242,7 +258,7 @@ export async function executeTask(ctx, doc, taskName) {
         for (const e of incoming.get(id) ?? []) {
             if (e.kind === "seq" || !e.sourceHandle) continue;
             const srcNode = nodeById.get(e.source);
-            const outDef = getOutputs(srcNode).find(o => o.id === e.sourceHandle);
+            const outDef = getOutputs(srcNode, doc).find(o => o.id === e.sourceHandle);
             inputValues[e.targetHandle] = coerce(executed.get(e.source)?.[e.sourceHandle], declaredType(node, e.targetHandle) ?? outDef?.type ?? "any");
         }
         ctx.log(`──── [${def.title}] ${node.id}`);

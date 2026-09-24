@@ -17,11 +17,11 @@ runner（engine/runner.js）
         副作用收尾（git 恢复 / 远端临时文件清理 / 会话关闭）
         │
 workflow 执行器（engine/workflow.js）
-        图校验（类型/悬空边/多边同输入/环依赖/前向依赖）→
-        任务路径执行（主路径按序；输入经边解析，依赖闭包自动先执行侧挂节点）
+        图校验（类型/悬空边/required 闭包/插槽唯一/环依赖）→
+        任务子图执行（选点构成 1 个或多个 DAG；层内并发，层间按拓扑序）
         │
-节点注册表（engine/nodes/：input / build / remote / util，22 种）
-        每个节点 = 元数据（输入/输出插槽与类型、widget 表单定义、动态插槽规则）+ run(ctx, node, inputs)
+节点注册表（engine/nodes/：input / build / remote / util，22 种，含 struct 构造/析构）
+        每个节点 = 元数据（输入/输出插槽与类型、widget 表单定义、动态插槽/出口规则、desc 描述）+ run(ctx, node, inputs)
         │
 引擎原语（engine/ssh|env|render|tarball|gitops|exec）
 ```
@@ -30,8 +30,8 @@ workflow 执行器（engine/workflow.js）
 
 1. **CLI-first**：GUI 与 CLI 是同一 runner 的两个前端。部署逻辑 100% 在 workflow.json + 节点执行器里，可审计、可脱离 GUI 运行。
 2. **任务串行**：全局一个队列，杜绝并发部署写同一目标机。
-3. **prod 门禁在 runner 兜底**：任务 `mutates` + 任一路径上 env 的 `SERVER_TYPE=prod` → 必须携带 `confirmProd === 工作流名`；GUI 弹窗与 CLI 交互只是采集确认的两种方式；dry-run 免门禁。
-4. **机密不出本地**：env 值只在内存；日志掩码 `SECRET/TOKEN/PASSWORD/PASSPHRASE=***`；审计只记 `confirmProd: "(typed)"`。
+3. **prod 门禁在 runner 兜底**：任务 `mutates` + 任务子图内 Struct 构造器的 `SERVER_TYPE=prod` 字段 → 必须携带 `confirmProd === 工作流名`；GUI 弹窗与 CLI 交互只是采集确认的两种方式；dry-run 免门禁。
+4. **工作流文件即机密文件（2026-09-24 定，取代原 envs/ 文件方案）**：env 字段以 Struct 构造器的字段直接定义在图 JSON 中——可视化的收益是哪个字段被哪个流程消费，连线即知。因此 **wf 文件必须存放在安全处（勿提交公共仓库）**；日志掩码 `SECRET/TOKEN/PASSWORD/PASSPHRASE=***` 与审计只记 `confirmProd: "(typed)"` 不变。
 5. **类型即契约**：连线两端类型必须匹配（any 输入兜底）；校验发生在 GUI 连线时、保存写盘前、CLI 加载时三处，规则同源（engine/types.js 是唯一事实源，前端 types.js 是其镜像）。
 6. **无控制流（if-else / for / try-catch 不进节点图，2026-09-24 定）**：条件、软失败、循环一律写在 `ssh.exec`
    等执行类节点的 bash 里——现网工作流即如此（健康检查 `for i in $(seq 1 10); do … done`、回滚守卫
@@ -93,6 +93,6 @@ mv .<name>.tmp <releases>/<name>   ← 原子发布
 ## 新增一个应用工作流
 
 1. GUI「新建」→ 弹窗确认存放路径（任意位置，自动记住）→ 空白图起步；
-2. 拖入 `env.file` + `ssh.session` + 需要的构建/远端节点，连线；
+2. 拖入 `struct.make`（定义 SERVER_TYPE 等字段）+ `ssh.session` + 需要的构建/远端节点，连线；
 3. 「定义任务」在画布上点选节点（顺序无关；required 闭包 / 插槽唯一 / 无环即时校验）→ 命名 → 保存；重复定义 deploy/rollback/status；
 4. CLI 对照：`node cli.js run <名或路径> deploy --dry-run`。
