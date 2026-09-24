@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { expandHome } from "../exec.js";
 import { loadEnv, rawParse } from "../env.js";
 import { ROOT, ENVS_DIR } from "../runner.js";
 
@@ -82,17 +83,19 @@ export default [
             { id: "dir", type: "folder" },
             { id: "file", type: "file" },
         ],
-        widgets: [{ key: "path", label: "路径", kind: "string", default: "", placeholder: "C:/...（绝对路径）" }],
+        widgets: [{ key: "path", label: "路径", kind: "string", serializable: true, default: "", placeholder: "C:/... 或 ~/...（~ = 用户目录）" }],
         async run(ctx, node) {
-            const p = String(node.data.path ?? "").trim();
-            if (!p) throw new Error("fs.path 未配置路径");
+            const typed = String(node.data.path ?? "").trim();
+            if (!typed) throw new Error("fs.path 未配置路径");
+            // 输出 resolve 后的完整绝对路径（~ 展开 + 分隔符/.. 归一），下游节点直接可用
+            const full = path.resolve(expandHome(typed));
             /** @type {import("fs").Stats} */
             let st;
-            try { st = await fs.promises.stat(p); } catch { throw new Error(`fs.path 路径不存在: ${p}`); }
+            try { st = await fs.promises.stat(full); } catch { throw new Error(`fs.path 路径不存在: ${full}`); }
             const isDir = st.isDirectory();
-            ctx.log(`[fs.path] ${p} → ${isDir ? "文件夹" : "文件"}（${st.size} B，mtime ${st.mtime.toISOString()}）`);
+            ctx.log(`[fs.path] ${typed} → ${full}（${isDir ? "文件夹" : "文件"}，${st.size} B）`);
             // 双插槽：只有与实际类型匹配的输出有值，另一个为 undefined
-            return { dir: isDir ? p : undefined, file: isDir ? undefined : p };
+            return { dir: isDir ? full : undefined, file: isDir ? undefined : full };
         },
     },
 ];

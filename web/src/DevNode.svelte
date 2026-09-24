@@ -11,12 +11,10 @@
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
   let hl = $derived(ui.pathHighlight[id]);
-
   let inputs = $derived(effectiveInputs(meta, data));
   let outputs = $derived(meta?.outputs ?? []);
   let color = $derived(meta?.color ?? "#8a97a8");
-  let onPath = $derived(hl !== undefined);
-  let pathIdx = $derived(hl ?? 0);
+  let onPath = $derived(hl === true);
 
   // ── widget 编辑（原 Inspector 逻辑上卡片）────
   /** @param {string} k @param {any} v */
@@ -46,13 +44,13 @@
     newVals[key] = "";
   }
 
-  // ── fs.path：路径校验 + stat 展示 ────
-  /** 绝对路径 + 盘符冒号之外不允许 Windows 非法字符 */
+  // ── fs.path：路径校验（绝对路径或 ~ 开头，~ = 用户主目录）+ stat 展示 ────
   function pathCheck(p) {
     if (!p) return false;
-    if (!/^(?:[a-zA-Z]:[\\/]|\\\\)/.test(p)) return false;
+    const home = /^~(?:[\\/]|$)/.test(p);
+    if (!home && !/^(?:[a-zA-Z]:[\\/]|\\\\)/.test(p)) return false;
     if (/[<>|"?*\x00-\x1f]/.test(p)) return false;
-    return !/[<>:"|?*\x00-\x1f]/.test(p.slice(2));
+    return home || !/[<>:"|?*\x00-\x1f]/.test(p.slice(2));
   }
   let pathValid = $derived(meta?.pathStat ? pathCheck(String(data?.path ?? "").trim()) : true);
   let stat = $state(null);
@@ -104,7 +102,7 @@
     if (meta?.pathStat) {
       const p = String(data?.path ?? "").trim();
       if (!p) return "";
-      if (!pathValid) return "路径非法（需绝对路径）";
+      if (!pathValid) return "路径非法（需绝对路径或 ~ 开头）";
       if (statErr) return statErr;
       if (!stat) return "";
       if (!stat.exists) return "路径不存在";
@@ -118,16 +116,15 @@
 </script>
 
 <div class="devnode" class:selected class:onpath={onPath} class:error={!!cardError}>
-  {#if onPath}<span class="pathidx">{pathIdx}</span>{/if}
   <div class="head" style="background:{color}">
     <span class="htitle">{meta?.title ?? data.__type}</span>
     <button class="del nodrag" title="删除节点" onclick={() => ondelete?.(id)}>✕</button>
   </div>
   <div class="body nowheel">
     {#each inputs as inp (inp.id)}
-      <div class="kv in" title={inp.dynamic ? `动态插槽：在对应控件里写 {{${inp.id}}} 生成` : undefined}>
+      <div class="kv in" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}` : undefined}>
         <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[inp.type]}" />
-        <span class="lbl">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span></span>
+        <span class="lbl">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填">*</span>{/if}</span>
       </div>
     {/each}
     {#if outputs.length}
@@ -149,7 +146,7 @@
       <div class="sep"></div>
       {#each meta.widgets as w (w.key)}
         <label class="wrow nodrag">
-          <span class="wlab">{w.label}</span>
+          <span class="wlab">{w.label}{#if w.serializable}<span class="sbadge" title="可序列化：纯文本字面量，可直接入库或携带占位符">s</span>{/if}</span>
           {#if w.kind === "text"}
             <textarea rows="4" value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
               oninput={e => set(w.key, e.target.value)}></textarea>
@@ -230,7 +227,7 @@
         {#if !String(get("path") ?? "").trim()}
           <span class="srow"><span>状态</span><b>未配置</b></span>
         {:else if !pathValid}
-          <span class="srow"><span>状态</span><b class="bad">路径非法（需绝对路径）</b></span>
+          <span class="srow"><span>状态</span><b class="bad">路径非法（需绝对路径或 ~ 开头）</b></span>
         {:else if statErr}
           <span class="srow"><span>状态</span><b class="bad">{statErr}</b></span>
         {:else}

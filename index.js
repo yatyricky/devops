@@ -15,6 +15,7 @@ import { loadWorkflow, validateWorkflow } from "./engine/workflow.js";
 import { enqueueWorkflowTask, listRuns, getRun, getCurrentJob, ENVS_DIR as ROOT_ENVS } from "./engine/runner.js";
 import { rawParse } from "./engine/env.js";
 import { getRefs } from "./engine/gitops.js";
+import { expandHome } from "./engine/exec.js";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -39,9 +40,8 @@ app.get("/api/workflows", (req, res) => {
         if (!w.doc) return { path: w.path, error: w.error };
         // 首个 env.file 节点的 SERVER_TYPE（GUI 徽标与 prod 门禁提示）
         let serverType = "";
-        const envNode = (w.doc.tasks && Object.values(w.doc.tasks).flatMap(t => t.path)
-            ? Object.values(w.doc.tasks).flatMap(t => t.path)
-            : w.doc.nodes.map(n => n.id))
+        const taskNodeIds = Object.values(w.doc.tasks).flatMap(t => /** @type {any} */(t).nodes ?? /** @type {any} */(t).path ?? []);
+        const envNode = taskNodeIds
             .map(id => w.doc.nodes.find(n => n.id === id))
             .find(n => n?.type === "env.file" && n.data?.envFile);
         if (envNode) {
@@ -112,7 +112,7 @@ app.post("/api/refs", async (req, res) => {
 
 // ── 本地路径 stat（fs.path 节点卡片展示：权限/大小/修改时间）────
 app.post("/api/fs/stat", async (req, res) => {
-    const p = String(req.body?.path || "").trim();
+    const p = expandHome(String(req.body?.path || "").trim());
     if (!p) return res.json({ exists: false, error: "empty" });
     try {
         const st = await fs.promises.stat(p);
@@ -141,7 +141,7 @@ function modeToString(st) {
 
 // ── git refs（任意仓库目录；git.getRefs 卡片刷新用）────
 app.post("/api/git/refs", async (req, res) => {
-    const repoDir = String(req.body?.repoDir || "").trim();
+    const repoDir = expandHome(String(req.body?.repoDir || "").trim());
     if (!repoDir) return res.status(400).json({ error: "repoDir required" });
     try {
         res.json(await getRefs(repoDir, { log: () => {} }));

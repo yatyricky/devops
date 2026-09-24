@@ -2,7 +2,7 @@
   import { getContext, setContext } from "svelte";
   import { SvelteFlow, Background, Controls, MiniMap } from "@xyflow/svelte";
   import { api } from "./api.js";
-  import { canConnect, effectiveInputs, genId } from "./types.js";
+  import { canConnect, effectiveInputs, genId, validateTaskSelection } from "./types.js";
   import { ui } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
   import Palette from "./Palette.svelte";
@@ -17,10 +17,10 @@
   let dirty = $state(false);
   let toast = $state("");
   let busyText = $state("空闲");
-  let hoverPath = $state(/** @type {string[] | null} */ (null));
 
   let ignoreDirtyUntil = 0;
-  let definer = $state(/** @type {{ path: string[], name: string, label: string, mutates: boolean } | null} */ (null));
+  let definer = $state(/** @type {{ nodes: string[], name: string, label: string, mutates: boolean, problems: string[] } | null} */ (null));
+  let hoverTask = $state(/** @type {string | null} */ (null));
   let runModal = $state(/** @type {{ task: string, label: string, mutates: boolean, inputs: {name:string,label:string,fallback:string,value:string}[], dryRun: boolean, needProd: boolean, prodVal: string } | null} */(null));
   let openModal = $state(/** @type {{ mode: "open" | "new", path: string, name: string, title: string } | null} */(null));
   let logRef = $state(null);
@@ -83,7 +83,7 @@
     }));
     edges = (doc.edges ?? []).map(e => ({ ...e, ...(e.kind === "seq" ? { class: "seq" } : {}) }));
     tasks = doc.tasks ?? {};
-    hoverPath = null; definer = null;
+    hoverTask = null; definer = null;
     ignoreDirtyUntil = Date.now() + 1000;
   }
   function toDoc() {
@@ -152,19 +152,17 @@
     edges = edges.filter(e => e.source !== id && e.target !== id);
     dirty = true;
   }
-  /** @param {{ event: any, node: any }} m 定义任务模式下点选节点；其余选中交给 xyflow */
+  /** @param {{ event: any, node: any }} m 定义任务模式下点选节点（切换选入/移出，顺序无关）；其余选中交给 xyflow */
   function onNodeClick({ node }) {
     if (!node || !definer) return;
-    // 点击节点入路径，并沿唯一顺序后继自动追加链条（遇分叉/已在路径中即停）
-    let cur = node.id;
-    const add = [];
-    while (cur && !definer.path.includes(cur) && !add.includes(cur)) {
-      add.push(cur);
-      const succ = edges.filter(e => e.kind === "seq" && e.source === cur).map(e => e.target);
-      cur = succ.length === 1 ? succ[0] : null;
-    }
-    if (add.length) definer.path = [...definer.path, ...add];
+    definer.nodes = definer.nodes.includes(node.id)
+      ? definer.nodes.filter(x => x !== node.id)
+      : [...definer.nodes, node.id];
+    definer.problems = validateTaskSelection(definer.nodes, edges, nodeByIdMap, typeMap);
   }
+
+  /** id → 节点（画布态，含 data.__type） */
+  const nodeByIdMap = $derived(new Map(nodes.map(n => [n.id, n])));
   /** @param {any} p 连线参数 */
   function onConnect(p) {
     const src = nodes.find(n => n.id === p.source), tgt = nodes.find(n => n.id === p.target);
@@ -184,7 +182,7 @@
     const i = p.targetHandle ? inps.find(x => x.id === p.targetHandle) : inps[0];
     if (!o || !i) return;
     if (!canConnect(o.type, i.type)) { showToast(`类型不兼容：${o.type} → ${i.type}`); return; }
-    if (edges.some(e => e.target === tgt.id && e.targetHandle === i.id)) { showToast(`输入 ${tgt.id}.${i.id} 已有连线`); return; }
+    // 大图允许同一输入接多条备选连线（不同任务各取其一）；唯一性在任务定义时校验
     edges = [...edges, { id: genId("e"), source: p.source, target: p.target, sourceHandle: o.id, targetHandle: i.id }];
     dirty = true;
   }
@@ -194,11 +192,15 @@
   }
   function onMoveEnd() { if (Date.now() > ignoreDirtyUntil) dirty = true; }
 
-  // ── 路径高亮（悬停任务 / 定义任务）────
-  let activePath = $derived(hoverPath ?? (definer ? definer.path : null));
+  // ── 任务子图高亮（悬停任务 / 定义任务）：集合语义，id → true ────
+  let activeSet = $derived.by(() => {
+    if (hoverTask) return tasks[hoverTask]?.nodes ?? tasks[hoverTask]?.path ?? null;
+    if (definer) return definer.nodes;
+    return null;
+  });
   $effect(() => {
-    const p = activePath ?? [];
-    ui.pathHighlight = Object.fromEntries(p.map((id, i) => [id, i + 1]));
+    const p = activeSet ?? [];
+    ui.pathHighlight = Object.fromEntries(p.map(id => [id, true]));
   });
 
   // 连线动画跟随选中：仅与选中节点相连（或被选中）的数据边播放虚线动画；顺序边恒为静态。
@@ -213,8 +215,9 @@
   // ── 任务运行 ────
   function openRun(taskName) {
     const t = tasks[taskName];
-    // 收集运行时输入：全图的 task.input 节点（含经依赖闭包自动执行的侧挂节点）
-    const inputNodes = nodes.filter(n => n.type === "task.input");
+    const sel = new Set(t.nodes ?? t.path ?? []);
+    // 收集运行时输入：任务选中的 task.input 节点
+    const inputNodes = nodes.filter(n => n.type === "task.input" && sel.has(n.id));
     runModal = {
       task: taskName, label: t.label ?? taskName, mutates: !!t.mutates,
       inputs: inputNodes.map(n => ({ name: n.data.name, label: n.data.label || n.data.name, fallback: n.data.fallback ?? "", value: "" })),
@@ -238,8 +241,10 @@
   }
 
   function saveDefinedTask() {
-    if (!definer?.name || definer.path.length < 1) { showToast("任务名必填"); return; }
-    tasks[definer.name] = { label: definer.label || definer.name, mutates: definer.mutates, path: [...definer.path] };
+    if (!definer?.name) { showToast("任务名必填"); return; }
+    const problems = validateTaskSelection(definer.nodes, edges, nodeByIdMap, typeMap);
+    if (problems.length) { definer.problems = problems; return; }
+    tasks[definer.name] = { label: definer.label || definer.name, mutates: definer.mutates, nodes: [...definer.nodes] };
     definer = null;
     dirty = true;
   }
@@ -277,14 +282,14 @@
     </span>
     <span class="sep"></span>
     {#each Object.entries(tasks) as [tn, t] (tn)}
-      <button class:onpath-btn={hoverPath === t.path}
-        onmouseenter={() => (hoverPath = t.path)} onmouseleave={() => (hoverPath = null)}
+      <button class:onpath-btn={hoverTask === tn}
+        onmouseenter={() => (hoverTask = tn)} onmouseleave={() => (hoverTask = null)}
         onclick={() => openRun(tn)}>
         {t.label ?? tn}{t.mutates ? " ⚠" : ""}
       </button>
       <button class="danger mini" title="删除任务" onclick={() => deleteTask(tn)}>✕</button>
     {/each}
-    <button class="define" class:active={!!definer} onclick={() => (definer = definer ? null : { path: [], name: "", label: "", mutates: true })}>
+    <button class="define" class:active={!!definer} onclick={() => (definer = definer ? null : { nodes: [], name: "", label: "", mutates: true, problems: [] })}>
       {definer ? "取消定义" : "定义任务"}
     </button>
   </div>
@@ -312,10 +317,15 @@
 
       {#if definer}
         <div class="definer">
-          <b>定义任务</b>：按执行顺序点击节点（当前 {definer.path.length} 个）
+          <b>定义任务</b>：点选节点（顺序无关，将构成一个或多个 DAG 并发执行；当前 {definer.nodes.length} 个）
           <div class="chips">
-            {#each definer.path as id, i (id)}<span class="badge">{i + 1}. {id}</span>{/each}
+            {#each definer.nodes as id (id)}<span class="badge mono">{id}</span>{/each}
           </div>
+          {#if definer.problems?.length}
+            <div class="defprobs">
+              {#each definer.problems as p}<div>✗ {p}</div>{/each}
+            </div>
+          {/if}
           <div class="row">
             <input placeholder="任务名(英文)" bind:value={definer.name} />
             <input placeholder="显示名" bind:value={definer.label} />
@@ -390,6 +400,7 @@
   .definer { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 10; background: var(--panel);
     border: 1px solid var(--warn); border-radius: 10px; padding: 10px 14px; font-size: 13px; }
   .definer .chips { margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px; }
+  .definer .defprobs { margin: 6px 0; color: var(--err); font-size: 12px; line-height: 1.6; }
   .definer .row { display: flex; gap: 6px; align-items: center; }
   .definer .row input { width: auto; flex: 1; }
   .mut { display: flex; gap: 6px; align-items: center; font-size: 13px; }

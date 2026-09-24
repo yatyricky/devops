@@ -691,6 +691,83 @@
         "useSudo": true,
         "loginShell": false
       }
+    },
+    {
+      "id": "fmtUpNg",
+      "type": "string.format",
+      "position": [
+        500,
+        1710
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/xlgbis"
+      }
+    },
+    {
+      "id": "fmtUpFrpsT",
+      "type": "string.format",
+      "position": [
+        500,
+        1790
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/frps.toml"
+      }
+    },
+    {
+      "id": "fmtUpFrpsS",
+      "type": "string.format",
+      "position": [
+        500,
+        1870
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/frps.service"
+      }
+    },
+    {
+      "id": "fmtUpNginxS",
+      "type": "string.format",
+      "position": [
+        500,
+        1950
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/nginx.service"
+      }
+    },
+    {
+      "id": "fmtUpLoginS",
+      "type": "string.format",
+      "position": [
+        500,
+        2030
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/xlgbis-login.service"
+      }
+    },
+    {
+      "id": "fmtUp503",
+      "type": "string.format",
+      "position": [
+        500,
+        2110
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/503.html"
+      }
+    },
+    {
+      "id": "fmtUpToken",
+      "type": "string.format",
+      "position": [
+        500,
+        2190
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/frp_token"
+      }
     }
   ],
   "edges": [
@@ -1428,13 +1505,351 @@
       "target": "aInstall",
       "sourceHandle": "remoteFile",
       "targetHandle": "ftok"
+    },
+    {
+      "id": "seq-env1-git1",
+      "kind": "seq",
+      "source": "env1",
+      "target": "git1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-cEnv-cBuild",
+      "kind": "seq",
+      "source": "cEnv",
+      "target": "cBuild",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-cBuild-cPack",
+      "kind": "seq",
+      "source": "cBuild",
+      "target": "cPack",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-cPack-ssh1",
+      "kind": "seq",
+      "source": "cPack",
+      "target": "ssh1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-cMk-cUp",
+      "kind": "seq",
+      "source": "cMk",
+      "target": "cUp",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-cLink-nginxR",
+      "kind": "seq",
+      "source": "cLink",
+      "target": "nginxR",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sEnv-sPack",
+      "kind": "seq",
+      "source": "sEnv",
+      "target": "sPack",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sPack-ssh1",
+      "kind": "seq",
+      "source": "sPack",
+      "target": "ssh1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sMk-sUp",
+      "kind": "seq",
+      "source": "sMk",
+      "target": "sUp",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sDeps-sChown",
+      "kind": "seq",
+      "source": "sDeps",
+      "target": "sChown",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sChown-sLink",
+      "kind": "seq",
+      "source": "sChown",
+      "target": "sLink",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sLink-svc1",
+      "kind": "seq",
+      "source": "sLink",
+      "target": "svc1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-chkC-rLinkC",
+      "kind": "seq",
+      "source": "chkC",
+      "target": "rLinkC",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-rLinkC-nginxR",
+      "kind": "seq",
+      "source": "rLinkC",
+      "target": "nginxR",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-chkS-rLinkS",
+      "kind": "seq",
+      "source": "chkS",
+      "target": "rLinkS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-rLinkS-svc1",
+      "kind": "seq",
+      "source": "rLinkS",
+      "target": "svc1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aMk-aNg",
+      "kind": "seq",
+      "source": "aMk",
+      "target": "aNg",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aNg-aFrpsT",
+      "kind": "seq",
+      "source": "aNg",
+      "target": "aFrpsT",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aFrpsT-aFrpsS",
+      "kind": "seq",
+      "source": "aFrpsT",
+      "target": "aFrpsS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aFrpsS-aNginxS",
+      "kind": "seq",
+      "source": "aFrpsS",
+      "target": "aNginxS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aNginxS-aLoginS",
+      "kind": "seq",
+      "source": "aNginxS",
+      "target": "aLoginS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aLoginS-a503",
+      "kind": "seq",
+      "source": "aLoginS",
+      "target": "a503",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-a503-aToken",
+      "kind": "seq",
+      "source": "a503",
+      "target": "aToken",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aToken-aUpNg",
+      "kind": "seq",
+      "source": "aToken",
+      "target": "aUpNg",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aUpNg-aUpFrpsT",
+      "kind": "seq",
+      "source": "aUpNg",
+      "target": "aUpFrpsT",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aUpFrpsT-aUpFrpsS",
+      "kind": "seq",
+      "source": "aUpFrpsT",
+      "target": "aUpFrpsS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aUpFrpsS-aUpNginxS",
+      "kind": "seq",
+      "source": "aUpFrpsS",
+      "target": "aUpNginxS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aUpNginxS-aUpLoginS",
+      "kind": "seq",
+      "source": "aUpNginxS",
+      "target": "aUpLoginS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aUpLoginS-aUp503",
+      "kind": "seq",
+      "source": "aUpLoginS",
+      "target": "aUp503",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aUp503-aUpToken",
+      "kind": "seq",
+      "source": "aUp503",
+      "target": "aUpToken",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "e-fmtUpNg-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpNg",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUpNg-path",
+      "source": "fmtUpNg",
+      "sourceHandle": "value",
+      "target": "aUpNg",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e-fmtUpFrpsT-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpFrpsT",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUpFrpsT-path",
+      "source": "fmtUpFrpsT",
+      "sourceHandle": "value",
+      "target": "aUpFrpsT",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e-fmtUpFrpsS-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpFrpsS",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUpFrpsS-path",
+      "source": "fmtUpFrpsS",
+      "sourceHandle": "value",
+      "target": "aUpFrpsS",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e-fmtUpNginxS-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpNginxS",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUpNginxS-path",
+      "source": "fmtUpNginxS",
+      "sourceHandle": "value",
+      "target": "aUpNginxS",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e-fmtUpLoginS-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpLoginS",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUpLoginS-path",
+      "source": "fmtUpLoginS",
+      "sourceHandle": "value",
+      "target": "aUpLoginS",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e-fmtUp503-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUp503",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUp503-path",
+      "source": "fmtUp503",
+      "sourceHandle": "value",
+      "target": "aUp503",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e-fmtUpToken-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpToken",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUpToken-path",
+      "source": "fmtUpToken",
+      "sourceHandle": "value",
+      "target": "aUpToken",
+      "targetHandle": "path"
     }
   ],
   "tasks": {
     "deploy-client": {
       "label": "部署前端",
       "mutates": true,
-      "path": [
+      "nodes": [
         "env1",
         "git1",
         "cEnv",
@@ -1445,13 +1860,19 @@
         "cUp",
         "cExt",
         "cLink",
-        "nginxR"
+        "nginxR",
+        "inRef",
+        "fmtCDist",
+        "fmtUpC",
+        "fieldDD",
+        "fmtCurC",
+        "nginxName"
       ]
     },
     "deploy-server": {
       "label": "部署服务端",
       "mutates": true,
-      "path": [
+      "nodes": [
         "env1",
         "git1",
         "sStage",
@@ -1464,35 +1885,49 @@
         "sDeps",
         "sChown",
         "sLink",
-        "svc1"
+        "svc1",
+        "inRef",
+        "fmtUpS",
+        "fieldDD",
+        "fieldWSU",
+        "fmtCurS",
+        "svcName"
       ]
     },
     "rollback-client": {
       "label": "回滚前端",
       "mutates": true,
-      "path": [
+      "nodes": [
         "env1",
         "ssh1",
         "chkC",
         "rLinkC",
-        "nginxR"
+        "nginxR",
+        "nginxName",
+        "inRel",
+        "fmtRelC",
+        "fmtCurC"
       ]
     },
     "rollback-server": {
       "label": "回滚服务端",
       "mutates": true,
-      "path": [
+      "nodes": [
         "env1",
         "ssh1",
         "chkS",
         "rLinkS",
-        "svc1"
+        "svc1",
+        "svcName",
+        "inRel",
+        "fmtRelS",
+        "fmtCurS"
       ]
     },
     "status": {
       "label": "状态",
       "mutates": false,
-      "path": [
+      "nodes": [
         "env1",
         "ssh1",
         "st1"
@@ -1501,7 +1936,7 @@
     "apply-config": {
       "label": "应用配置",
       "mutates": true,
-      "path": [
+      "nodes": [
         "env1",
         "ssh1",
         "aMk",
@@ -1519,7 +1954,14 @@
         "aUpLoginS",
         "aUp503",
         "aUpToken",
-        "aInstall"
+        "aInstall",
+        "fmtUpNg",
+        "fmtUpFrpsT",
+        "fmtUpFrpsS",
+        "fmtUpNginxS",
+        "fmtUpLoginS",
+        "fmtUp503",
+        "fmtUpToken"
       ]
     }
   }

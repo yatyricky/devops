@@ -1,5 +1,6 @@
 import child_process from "child_process";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
 /**
@@ -38,6 +39,14 @@ export function writeLF(fp, content) {
 /** @param {string} p */
 export function rmrf(p) {
     try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
+}
+
+/** 路径开头的 ~ 解析为用户主目录（Windows 如 C:\\Users\\<user>）；其余原样返回。 */
+export function expandHome(p) {
+    const s = String(p ?? "").trim();
+    if (s === "~") return os.homedir();
+    if (s.startsWith("~/") || s.startsWith("~\\")) return path.join(os.homedir(), s.slice(2));
+    return s;
 }
 
 /**

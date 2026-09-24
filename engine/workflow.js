@@ -6,15 +6,21 @@ import { loadEnv, rawParse } from "./env.js";
 import { ENVS_DIR } from "./runner.js";
 
 /**
- * workflow.json = 一张节点图（nodes + edges）+ 若干命名任务（tasks）。
- * 每个任务 = 图中一条有序路径（用户示例：deploy = 1→2→3，rollback = 4→3，preview = 1→2→5）。
+ * workflow.json = 一张节点大图（nodes + edges，元图允许多条备选连线进同一输入）+ 若干命名任务。
+ * 任务 = 从大图中选出的节点集合（顺序无关），集合 + 两端都在集合内的边构成 1 个或多个 DAG。
  *
- * 执行语义：
- * - 主路径节点按数组顺序执行（顺序即副作用顺序；相邻节点不强制有边——纯顺序相邻如 deps→symlink 合法）；
- * - 节点输入经连线解析：来源是"已执行"节点——主路径中更早的节点，或其依赖闭包自动先执行的侧挂节点
- *   （field.get/string.format 等 helper 从侧挂取值汇入主链）；
- * - 输入若依赖主路径中更晚的节点 → 报错；环依赖 → 报错；
- * - 顺序边（kind:"seq"，handle __seqOut→__seqIn）不是执行驱动，是顺序约束：同任务路径内两端必须保序（校验拦截）。
+ * 任务子图构成规则：
+ * - data 边指向 required 输入槽（含动态插槽）：源必须已选，否则闭包错误；
+ * - data 边指向非 required 输入槽：源未选时静默丢弃（该输入在此任务中视作未连线）；
+ * - seq 边：源或目标未选时静默丢弃；两端都在则携带并参与定序。
+ *
+ * 任务级校验（对子图）：
+ * - 插槽唯一：每个输入槽最多 1 条携带边（歧义即错误）；
+ * - required 覆盖：required 输入必须恰好 1 条（0 条 = 图上没画线）；
+ * - 无环：Kahn 拓扑（data + seq 携带边都参与定序）。
+ *
+ * 执行语义：拓扑层级并发——入度 0 的节点并发一批，完成后释放下一层；
+ * 任一节点失败，本批全部落地后抛错终止（在途副作用由 runner finalize 收尾）。
  */
 
 /**
@@ -34,6 +40,27 @@ export function loadWorkflow(fp) {
     const problems = validateWorkflow(doc);
     if (problems.length) throw new Error(`workflow 校验失败 ${path.basename(fp)}:\n  - ${problems.join("\n  - ")}`);
     return doc;
+}
+
+/**
+ * 旧版有序 path → 节点集合：补齐数据依赖闭包。
+ * 旧执行器会自动先执行侧挂的数据依赖节点（required 与 optional 都会），忠实迁移 = 全部补入。
+ * @param {any} doc
+ * @param {string[]} ids
+ */
+function closeOverDataEdges(doc, ids) {
+    const selected = new Set(ids);
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (const e of doc.edges) {
+            if (e.kind !== "seq" && selected.has(e.target) && !selected.has(e.source)) {
+                selected.add(e.source);
+                changed = true;
+            }
+        }
+    }
+    return [...selected];
 }
 
 /**
@@ -89,50 +116,83 @@ export function validateWorkflow(doc) {
             problems.push(`边 ${e.id ?? "?"} 校验出错: ${err.message}`);
         }
     }
+    // 注意：元图允许同一输入接多条备选连线（不同任务各取其一）；唯一性在任务级校验。
 
-    // 同一输入多条边（一个插槽只接一条线）；顺序边无插槽语义，不参与
-    const seen = new Set();
-    for (const e of doc.edges) {
-        if (e.kind === "seq" || !e.targetHandle) continue;
-        const k = `${e.target}.${e.targetHandle}`;
-        if (seen.has(k)) problems.push(`输入 ${k} 接了多条连线`);
-        seen.add(k);
-    }
-
+    // ── 任务：子图选点（顺序无关；旧版有序 path 静默规范化，含数据依赖闭包）────
     for (const [name, t] of Object.entries(doc.tasks)) {
-        if (!Array.isArray(t.path) || !t.path.length) { problems.push(`任务 ${name} 缺少 path`); continue; }
-        for (const id of t.path) {
+        if (!Array.isArray(t.nodes) && Array.isArray(t.path)) {
+            t.nodes = closeOverDataEdges(doc, t.path);
+            delete t.path;
+        }
+        if (!Array.isArray(t.nodes) || !t.nodes.length) { problems.push(`任务 ${name} 缺少 nodes`); continue; }
+        for (const id of t.nodes) {
             if (!ids.has(id)) problems.push(`任务 ${name} 引用不存在的节点: ${id}`);
         }
-        const dups = t.path.filter((v, i) => t.path.indexOf(v) !== i);
-        if (dups.length) problems.push(`任务 ${name} 路径含重复节点: ${[...new Set(dups)].join(", ")}`);
+        const dups = t.nodes.filter((v, i) => t.nodes.indexOf(v) !== i);
+        if (dups.length) problems.push(`任务 ${name} 节点重复: ${[...new Set(dups)].join(", ")}`);
         if (t.mutates === undefined) problems.push(`任务 ${name} 缺少 mutates 标记`);
         if (t.label === undefined) problems.push(`任务 ${name} 缺少 label`);
-    }
+        if (dups.length || t.nodes.some(id => !ids.has(id))) continue;
 
-    // 顺序边与任务路径顺序一致性：同路径内源必须早于目标
-    for (const e of doc.edges) {
-        if (e.kind !== "seq") continue;
-        for (const [name, t] of Object.entries(doc.tasks)) {
-            if (!Array.isArray(t.path)) continue;
-            const si = t.path.indexOf(e.source), ti = t.path.indexOf(e.target);
-            if (si !== -1 && ti !== -1 && si > ti) {
-                problems.push(`顺序边 ${e.source} → ${e.target} 与任务 ${name} 的路径顺序矛盾（位置 ${si} → ${ti}）`);
+        const selected = new Set(t.nodes);
+
+        // 逐插槽统计任务内携带边；required 闭包/覆盖在此一并判定
+        for (const id of t.nodes) {
+            const node = nodeById.get(id);
+            let ins;
+            try { ins = getInputs(node); } catch { continue; } // 未知类型已在节点段报过
+            for (const inp of ins) {
+                const inEdges = doc.edges.filter(e => e.kind !== "seq" && e.target === id && e.targetHandle === inp.id);
+                const carriedCnt = inEdges.filter(e => selected.has(e.source)).length;
+                if (carriedCnt >= 2) {
+                    problems.push(`任务 ${name}：输入 ${id}.${inp.id} 有 ${carriedCnt} 条连线，只能有一个输入`);
+                } else if (inp.required && carriedCnt === 0) {
+                    if (inEdges.length > 0) {
+                        problems.push(`任务 ${name}：节点 ${id} 的必填输入 ${inp.id} 依赖节点 ${inEdges.map(e => e.source).join("/")}，未选入`);
+                    } else {
+                        problems.push(`任务 ${name}：节点 ${id} 的必填输入 ${inp.id} 未连线`);
+                    }
+                }
             }
+        }
+
+        // 无环：Kahn 拓扑（两端都在选择内的 data + seq 边都参与定序）
+        const carriedEdges = doc.edges.filter(e => selected.has(e.source) && selected.has(e.target));
+        const indeg = new Map(t.nodes.map(id => [id, 0]));
+        const adj = new Map(t.nodes.map(id => [id, []]));
+        for (const e of carriedEdges) {
+            adj.get(e.source).push(e.target);
+            indeg.set(e.target, /** @type {number} */ (indeg.get(e.target)) + 1);
+        }
+        let frontier = t.nodes.filter(id => indeg.get(id) === 0);
+        let done = 0;
+        while (frontier.length) {
+            const next = [];
+            for (const id of frontier) {
+                done++;
+                for (const m of /** @type {string[]} */ (adj.get(id))) {
+                    indeg.set(m, /** @type {number} */ (indeg.get(m)) - 1);
+                    if (indeg.get(m) === 0) next.push(m);
+                }
+            }
+            frontier = next;
+        }
+        if (done < t.nodes.length) {
+            problems.push(`任务 ${name} 存在环依赖: ${t.nodes.filter(id => indeg.get(id) > 0).join(" → ")}`);
         }
     }
     return problems;
 }
 
 /**
- * 任务路径上的 env（prod 门禁用；宽松——env 文件缺失/校验失败返回 null）。
+ * 任务选中的 env（prod 门禁用；宽松——env 文件缺失/校验失败返回 null）。
  * @param {any} doc
  * @param {string} taskName
  */
 export function findTaskEnv(doc, taskName) {
     const task = doc.tasks?.[taskName];
     if (!task) return null;
-    for (const id of task.path) {
+    for (const id of task.nodes ?? task.path ?? []) {
         const node = doc.nodes.find(n => n.id === id);
         if (node?.type !== "env.file" || !node.data?.envFile) continue;
         try {
@@ -145,7 +205,7 @@ export function findTaskEnv(doc, taskName) {
 }
 
 /**
- * 执行任务路径。
+ * 执行任务：子图拓扑层级并发调度。
  * @param {any} ctx 执行上下文（runner 构造）：log/dryRun/inputs/mask/configDir/repoDir
  *               + registerGitRestore/registerSession/trackRemoteFile
  * @param {any} doc workflow 文档
@@ -154,54 +214,52 @@ export function findTaskEnv(doc, taskName) {
 export async function executeTask(ctx, doc, taskName) {
     const task = doc.tasks?.[taskName];
     if (!task) throw new Error(`任务不存在: ${taskName}`);
+    const selected = new Set(task.nodes ?? task.path ?? []);
     const nodeById = new Map(doc.nodes.map(n => [n.id, n]));
-    const incoming = new Map(); // nodeId → edge[]
+
+    // 任务子图携带边：两端都在选择内（校验在 load/validate 已做，这里按构成直接执行）
+    const incoming = new Map(); // nodeId → 携带边[]
     for (const e of doc.edges) {
+        if (!selected.has(e.source) || !selected.has(e.target)) continue;
         if (!incoming.has(e.target)) incoming.set(e.target, []);
-        incoming.get(e.target).push(e);
+        /** @type {any[]} */ (incoming.get(e.target)).push(e);
     }
-    const pos = new Map(task.path.map((id, i) => [id, i]));
 
     /** @type {Map<string, any>} */
     const executed = new Map();
-    /** @type {Set<string>} */
-    const visiting = new Set();
+    const pending = new Set(selected);
 
     /**
+     * 解析输入（仅 data 边）并执行单个节点。
      * @param {string} id
-     * @param {number} maxPathPos 主路径位置上限（防前向依赖）
      */
-    async function ensureNode(id, maxPathPos) {
-        if (executed.has(id)) return executed.get(id);
-        if (visiting.has(id)) throw new Error(`依赖环: ${[...visiting, id].join(" → ")}`);
+    async function runNode(id) {
         const node = nodeById.get(id);
         if (!node) throw new Error(`节点不存在: ${id}`);
-        if (pos.has(id) && pos.get(id) > maxPathPos) {
-            throw new Error(`节点 ${id} 的输入依赖主路径中更晚的节点（任务 ${taskName} 位置 ${pos.get(id)}）`);
+        const def = NODE_TYPES[node.type];
+        /** @type {Record<string, any>} */
+        const inputValues = {};
+        for (const e of incoming.get(id) ?? []) {
+            if (e.kind === "seq" || !e.sourceHandle) continue;
+            const srcNode = nodeById.get(e.source);
+            const outDef = getOutputs(srcNode).find(o => o.id === e.sourceHandle);
+            inputValues[e.targetHandle] = coerce(executed.get(e.source)?.[e.sourceHandle], declaredType(node, e.targetHandle) ?? outDef?.type ?? "any");
         }
-        visiting.add(id);
-        try {
-            const def = NODE_TYPES[node.type];
-            /** @type {Record<string, any>} */
-            const inputValues = {};
-            for (const e of incoming.get(id) ?? []) {
-                const sourceOut = await ensureNode(e.source, pos.has(id) ? pos.get(id) : Number.MAX_SAFE_INTEGER);
-                if (!e.sourceHandle) continue;
-                const srcNode = nodeById.get(e.source);
-                const outDef = getOutputs(srcNode).find(o => o.id === e.sourceHandle);
-                inputValues[e.targetHandle] = coerce(sourceOut[e.sourceHandle], declaredType(node, e.targetHandle) ?? outDef?.type ?? "any");
-            }
-            ctx.log(`──── [${def.title}] ${node.id}`);
-            const out = (await def.run(ctx, node, inputValues)) ?? {};
-            executed.set(id, out);
-            return out;
-        } finally {
-            visiting.delete(id);
-        }
+        ctx.log(`──── [${def.title}] ${node.id}`);
+        const out = (await def.run(ctx, node, inputValues)) ?? {};
+        executed.set(id, out);
     }
 
-    for (let i = 0; i < task.path.length; i++) {
-        await ensureNode(task.path[i], i);
+    while (pending.size) {
+        // 本批：所有入边源都已执行（data + seq 都参与定序）
+        const ready = [...pending].filter(id => (incoming.get(id) ?? []).every(e => executed.has(e.source)));
+        if (!ready.length) throw new Error(`任务 ${taskName} 存在环依赖: ${[...pending].join(", ")}`);
+        ctx.log(`──── 批次并发 ${ready.length}：${ready.join(", ")}`);
+        const results = await Promise.allSettled(ready.map(id => runNode(id)));
+        // 本批已全部落地（allSettled），任一失败则终止——在途副作用由 runner finalize 收尾
+        const failed = results.find(r => r.status === "rejected");
+        if (failed) throw failed.reason;
+        for (const id of ready) pending.delete(id);
     }
 }
 

@@ -936,13 +936,133 @@
       "target": "installOps",
       "sourceHandle": "remoteFile",
       "targetHandle": "svc"
+    },
+    {
+      "id": "seq-env1-git1",
+      "kind": "seq",
+      "source": "env1",
+      "target": "git1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-build1-stage1",
+      "kind": "seq",
+      "source": "build1",
+      "target": "stage1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-pack1-ssh1",
+      "kind": "seq",
+      "source": "pack1",
+      "target": "ssh1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-pre1-up1",
+      "kind": "seq",
+      "source": "pre1",
+      "target": "up1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-deps1-link1",
+      "kind": "seq",
+      "source": "deps1",
+      "target": "link1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-link1-chown1",
+      "kind": "seq",
+      "source": "link1",
+      "target": "chown1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-chown1-linkCur",
+      "kind": "seq",
+      "source": "chown1",
+      "target": "linkCur",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-linkCur-svc1",
+      "kind": "seq",
+      "source": "linkCur",
+      "target": "svc1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-svc1-hc1",
+      "kind": "seq",
+      "source": "svc1",
+      "target": "hc1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-hc1-clean1",
+      "kind": "seq",
+      "source": "hc1",
+      "target": "clean1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-chk1-chk2",
+      "kind": "seq",
+      "source": "chk1",
+      "target": "chk2",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-chk2-symlinkR",
+      "kind": "seq",
+      "source": "chk2",
+      "target": "symlinkR",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-symlinkR-svc1",
+      "kind": "seq",
+      "source": "symlinkR",
+      "target": "svc1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-mkOps-ngR",
+      "kind": "seq",
+      "source": "mkOps",
+      "target": "ngR",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-ngU-svcR",
+      "kind": "seq",
+      "source": "ngU",
+      "target": "svcR",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
     }
   ],
   "tasks": {
     "deploy": {
       "label": "部署",
       "mutates": true,
-      "path": [
+      "nodes": [
         "env1",
         "git1",
         "build1",
@@ -958,26 +1078,36 @@
         "linkCur",
         "svc1",
         "hc1",
-        "clean1"
+        "clean1",
+        "inRef",
+        "fmtUp",
+        "fieldDD",
+        "fieldSU",
+        "fmtCur",
+        "fieldSN"
       ]
     },
     "rollback": {
       "label": "回滚",
       "mutates": true,
-      "path": [
+      "nodes": [
         "env1",
         "ssh1",
         "chk1",
         "chk2",
         "symlinkR",
         "svc1",
-        "hc1"
+        "hc1",
+        "fieldSN",
+        "inRel",
+        "fmtRel",
+        "fmtCur"
       ]
     },
     "status": {
       "label": "状态",
       "mutates": false,
-      "path": [
+      "nodes": [
         "env1",
         "ssh1",
         "st1"
@@ -986,7 +1116,7 @@
     "apply-config": {
       "label": "应用配置",
       "mutates": true,
-      "path": [
+      "nodes": [
         "env1",
         "ssh1",
         "mkOps",
@@ -994,7 +1124,9 @@
         "ngU",
         "svcR",
         "svcU",
-        "installOps"
+        "installOps",
+        "fmtOpsNg",
+        "fmtOpsSvc"
       ]
     }
   }

@@ -4,190 +4,1669 @@
   "version": 1,
   "repoDir": "C:/Users/yatyr/workspace/xlgbis",
   "nodes": [
-    { "id": "env1", "type": "env.file", "position": [40, 420], "data": { "envFile": "xlgbis-bs.env", "schema": {
-      "SERVER_TYPE": "test", "REMOTE_HOST": "host.example.com", "REMOTE_USER": "deploy",
-      "REMOTE_HOST_FINGERPRINT": "", "REMOTE_KEY_FILE": "", "DEPLOY_DIR": "/opt/xlgbis-biz",
-      "BSI": "bs1", "FRPS_SERVER_ADDR": "login.domain.com", "FRPS_BIND_PORT": 9999,
-      "FRP_TOKEN_PATH": "/etc/frp/frp_token", "LOCAL_NGINX_WEB_ROOT": "/opt/xlgbis-biz/client",
-      "BIZ_APP_PORT": 3000, "FRP_USER": "frp", "WEB_SERVER_USER": "opbiz",
-      "DEBUG": true, "PORT": 3000, "UPLOAD_DIR": "a_secure_dir",
-      "JWT_SECRET": "a_jwt_secret", "JWT_KID": "v1", "DB_URL": "http://db", "DB_SU_ACCQYWX": "superuser",
-      "DOMAIN_NAME": "domain.com", "LOGIN_URL": "", "URL_OA_SERVER": "", "LOG_LEVEL": "info"
-    } } },
-
-    { "id": "inRef", "type": "task.input", "position": [40, 80], "data": { "name": "ref", "label": "Git ref（空 = HEAD）", "fallback": "" } },
-    { "id": "git1", "type": "git.ref", "position": [300, 80], "data": { "repoDir": "C:/Users/yatyr/workspace/xlgbis", "prefix": "" } },
-
-    { "id": "cEnv", "type": "write.env", "position": [560, 40], "data": { "target": "biz-client/.env", "mapping": {
-      "VITE_VERSION": "VERSION", "VITE_LOGIN_URL": "LOGIN_URL", "VITE_URL_OA_SERVER": "URL_OA_SERVER", "VITE_LOG_LEVEL": "LOG_LEVEL"
-    } } },
-    { "id": "cBuild", "type": "cmd.exec", "position": [820, 40], "data": { "commands": "pnpm -C biz-client install --frozen-lockfile\npnpm -C biz-client build" } },
-    { "id": "fmtCDist", "type": "string.format", "position": [1080, 100], "data": { "format": "{{repo}}/biz-client/build" } },
-    { "id": "cPack", "type": "tar.pack", "position": [1340, 40], "data": { "entries": ["."], "prefix": "biz-client" } },
-
-    { "id": "sStage", "type": "stage.copy", "position": [560, 260], "data": {
-      "entries": [ { "from": "biz-server", "to": "biz-server" }, { "from": "packages/common", "to": "packages/common" } ],
-      "excludes": ["node_modules", "build", ".svelte-kit", ".env"]
-    } },
-    { "id": "sEnv", "type": "write.env", "position": [820, 260], "data": { "target": "biz-server/.env", "mapping": {
-      "DEBUG": "DEBUG", "PORT": "PORT", "UPLOAD_DIR": "UPLOAD_DIR",
-      "JWT_SECRET": "JWT_SECRET", "BSI": "BSI", "JWT_KID": "JWT_KID",
-      "DB_URL": "DB_URL", "DB_SU_ACCQYWX": "DB_SU_ACCQYWX"
-    } } },
-    { "id": "sPack", "type": "tar.pack", "position": [1080, 260], "data": { "entries": ["biz-server", "packages"], "prefix": "biz-server" } },
-
-    { "id": "ssh1", "type": "ssh.session", "position": [40, 1100], "data": {} },
-    { "id": "fieldDD", "type": "field.get", "position": [300, 1340], "data": { "key": "DEPLOY_DIR" } },
-    { "id": "fieldWSU", "type": "field.get", "position": [300, 1420], "data": { "key": "WEB_SERVER_USER" } },
-    { "id": "svcName", "type": "string.const", "position": [560, 1260], "data": { "value": "xlgbis-biz" } },
-    { "id": "nginxName", "type": "string.const", "position": [560, 1180], "data": { "value": "nginx" } },
-    { "id": "fmtUpC", "type": "string.format", "position": [1340, 180], "data": { "format": "{{env.DEPLOY_DIR}}/client-build/{{name}}" } },
-    { "id": "fmtUpS", "type": "string.format", "position": [1080, 400], "data": { "format": "{{env.DEPLOY_DIR}}/server-build/{{name}}" } },
-    { "id": "fmtCurC", "type": "string.format", "position": [820, 1340], "data": { "format": "{{env.DEPLOY_DIR}}/client" } },
-    { "id": "fmtCurS", "type": "string.format", "position": [820, 1420], "data": { "format": "{{env.DEPLOY_DIR}}/server" } },
-    { "id": "fmtRelC", "type": "string.format", "position": [1600, 700], "data": { "format": "{{env.DEPLOY_DIR}}/client-release/{{rel}}" } },
-    { "id": "fmtRelS", "type": "string.format", "position": [1600, 860], "data": { "format": "{{env.DEPLOY_DIR}}/server-release/{{rel}}" } },
-
-    { "id": "cMk", "type": "ssh.exec", "position": [1600, 40], "data": { "command": "mkdir -p {{env.DEPLOY_DIR}}/client-build {{env.DEPLOY_DIR}}/client-release", "useSudo": true, "loginShell": false } },
-    { "id": "cUp", "type": "ssh.upload", "position": [1860, 40], "data": {} },
-    { "id": "cExt", "type": "remote.extract", "position": [2120, 40], "data": { "expect": ["index.html"], "subdir": "client-release" } },
-    { "id": "cLink", "type": "remote.symlink", "position": [2380, 40], "data": {} },
-    { "id": "nginxR", "type": "remote.service", "position": [2640, 40], "data": { "action": "reload" } },
-
-    { "id": "sMk", "type": "ssh.exec", "position": [1340, 260], "data": { "command": "mkdir -p {{env.DEPLOY_DIR}}/server-build {{env.DEPLOY_DIR}}/server-release", "useSudo": true, "loginShell": false } },
-    { "id": "sUp", "type": "ssh.upload", "position": [1600, 260], "data": {} },
-    { "id": "sExt", "type": "remote.extract", "position": [1860, 260], "data": { "subdir": "server-release", "expect": ["biz-server/src/index.js", "biz-server/package.json", "biz-server/pnpm-lock.yaml", "biz-server/.env", "packages/common/package.json"] } },
-    { "id": "sDeps", "type": "ssh.exec", "position": [2120, 260], "data": { "command": "cd {{rel}}/biz-server && pnpm install --prod --frozen-lockfile && cd {{rel}}/packages/common && pnpm install --prod --frozen-lockfile", "useSudo": true, "loginShell": true } },
-    { "id": "sChown", "type": "remote.chown", "position": [2380, 260], "data": {} },
-    { "id": "sLink", "type": "remote.symlink", "position": [2640, 260], "data": {} },
-    { "id": "svc1", "type": "remote.service", "position": [2900, 260], "data": { "action": "restart" } },
-
-    { "id": "inRel", "type": "task.input", "position": [1340, 780], "data": { "name": "release", "label": "目标 release 名", "fallback": "" } },
-    { "id": "chkC", "type": "ssh.exec", "position": [1860, 700], "data": { "command": "test -f {{env.DEPLOY_DIR}}/client-release/{{rel}}/index.html || { echo 'client release not found: {{rel}}'; exit 1; }", "useSudo": false, "loginShell": false } },
-    { "id": "rLinkC", "type": "remote.symlink", "position": [2380, 700], "data": {} },
-    { "id": "chkS", "type": "ssh.exec", "position": [1860, 860], "data": { "command": "test -f {{env.DEPLOY_DIR}}/server-release/{{rel}}/biz-server/src/index.js && test -f {{env.DEPLOY_DIR}}/server-release/{{rel}}/biz-server/.env || { echo 'server release invalid: {{rel}}'; exit 1; }", "useSudo": false, "loginShell": false } },
-    { "id": "rLinkS", "type": "remote.symlink", "position": [2380, 860], "data": {} },
-
-    { "id": "st1", "type": "ssh.exec", "position": [1340, 1020], "data": { "command": "systemctl is-active frpc || true\nsystemctl is-active nginx || true\nsystemctl is-active xlgbis-biz || true\nreadlink -f {{env.DEPLOY_DIR}}/client || true\nreadlink -f {{env.DEPLOY_DIR}}/server || true\nls -1t {{env.DEPLOY_DIR}}/client-release 2>/dev/null | head -5\nls -1t {{env.DEPLOY_DIR}}/server-release 2>/dev/null | head -5\ndf -h {{env.DEPLOY_DIR}} | tail -1", "useSudo": false, "loginShell": true } },
-
-    { "id": "aMk", "type": "ssh.exec", "position": [40, 1620], "data": { "command": "mkdir -p {{env.DEPLOY_DIR}}/ops", "useSudo": true, "loginShell": false } },
-    { "id": "aNg", "type": "template.render", "position": [300, 1540], "data": { "template": "./tpl/xlgbis-bs/nginx-site.conf", "outputName": "xlgbis" } },
-    { "id": "aFrpcT", "type": "template.render", "position": [300, 1620], "data": { "template": "./tpl/xlgbis-bs/frpc.toml", "outputName": "frpc.toml" } },
-    { "id": "aFrpcS", "type": "template.render", "position": [300, 1700], "data": { "template": "./tpl/xlgbis-bs/frpc.service", "outputName": "frpc.service" } },
-    { "id": "aBizS", "type": "template.render", "position": [300, 1780], "data": { "template": "./tpl/xlgbis-bs/xlgbis-biz.service", "outputName": "xlgbis-biz.service" } },
-    { "id": "aUpNg", "type": "ssh.upload", "position": [560, 1540], "data": {} },
-    { "id": "aUpFrpcT", "type": "ssh.upload", "position": [560, 1620], "data": {} },
-    { "id": "aUpFrpcS", "type": "ssh.upload", "position": [560, 1700], "data": {} },
-    { "id": "aUpBizS", "type": "ssh.upload", "position": [560, 1780], "data": {} },
-    { "id": "aInstall", "type": "ssh.exec", "position": [820, 1620], "data": { "command": "install -d -o {{env.FRP_USER}} -g {{env.FRP_USER}} -m 0700 /etc/frp && install -o {{env.FRP_USER}} -g {{env.FRP_USER}} -m 0600 {{frpct}} /etc/frp/frpc.toml && install -o root -g root -m 0644 {{frpcs}} /etc/systemd/system/frpc.service && install -o root -g root -m 0644 {{bizs}} /etc/systemd/system/xlgbis-biz.service && install -o root -g root -m 0644 {{ng}} /etc/nginx/sites-available/xlgbis && ln -sfn /etc/nginx/sites-available/xlgbis /etc/nginx/sites-enabled/xlgbis && nginx -t && systemctl daemon-reload && systemctl enable frpc.service && systemctl restart frpc.service && systemctl restart xlgbis-biz.service && systemctl reload nginx && echo 'apply-config done'", "useSudo": true, "loginShell": false } }
+    {
+      "id": "env1",
+      "type": "env.file",
+      "position": [
+        40,
+        420
+      ],
+      "data": {
+        "envFile": "xlgbis-bs.env",
+        "schema": {
+          "SERVER_TYPE": "test",
+          "REMOTE_HOST": "host.example.com",
+          "REMOTE_USER": "deploy",
+          "REMOTE_HOST_FINGERPRINT": "",
+          "REMOTE_KEY_FILE": "",
+          "DEPLOY_DIR": "/opt/xlgbis-biz",
+          "BSI": "bs1",
+          "FRPS_SERVER_ADDR": "login.domain.com",
+          "FRPS_BIND_PORT": 9999,
+          "FRP_TOKEN_PATH": "/etc/frp/frp_token",
+          "LOCAL_NGINX_WEB_ROOT": "/opt/xlgbis-biz/client",
+          "BIZ_APP_PORT": 3000,
+          "FRP_USER": "frp",
+          "WEB_SERVER_USER": "opbiz",
+          "DEBUG": true,
+          "PORT": 3000,
+          "UPLOAD_DIR": "a_secure_dir",
+          "JWT_SECRET": "a_jwt_secret",
+          "JWT_KID": "v1",
+          "DB_URL": "http://db",
+          "DB_SU_ACCQYWX": "superuser",
+          "DOMAIN_NAME": "domain.com",
+          "LOGIN_URL": "",
+          "URL_OA_SERVER": "",
+          "LOG_LEVEL": "info"
+        }
+      }
+    },
+    {
+      "id": "inRef",
+      "type": "task.input",
+      "position": [
+        40,
+        80
+      ],
+      "data": {
+        "name": "ref",
+        "label": "Git ref（空 = HEAD）",
+        "fallback": ""
+      }
+    },
+    {
+      "id": "git1",
+      "type": "git.ref",
+      "position": [
+        300,
+        80
+      ],
+      "data": {
+        "repoDir": "C:/Users/yatyr/workspace/xlgbis",
+        "prefix": ""
+      }
+    },
+    {
+      "id": "cEnv",
+      "type": "write.env",
+      "position": [
+        560,
+        40
+      ],
+      "data": {
+        "target": "biz-client/.env",
+        "mapping": {
+          "VITE_VERSION": "VERSION",
+          "VITE_LOGIN_URL": "LOGIN_URL",
+          "VITE_URL_OA_SERVER": "URL_OA_SERVER",
+          "VITE_LOG_LEVEL": "LOG_LEVEL"
+        }
+      }
+    },
+    {
+      "id": "cBuild",
+      "type": "cmd.exec",
+      "position": [
+        820,
+        40
+      ],
+      "data": {
+        "commands": "pnpm -C biz-client install --frozen-lockfile\npnpm -C biz-client build"
+      }
+    },
+    {
+      "id": "fmtCDist",
+      "type": "string.format",
+      "position": [
+        1080,
+        100
+      ],
+      "data": {
+        "format": "{{repo}}/biz-client/build"
+      }
+    },
+    {
+      "id": "cPack",
+      "type": "tar.pack",
+      "position": [
+        1340,
+        40
+      ],
+      "data": {
+        "entries": [
+          "."
+        ],
+        "prefix": "biz-client"
+      }
+    },
+    {
+      "id": "sStage",
+      "type": "stage.copy",
+      "position": [
+        560,
+        260
+      ],
+      "data": {
+        "entries": [
+          {
+            "from": "biz-server",
+            "to": "biz-server"
+          },
+          {
+            "from": "packages/common",
+            "to": "packages/common"
+          }
+        ],
+        "excludes": [
+          "node_modules",
+          "build",
+          ".svelte-kit",
+          ".env"
+        ]
+      }
+    },
+    {
+      "id": "sEnv",
+      "type": "write.env",
+      "position": [
+        820,
+        260
+      ],
+      "data": {
+        "target": "biz-server/.env",
+        "mapping": {
+          "DEBUG": "DEBUG",
+          "PORT": "PORT",
+          "UPLOAD_DIR": "UPLOAD_DIR",
+          "JWT_SECRET": "JWT_SECRET",
+          "BSI": "BSI",
+          "JWT_KID": "JWT_KID",
+          "DB_URL": "DB_URL",
+          "DB_SU_ACCQYWX": "DB_SU_ACCQYWX"
+        }
+      }
+    },
+    {
+      "id": "sPack",
+      "type": "tar.pack",
+      "position": [
+        1080,
+        260
+      ],
+      "data": {
+        "entries": [
+          "biz-server",
+          "packages"
+        ],
+        "prefix": "biz-server"
+      }
+    },
+    {
+      "id": "ssh1",
+      "type": "ssh.session",
+      "position": [
+        40,
+        1100
+      ],
+      "data": {}
+    },
+    {
+      "id": "fieldDD",
+      "type": "field.get",
+      "position": [
+        300,
+        1340
+      ],
+      "data": {
+        "key": "DEPLOY_DIR"
+      }
+    },
+    {
+      "id": "fieldWSU",
+      "type": "field.get",
+      "position": [
+        300,
+        1420
+      ],
+      "data": {
+        "key": "WEB_SERVER_USER"
+      }
+    },
+    {
+      "id": "svcName",
+      "type": "string.const",
+      "position": [
+        560,
+        1260
+      ],
+      "data": {
+        "value": "xlgbis-biz"
+      }
+    },
+    {
+      "id": "nginxName",
+      "type": "string.const",
+      "position": [
+        560,
+        1180
+      ],
+      "data": {
+        "value": "nginx"
+      }
+    },
+    {
+      "id": "fmtUpC",
+      "type": "string.format",
+      "position": [
+        1340,
+        180
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/client-build/{{name}}"
+      }
+    },
+    {
+      "id": "fmtUpS",
+      "type": "string.format",
+      "position": [
+        1080,
+        400
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/server-build/{{name}}"
+      }
+    },
+    {
+      "id": "fmtCurC",
+      "type": "string.format",
+      "position": [
+        820,
+        1340
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/client"
+      }
+    },
+    {
+      "id": "fmtCurS",
+      "type": "string.format",
+      "position": [
+        820,
+        1420
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/server"
+      }
+    },
+    {
+      "id": "fmtRelC",
+      "type": "string.format",
+      "position": [
+        1600,
+        700
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/client-release/{{rel}}"
+      }
+    },
+    {
+      "id": "fmtRelS",
+      "type": "string.format",
+      "position": [
+        1600,
+        860
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/server-release/{{rel}}"
+      }
+    },
+    {
+      "id": "cMk",
+      "type": "ssh.exec",
+      "position": [
+        1600,
+        40
+      ],
+      "data": {
+        "command": "mkdir -p {{env.DEPLOY_DIR}}/client-build {{env.DEPLOY_DIR}}/client-release",
+        "useSudo": true,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "cUp",
+      "type": "ssh.upload",
+      "position": [
+        1860,
+        40
+      ],
+      "data": {}
+    },
+    {
+      "id": "cExt",
+      "type": "remote.extract",
+      "position": [
+        2120,
+        40
+      ],
+      "data": {
+        "expect": [
+          "index.html"
+        ],
+        "subdir": "client-release"
+      }
+    },
+    {
+      "id": "cLink",
+      "type": "remote.symlink",
+      "position": [
+        2380,
+        40
+      ],
+      "data": {}
+    },
+    {
+      "id": "nginxR",
+      "type": "remote.service",
+      "position": [
+        2640,
+        40
+      ],
+      "data": {
+        "action": "reload"
+      }
+    },
+    {
+      "id": "sMk",
+      "type": "ssh.exec",
+      "position": [
+        1340,
+        260
+      ],
+      "data": {
+        "command": "mkdir -p {{env.DEPLOY_DIR}}/server-build {{env.DEPLOY_DIR}}/server-release",
+        "useSudo": true,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "sUp",
+      "type": "ssh.upload",
+      "position": [
+        1600,
+        260
+      ],
+      "data": {}
+    },
+    {
+      "id": "sExt",
+      "type": "remote.extract",
+      "position": [
+        1860,
+        260
+      ],
+      "data": {
+        "subdir": "server-release",
+        "expect": [
+          "biz-server/src/index.js",
+          "biz-server/package.json",
+          "biz-server/pnpm-lock.yaml",
+          "biz-server/.env",
+          "packages/common/package.json"
+        ]
+      }
+    },
+    {
+      "id": "sDeps",
+      "type": "ssh.exec",
+      "position": [
+        2120,
+        260
+      ],
+      "data": {
+        "command": "cd {{rel}}/biz-server && pnpm install --prod --frozen-lockfile && cd {{rel}}/packages/common && pnpm install --prod --frozen-lockfile",
+        "useSudo": true,
+        "loginShell": true
+      }
+    },
+    {
+      "id": "sChown",
+      "type": "remote.chown",
+      "position": [
+        2380,
+        260
+      ],
+      "data": {}
+    },
+    {
+      "id": "sLink",
+      "type": "remote.symlink",
+      "position": [
+        2640,
+        260
+      ],
+      "data": {}
+    },
+    {
+      "id": "svc1",
+      "type": "remote.service",
+      "position": [
+        2900,
+        260
+      ],
+      "data": {
+        "action": "restart"
+      }
+    },
+    {
+      "id": "inRel",
+      "type": "task.input",
+      "position": [
+        1340,
+        780
+      ],
+      "data": {
+        "name": "release",
+        "label": "目标 release 名",
+        "fallback": ""
+      }
+    },
+    {
+      "id": "chkC",
+      "type": "ssh.exec",
+      "position": [
+        1860,
+        700
+      ],
+      "data": {
+        "command": "test -f {{env.DEPLOY_DIR}}/client-release/{{rel}}/index.html || { echo 'client release not found: {{rel}}'; exit 1; }",
+        "useSudo": false,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "rLinkC",
+      "type": "remote.symlink",
+      "position": [
+        2380,
+        700
+      ],
+      "data": {}
+    },
+    {
+      "id": "chkS",
+      "type": "ssh.exec",
+      "position": [
+        1860,
+        860
+      ],
+      "data": {
+        "command": "test -f {{env.DEPLOY_DIR}}/server-release/{{rel}}/biz-server/src/index.js && test -f {{env.DEPLOY_DIR}}/server-release/{{rel}}/biz-server/.env || { echo 'server release invalid: {{rel}}'; exit 1; }",
+        "useSudo": false,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "rLinkS",
+      "type": "remote.symlink",
+      "position": [
+        2380,
+        860
+      ],
+      "data": {}
+    },
+    {
+      "id": "st1",
+      "type": "ssh.exec",
+      "position": [
+        1340,
+        1020
+      ],
+      "data": {
+        "command": "systemctl is-active frpc || true\nsystemctl is-active nginx || true\nsystemctl is-active xlgbis-biz || true\nreadlink -f {{env.DEPLOY_DIR}}/client || true\nreadlink -f {{env.DEPLOY_DIR}}/server || true\nls -1t {{env.DEPLOY_DIR}}/client-release 2>/dev/null | head -5\nls -1t {{env.DEPLOY_DIR}}/server-release 2>/dev/null | head -5\ndf -h {{env.DEPLOY_DIR}} | tail -1",
+        "useSudo": false,
+        "loginShell": true
+      }
+    },
+    {
+      "id": "aMk",
+      "type": "ssh.exec",
+      "position": [
+        40,
+        1620
+      ],
+      "data": {
+        "command": "mkdir -p {{env.DEPLOY_DIR}}/ops",
+        "useSudo": true,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "aNg",
+      "type": "template.render",
+      "position": [
+        300,
+        1540
+      ],
+      "data": {
+        "template": "./tpl/xlgbis-bs/nginx-site.conf",
+        "outputName": "xlgbis"
+      }
+    },
+    {
+      "id": "aFrpcT",
+      "type": "template.render",
+      "position": [
+        300,
+        1620
+      ],
+      "data": {
+        "template": "./tpl/xlgbis-bs/frpc.toml",
+        "outputName": "frpc.toml"
+      }
+    },
+    {
+      "id": "aFrpcS",
+      "type": "template.render",
+      "position": [
+        300,
+        1700
+      ],
+      "data": {
+        "template": "./tpl/xlgbis-bs/frpc.service",
+        "outputName": "frpc.service"
+      }
+    },
+    {
+      "id": "aBizS",
+      "type": "template.render",
+      "position": [
+        300,
+        1780
+      ],
+      "data": {
+        "template": "./tpl/xlgbis-bs/xlgbis-biz.service",
+        "outputName": "xlgbis-biz.service"
+      }
+    },
+    {
+      "id": "aUpNg",
+      "type": "ssh.upload",
+      "position": [
+        560,
+        1540
+      ],
+      "data": {}
+    },
+    {
+      "id": "aUpFrpcT",
+      "type": "ssh.upload",
+      "position": [
+        560,
+        1620
+      ],
+      "data": {}
+    },
+    {
+      "id": "aUpFrpcS",
+      "type": "ssh.upload",
+      "position": [
+        560,
+        1700
+      ],
+      "data": {}
+    },
+    {
+      "id": "aUpBizS",
+      "type": "ssh.upload",
+      "position": [
+        560,
+        1780
+      ],
+      "data": {}
+    },
+    {
+      "id": "aInstall",
+      "type": "ssh.exec",
+      "position": [
+        820,
+        1620
+      ],
+      "data": {
+        "command": "install -d -o {{env.FRP_USER}} -g {{env.FRP_USER}} -m 0700 /etc/frp && install -o {{env.FRP_USER}} -g {{env.FRP_USER}} -m 0600 {{frpct}} /etc/frp/frpc.toml && install -o root -g root -m 0644 {{frpcs}} /etc/systemd/system/frpc.service && install -o root -g root -m 0644 {{bizs}} /etc/systemd/system/xlgbis-biz.service && install -o root -g root -m 0644 {{ng}} /etc/nginx/sites-available/xlgbis && ln -sfn /etc/nginx/sites-available/xlgbis /etc/nginx/sites-enabled/xlgbis && nginx -t && systemctl daemon-reload && systemctl enable frpc.service && systemctl restart frpc.service && systemctl restart xlgbis-biz.service && systemctl reload nginx && echo 'apply-config done'",
+        "useSudo": true,
+        "loginShell": false
+      }
+    },
+    {
+      "id": "fmtUpNg",
+      "type": "string.format",
+      "position": [
+        500,
+        1710
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/xlgbis"
+      }
+    },
+    {
+      "id": "fmtUpFrpcT",
+      "type": "string.format",
+      "position": [
+        500,
+        1790
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/frpc.toml"
+      }
+    },
+    {
+      "id": "fmtUpFrpcS",
+      "type": "string.format",
+      "position": [
+        500,
+        1870
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/frpc.service"
+      }
+    },
+    {
+      "id": "fmtUpBizS",
+      "type": "string.format",
+      "position": [
+        500,
+        1950
+      ],
+      "data": {
+        "format": "{{env.DEPLOY_DIR}}/ops/xlgbis-biz.service"
+      }
+    }
   ],
   "edges": [
-    { "id": "e1", "source": "inRef", "sourceHandle": "value", "target": "git1", "targetHandle": "ref" },
-    { "id": "e2", "source": "env1", "sourceHandle": "env", "target": "cEnv", "targetHandle": "env" },
-    { "id": "e3", "source": "git1", "sourceHandle": "versionId", "target": "cEnv", "targetHandle": "version" },
-    { "id": "e4", "source": "git1", "sourceHandle": "repoDir", "target": "cBuild", "targetHandle": "cwd" },
-    { "id": "e5", "source": "git1", "sourceHandle": "repoDir", "target": "fmtCDist", "targetHandle": "repo" },
-    { "id": "e6", "source": "fmtCDist", "sourceHandle": "value", "target": "cPack", "targetHandle": "dir" },
-    { "id": "e7", "source": "git1", "sourceHandle": "releaseName", "target": "cPack", "targetHandle": "name" },
-
-    { "id": "e10", "source": "git1", "sourceHandle": "repoDir", "target": "sStage", "targetHandle": "root" },
-    { "id": "e11", "source": "env1", "sourceHandle": "env", "target": "sEnv", "targetHandle": "env" },
-    { "id": "e12", "source": "sStage", "sourceHandle": "dir", "target": "sEnv", "targetHandle": "dir" },
-    { "id": "e13", "source": "sStage", "sourceHandle": "dir", "target": "sPack", "targetHandle": "dir" },
-    { "id": "e14", "source": "git1", "sourceHandle": "releaseName", "target": "sPack", "targetHandle": "name" },
-
-    { "id": "e20", "source": "env1", "sourceHandle": "env", "target": "ssh1", "targetHandle": "env" },
-    { "id": "e21", "source": "env1", "sourceHandle": "env", "target": "fieldDD", "targetHandle": "obj" },
-    { "id": "e22", "source": "env1", "sourceHandle": "env", "target": "fieldWSU", "targetHandle": "obj" },
-    { "id": "e23", "source": "env1", "sourceHandle": "env", "target": "fmtCurC", "targetHandle": "env" },
-    { "id": "e24", "source": "env1", "sourceHandle": "env", "target": "fmtCurS", "targetHandle": "env" },
-
-    { "id": "e30", "source": "ssh1", "sourceHandle": "ssh", "target": "cMk", "targetHandle": "ssh" },
-    { "id": "e31", "source": "env1", "sourceHandle": "env", "target": "cMk", "targetHandle": "env" },
-    { "id": "e32", "source": "env1", "sourceHandle": "env", "target": "fmtUpC", "targetHandle": "env" },
-    { "id": "e33", "source": "cPack", "sourceHandle": "archiveName", "target": "fmtUpC", "targetHandle": "name" },
-    { "id": "e34", "source": "ssh1", "sourceHandle": "ssh", "target": "cUp", "targetHandle": "ssh" },
-    { "id": "e35", "source": "cPack", "sourceHandle": "archive", "target": "cUp", "targetHandle": "local" },
-    { "id": "e36", "source": "fmtUpC", "sourceHandle": "value", "target": "cUp", "targetHandle": "path" },
-    { "id": "e37", "source": "ssh1", "sourceHandle": "ssh", "target": "cExt", "targetHandle": "ssh" },
-    { "id": "e38", "source": "cUp", "sourceHandle": "remoteFile", "target": "cExt", "targetHandle": "archive" },
-    { "id": "e39", "source": "git1", "sourceHandle": "releaseName", "target": "cExt", "targetHandle": "releaseName" },
-    { "id": "e40", "source": "fieldDD", "sourceHandle": "value", "target": "cExt", "targetHandle": "baseDir" },
-    { "id": "e41", "source": "ssh1", "sourceHandle": "ssh", "target": "cLink", "targetHandle": "ssh" },
-    { "id": "e42", "source": "cExt", "sourceHandle": "releasePath", "target": "cLink", "targetHandle": "target" },
-    { "id": "e43", "source": "fmtCurC", "sourceHandle": "value", "target": "cLink", "targetHandle": "link" },
-    { "id": "e44", "source": "ssh1", "sourceHandle": "ssh", "target": "nginxR", "targetHandle": "ssh" },
-    { "id": "e45", "source": "nginxName", "sourceHandle": "value", "target": "nginxR", "targetHandle": "name" },
-
-    { "id": "e50", "source": "ssh1", "sourceHandle": "ssh", "target": "sMk", "targetHandle": "ssh" },
-    { "id": "e51", "source": "env1", "sourceHandle": "env", "target": "sMk", "targetHandle": "env" },
-    { "id": "e52", "source": "env1", "sourceHandle": "env", "target": "fmtUpS", "targetHandle": "env" },
-    { "id": "e53", "source": "sPack", "sourceHandle": "archiveName", "target": "fmtUpS", "targetHandle": "name" },
-    { "id": "e54", "source": "ssh1", "sourceHandle": "ssh", "target": "sUp", "targetHandle": "ssh" },
-    { "id": "e55", "source": "sPack", "sourceHandle": "archive", "target": "sUp", "targetHandle": "local" },
-    { "id": "e56", "source": "fmtUpS", "sourceHandle": "value", "target": "sUp", "targetHandle": "path" },
-    { "id": "e57", "source": "ssh1", "sourceHandle": "ssh", "target": "sExt", "targetHandle": "ssh" },
-    { "id": "e58", "source": "sUp", "sourceHandle": "remoteFile", "target": "sExt", "targetHandle": "archive" },
-    { "id": "e59", "source": "git1", "sourceHandle": "releaseName", "target": "sExt", "targetHandle": "releaseName" },
-    { "id": "e60", "source": "fieldDD", "sourceHandle": "value", "target": "sExt", "targetHandle": "baseDir" },
-    { "id": "e61", "source": "ssh1", "sourceHandle": "ssh", "target": "sDeps", "targetHandle": "ssh" },
-    { "id": "e62", "source": "sExt", "sourceHandle": "releasePath", "target": "sDeps", "targetHandle": "rel" },
-    { "id": "e63", "source": "ssh1", "sourceHandle": "ssh", "target": "sChown", "targetHandle": "ssh" },
-    { "id": "e64", "source": "sExt", "sourceHandle": "releasePath", "target": "sChown", "targetHandle": "path" },
-    { "id": "e65", "source": "fieldWSU", "sourceHandle": "value", "target": "sChown", "targetHandle": "user" },
-    { "id": "e66", "source": "ssh1", "sourceHandle": "ssh", "target": "sLink", "targetHandle": "ssh" },
-    { "id": "e67", "source": "sExt", "sourceHandle": "releasePath", "target": "sLink", "targetHandle": "target" },
-    { "id": "e68", "source": "fmtCurS", "sourceHandle": "value", "target": "sLink", "targetHandle": "link" },
-    { "id": "e69", "source": "ssh1", "sourceHandle": "ssh", "target": "svc1", "targetHandle": "ssh" },
-    { "id": "e70", "source": "svcName", "sourceHandle": "value", "target": "svc1", "targetHandle": "name" },
-
-    { "id": "e80", "source": "env1", "sourceHandle": "env", "target": "fmtRelC", "targetHandle": "env" },
-    { "id": "e81", "source": "inRel", "sourceHandle": "value", "target": "fmtRelC", "targetHandle": "rel" },
-    { "id": "e82", "source": "ssh1", "sourceHandle": "ssh", "target": "chkC", "targetHandle": "ssh" },
-    { "id": "e83", "source": "env1", "sourceHandle": "env", "target": "chkC", "targetHandle": "env" },
-    { "id": "e84", "source": "inRel", "sourceHandle": "value", "target": "chkC", "targetHandle": "rel" },
-    { "id": "e85", "source": "ssh1", "sourceHandle": "ssh", "target": "rLinkC", "targetHandle": "ssh" },
-    { "id": "e86", "source": "fmtRelC", "sourceHandle": "value", "target": "rLinkC", "targetHandle": "target" },
-    { "id": "e87", "source": "fmtCurC", "sourceHandle": "value", "target": "rLinkC", "targetHandle": "link" },
-    { "id": "e88", "source": "env1", "sourceHandle": "env", "target": "fmtRelS", "targetHandle": "env" },
-    { "id": "e89", "source": "inRel", "sourceHandle": "value", "target": "fmtRelS", "targetHandle": "rel" },
-    { "id": "e90", "source": "ssh1", "sourceHandle": "ssh", "target": "chkS", "targetHandle": "ssh" },
-    { "id": "e91", "source": "env1", "sourceHandle": "env", "target": "chkS", "targetHandle": "env" },
-    { "id": "e92", "source": "inRel", "sourceHandle": "value", "target": "chkS", "targetHandle": "rel" },
-    { "id": "e93", "source": "ssh1", "sourceHandle": "ssh", "target": "rLinkS", "targetHandle": "ssh" },
-    { "id": "e94", "source": "fmtRelS", "sourceHandle": "value", "target": "rLinkS", "targetHandle": "target" },
-    { "id": "e95", "source": "fmtCurS", "sourceHandle": "value", "target": "rLinkS", "targetHandle": "link" },
-
-    { "id": "e100", "source": "ssh1", "sourceHandle": "ssh", "target": "st1", "targetHandle": "ssh" },
-    { "id": "e101", "source": "env1", "sourceHandle": "env", "target": "st1", "targetHandle": "env" },
-
-    { "id": "e110", "source": "ssh1", "sourceHandle": "ssh", "target": "aMk", "targetHandle": "ssh" },
-    { "id": "e111", "source": "env1", "sourceHandle": "env", "target": "aMk", "targetHandle": "env" },
-    { "id": "e112", "source": "env1", "sourceHandle": "env", "target": "aNg", "targetHandle": "vars" },
-    { "id": "e113", "source": "env1", "sourceHandle": "env", "target": "aFrpcT", "targetHandle": "vars" },
-    { "id": "e114", "source": "env1", "sourceHandle": "env", "target": "aFrpcS", "targetHandle": "vars" },
-    { "id": "e115", "source": "env1", "sourceHandle": "env", "target": "aBizS", "targetHandle": "vars" },
-    { "id": "e120", "source": "ssh1", "sourceHandle": "ssh", "target": "aUpNg", "targetHandle": "ssh" },
-    { "id": "e121", "source": "aNg", "sourceHandle": "file", "target": "aUpNg", "targetHandle": "local" },
-    { "id": "e122", "source": "ssh1", "sourceHandle": "ssh", "target": "aUpFrpcT", "targetHandle": "ssh" },
-    { "id": "e123", "source": "aFrpcT", "sourceHandle": "file", "target": "aUpFrpcT", "targetHandle": "local" },
-    { "id": "e124", "source": "ssh1", "sourceHandle": "ssh", "target": "aUpFrpcS", "targetHandle": "ssh" },
-    { "id": "e125", "source": "aFrpcS", "sourceHandle": "file", "target": "aUpFrpcS", "targetHandle": "local" },
-    { "id": "e126", "source": "ssh1", "sourceHandle": "ssh", "target": "aUpBizS", "targetHandle": "ssh" },
-    { "id": "e127", "source": "aBizS", "sourceHandle": "file", "target": "aUpBizS", "targetHandle": "local" },
-    { "id": "e130", "source": "ssh1", "sourceHandle": "ssh", "target": "aInstall", "targetHandle": "ssh" },
-    { "id": "e131", "source": "env1", "sourceHandle": "env", "target": "aInstall", "targetHandle": "env" },
-    { "id": "e132", "source": "aUpNg", "sourceHandle": "remoteFile", "target": "aInstall", "targetHandle": "ng" },
-    { "id": "e133", "source": "aUpFrpcT", "sourceHandle": "remoteFile", "target": "aInstall", "targetHandle": "frpct" },
-    { "id": "e134", "source": "aUpFrpcS", "sourceHandle": "remoteFile", "target": "aInstall", "targetHandle": "frpcs" },
-    { "id": "e135", "source": "aUpBizS", "sourceHandle": "remoteFile", "target": "aInstall", "targetHandle": "bizs" }
+    {
+      "id": "e1",
+      "source": "inRef",
+      "sourceHandle": "value",
+      "target": "git1",
+      "targetHandle": "ref"
+    },
+    {
+      "id": "e2",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "cEnv",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e3",
+      "source": "git1",
+      "sourceHandle": "versionId",
+      "target": "cEnv",
+      "targetHandle": "version"
+    },
+    {
+      "id": "e4",
+      "source": "git1",
+      "sourceHandle": "repoDir",
+      "target": "cBuild",
+      "targetHandle": "cwd"
+    },
+    {
+      "id": "e5",
+      "source": "git1",
+      "sourceHandle": "repoDir",
+      "target": "fmtCDist",
+      "targetHandle": "repo"
+    },
+    {
+      "id": "e6",
+      "source": "fmtCDist",
+      "sourceHandle": "value",
+      "target": "cPack",
+      "targetHandle": "dir"
+    },
+    {
+      "id": "e7",
+      "source": "git1",
+      "sourceHandle": "releaseName",
+      "target": "cPack",
+      "targetHandle": "name"
+    },
+    {
+      "id": "e10",
+      "source": "git1",
+      "sourceHandle": "repoDir",
+      "target": "sStage",
+      "targetHandle": "root"
+    },
+    {
+      "id": "e11",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "sEnv",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e12",
+      "source": "sStage",
+      "sourceHandle": "dir",
+      "target": "sEnv",
+      "targetHandle": "dir"
+    },
+    {
+      "id": "e13",
+      "source": "sStage",
+      "sourceHandle": "dir",
+      "target": "sPack",
+      "targetHandle": "dir"
+    },
+    {
+      "id": "e14",
+      "source": "git1",
+      "sourceHandle": "releaseName",
+      "target": "sPack",
+      "targetHandle": "name"
+    },
+    {
+      "id": "e20",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "ssh1",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e21",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fieldDD",
+      "targetHandle": "obj"
+    },
+    {
+      "id": "e22",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fieldWSU",
+      "targetHandle": "obj"
+    },
+    {
+      "id": "e23",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtCurC",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e24",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtCurS",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e30",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "cMk",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e31",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "cMk",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e32",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpC",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e33",
+      "source": "cPack",
+      "sourceHandle": "archiveName",
+      "target": "fmtUpC",
+      "targetHandle": "name"
+    },
+    {
+      "id": "e34",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "cUp",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e35",
+      "source": "cPack",
+      "sourceHandle": "archive",
+      "target": "cUp",
+      "targetHandle": "local"
+    },
+    {
+      "id": "e36",
+      "source": "fmtUpC",
+      "sourceHandle": "value",
+      "target": "cUp",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e37",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "cExt",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e38",
+      "source": "cUp",
+      "sourceHandle": "remoteFile",
+      "target": "cExt",
+      "targetHandle": "archive"
+    },
+    {
+      "id": "e39",
+      "source": "git1",
+      "sourceHandle": "releaseName",
+      "target": "cExt",
+      "targetHandle": "releaseName"
+    },
+    {
+      "id": "e40",
+      "source": "fieldDD",
+      "sourceHandle": "value",
+      "target": "cExt",
+      "targetHandle": "baseDir"
+    },
+    {
+      "id": "e41",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "cLink",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e42",
+      "source": "cExt",
+      "sourceHandle": "releasePath",
+      "target": "cLink",
+      "targetHandle": "target"
+    },
+    {
+      "id": "e43",
+      "source": "fmtCurC",
+      "sourceHandle": "value",
+      "target": "cLink",
+      "targetHandle": "link"
+    },
+    {
+      "id": "e44",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "nginxR",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e45",
+      "source": "nginxName",
+      "sourceHandle": "value",
+      "target": "nginxR",
+      "targetHandle": "name"
+    },
+    {
+      "id": "e50",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "sMk",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e51",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "sMk",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e52",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpS",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e53",
+      "source": "sPack",
+      "sourceHandle": "archiveName",
+      "target": "fmtUpS",
+      "targetHandle": "name"
+    },
+    {
+      "id": "e54",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "sUp",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e55",
+      "source": "sPack",
+      "sourceHandle": "archive",
+      "target": "sUp",
+      "targetHandle": "local"
+    },
+    {
+      "id": "e56",
+      "source": "fmtUpS",
+      "sourceHandle": "value",
+      "target": "sUp",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e57",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "sExt",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e58",
+      "source": "sUp",
+      "sourceHandle": "remoteFile",
+      "target": "sExt",
+      "targetHandle": "archive"
+    },
+    {
+      "id": "e59",
+      "source": "git1",
+      "sourceHandle": "releaseName",
+      "target": "sExt",
+      "targetHandle": "releaseName"
+    },
+    {
+      "id": "e60",
+      "source": "fieldDD",
+      "sourceHandle": "value",
+      "target": "sExt",
+      "targetHandle": "baseDir"
+    },
+    {
+      "id": "e61",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "sDeps",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e62",
+      "source": "sExt",
+      "sourceHandle": "releasePath",
+      "target": "sDeps",
+      "targetHandle": "rel"
+    },
+    {
+      "id": "e63",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "sChown",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e64",
+      "source": "sExt",
+      "sourceHandle": "releasePath",
+      "target": "sChown",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e65",
+      "source": "fieldWSU",
+      "sourceHandle": "value",
+      "target": "sChown",
+      "targetHandle": "user"
+    },
+    {
+      "id": "e66",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "sLink",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e67",
+      "source": "sExt",
+      "sourceHandle": "releasePath",
+      "target": "sLink",
+      "targetHandle": "target"
+    },
+    {
+      "id": "e68",
+      "source": "fmtCurS",
+      "sourceHandle": "value",
+      "target": "sLink",
+      "targetHandle": "link"
+    },
+    {
+      "id": "e69",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "svc1",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e70",
+      "source": "svcName",
+      "sourceHandle": "value",
+      "target": "svc1",
+      "targetHandle": "name"
+    },
+    {
+      "id": "e80",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtRelC",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e81",
+      "source": "inRel",
+      "sourceHandle": "value",
+      "target": "fmtRelC",
+      "targetHandle": "rel"
+    },
+    {
+      "id": "e82",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "chkC",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e83",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "chkC",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e84",
+      "source": "inRel",
+      "sourceHandle": "value",
+      "target": "chkC",
+      "targetHandle": "rel"
+    },
+    {
+      "id": "e85",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "rLinkC",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e86",
+      "source": "fmtRelC",
+      "sourceHandle": "value",
+      "target": "rLinkC",
+      "targetHandle": "target"
+    },
+    {
+      "id": "e87",
+      "source": "fmtCurC",
+      "sourceHandle": "value",
+      "target": "rLinkC",
+      "targetHandle": "link"
+    },
+    {
+      "id": "e88",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtRelS",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e89",
+      "source": "inRel",
+      "sourceHandle": "value",
+      "target": "fmtRelS",
+      "targetHandle": "rel"
+    },
+    {
+      "id": "e90",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "chkS",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e91",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "chkS",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e92",
+      "source": "inRel",
+      "sourceHandle": "value",
+      "target": "chkS",
+      "targetHandle": "rel"
+    },
+    {
+      "id": "e93",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "rLinkS",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e94",
+      "source": "fmtRelS",
+      "sourceHandle": "value",
+      "target": "rLinkS",
+      "targetHandle": "target"
+    },
+    {
+      "id": "e95",
+      "source": "fmtCurS",
+      "sourceHandle": "value",
+      "target": "rLinkS",
+      "targetHandle": "link"
+    },
+    {
+      "id": "e100",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "st1",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e101",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "st1",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e110",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "aMk",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e111",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "aMk",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e112",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "aNg",
+      "targetHandle": "vars"
+    },
+    {
+      "id": "e113",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "aFrpcT",
+      "targetHandle": "vars"
+    },
+    {
+      "id": "e114",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "aFrpcS",
+      "targetHandle": "vars"
+    },
+    {
+      "id": "e115",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "aBizS",
+      "targetHandle": "vars"
+    },
+    {
+      "id": "e120",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "aUpNg",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e121",
+      "source": "aNg",
+      "sourceHandle": "file",
+      "target": "aUpNg",
+      "targetHandle": "local"
+    },
+    {
+      "id": "e122",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "aUpFrpcT",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e123",
+      "source": "aFrpcT",
+      "sourceHandle": "file",
+      "target": "aUpFrpcT",
+      "targetHandle": "local"
+    },
+    {
+      "id": "e124",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "aUpFrpcS",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e125",
+      "source": "aFrpcS",
+      "sourceHandle": "file",
+      "target": "aUpFrpcS",
+      "targetHandle": "local"
+    },
+    {
+      "id": "e126",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "aUpBizS",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e127",
+      "source": "aBizS",
+      "sourceHandle": "file",
+      "target": "aUpBizS",
+      "targetHandle": "local"
+    },
+    {
+      "id": "e130",
+      "source": "ssh1",
+      "sourceHandle": "ssh",
+      "target": "aInstall",
+      "targetHandle": "ssh"
+    },
+    {
+      "id": "e131",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "aInstall",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e132",
+      "source": "aUpNg",
+      "sourceHandle": "remoteFile",
+      "target": "aInstall",
+      "targetHandle": "ng"
+    },
+    {
+      "id": "e133",
+      "source": "aUpFrpcT",
+      "sourceHandle": "remoteFile",
+      "target": "aInstall",
+      "targetHandle": "frpct"
+    },
+    {
+      "id": "e134",
+      "source": "aUpFrpcS",
+      "sourceHandle": "remoteFile",
+      "target": "aInstall",
+      "targetHandle": "frpcs"
+    },
+    {
+      "id": "e135",
+      "source": "aUpBizS",
+      "sourceHandle": "remoteFile",
+      "target": "aInstall",
+      "targetHandle": "bizs"
+    },
+    {
+      "id": "seq-env1-git1",
+      "kind": "seq",
+      "source": "env1",
+      "target": "git1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-cEnv-cBuild",
+      "kind": "seq",
+      "source": "cEnv",
+      "target": "cBuild",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-cBuild-cPack",
+      "kind": "seq",
+      "source": "cBuild",
+      "target": "cPack",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-cPack-ssh1",
+      "kind": "seq",
+      "source": "cPack",
+      "target": "ssh1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-cMk-cUp",
+      "kind": "seq",
+      "source": "cMk",
+      "target": "cUp",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-cLink-nginxR",
+      "kind": "seq",
+      "source": "cLink",
+      "target": "nginxR",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sEnv-sPack",
+      "kind": "seq",
+      "source": "sEnv",
+      "target": "sPack",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sPack-ssh1",
+      "kind": "seq",
+      "source": "sPack",
+      "target": "ssh1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sMk-sUp",
+      "kind": "seq",
+      "source": "sMk",
+      "target": "sUp",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sDeps-sChown",
+      "kind": "seq",
+      "source": "sDeps",
+      "target": "sChown",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sChown-sLink",
+      "kind": "seq",
+      "source": "sChown",
+      "target": "sLink",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-sLink-svc1",
+      "kind": "seq",
+      "source": "sLink",
+      "target": "svc1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-chkC-rLinkC",
+      "kind": "seq",
+      "source": "chkC",
+      "target": "rLinkC",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-rLinkC-nginxR",
+      "kind": "seq",
+      "source": "rLinkC",
+      "target": "nginxR",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-chkS-rLinkS",
+      "kind": "seq",
+      "source": "chkS",
+      "target": "rLinkS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-rLinkS-svc1",
+      "kind": "seq",
+      "source": "rLinkS",
+      "target": "svc1",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aMk-aNg",
+      "kind": "seq",
+      "source": "aMk",
+      "target": "aNg",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aNg-aFrpcT",
+      "kind": "seq",
+      "source": "aNg",
+      "target": "aFrpcT",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aFrpcT-aFrpcS",
+      "kind": "seq",
+      "source": "aFrpcT",
+      "target": "aFrpcS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aFrpcS-aBizS",
+      "kind": "seq",
+      "source": "aFrpcS",
+      "target": "aBizS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aBizS-aUpNg",
+      "kind": "seq",
+      "source": "aBizS",
+      "target": "aUpNg",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aUpNg-aUpFrpcT",
+      "kind": "seq",
+      "source": "aUpNg",
+      "target": "aUpFrpcT",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aUpFrpcT-aUpFrpcS",
+      "kind": "seq",
+      "source": "aUpFrpcT",
+      "target": "aUpFrpcS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "seq-aUpFrpcS-aUpBizS",
+      "kind": "seq",
+      "source": "aUpFrpcS",
+      "target": "aUpBizS",
+      "sourceHandle": "__seqOut",
+      "targetHandle": "__seqIn"
+    },
+    {
+      "id": "e-fmtUpNg-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpNg",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUpNg-path",
+      "source": "fmtUpNg",
+      "sourceHandle": "value",
+      "target": "aUpNg",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e-fmtUpFrpcT-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpFrpcT",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUpFrpcT-path",
+      "source": "fmtUpFrpcT",
+      "sourceHandle": "value",
+      "target": "aUpFrpcT",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e-fmtUpFrpcS-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpFrpcS",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUpFrpcS-path",
+      "source": "fmtUpFrpcS",
+      "sourceHandle": "value",
+      "target": "aUpFrpcS",
+      "targetHandle": "path"
+    },
+    {
+      "id": "e-fmtUpBizS-env",
+      "source": "env1",
+      "sourceHandle": "env",
+      "target": "fmtUpBizS",
+      "targetHandle": "env"
+    },
+    {
+      "id": "e-fmtUpBizS-path",
+      "source": "fmtUpBizS",
+      "sourceHandle": "value",
+      "target": "aUpBizS",
+      "targetHandle": "path"
+    }
   ],
   "tasks": {
-    "deploy-client":   { "label": "部署前端", "mutates": true, "path": ["env1", "git1", "cEnv", "cBuild", "cPack", "ssh1", "cMk", "cUp", "cExt", "cLink", "nginxR"] },
-    "deploy-server":   { "label": "部署服务端", "mutates": true, "path": ["env1", "git1", "sStage", "sEnv", "sPack", "ssh1", "sMk", "sUp", "sExt", "sDeps", "sChown", "sLink", "svc1"] },
-    "rollback-client": { "label": "回滚前端", "mutates": true, "path": ["env1", "ssh1", "chkC", "rLinkC", "nginxR"] },
-    "rollback-server": { "label": "回滚服务端", "mutates": true, "path": ["env1", "ssh1", "chkS", "rLinkS", "svc1"] },
-    "status":          { "label": "状态", "mutates": false, "path": ["env1", "ssh1", "st1"] },
-    "apply-config":    { "label": "应用配置", "mutates": true, "path": ["env1", "ssh1", "aMk", "aNg", "aFrpcT", "aFrpcS", "aBizS", "aUpNg", "aUpFrpcT", "aUpFrpcS", "aUpBizS", "aInstall"] }
+    "deploy-client": {
+      "label": "部署前端",
+      "mutates": true,
+      "nodes": [
+        "env1",
+        "git1",
+        "cEnv",
+        "cBuild",
+        "cPack",
+        "ssh1",
+        "cMk",
+        "cUp",
+        "cExt",
+        "cLink",
+        "nginxR",
+        "inRef",
+        "fmtCDist",
+        "fmtUpC",
+        "fieldDD",
+        "fmtCurC",
+        "nginxName"
+      ]
+    },
+    "deploy-server": {
+      "label": "部署服务端",
+      "mutates": true,
+      "nodes": [
+        "env1",
+        "git1",
+        "sStage",
+        "sEnv",
+        "sPack",
+        "ssh1",
+        "sMk",
+        "sUp",
+        "sExt",
+        "sDeps",
+        "sChown",
+        "sLink",
+        "svc1",
+        "inRef",
+        "fmtUpS",
+        "fieldDD",
+        "fieldWSU",
+        "fmtCurS",
+        "svcName"
+      ]
+    },
+    "rollback-client": {
+      "label": "回滚前端",
+      "mutates": true,
+      "nodes": [
+        "env1",
+        "ssh1",
+        "chkC",
+        "rLinkC",
+        "nginxR",
+        "nginxName",
+        "inRel",
+        "fmtRelC",
+        "fmtCurC"
+      ]
+    },
+    "rollback-server": {
+      "label": "回滚服务端",
+      "mutates": true,
+      "nodes": [
+        "env1",
+        "ssh1",
+        "chkS",
+        "rLinkS",
+        "svc1",
+        "svcName",
+        "inRel",
+        "fmtRelS",
+        "fmtCurS"
+      ]
+    },
+    "status": {
+      "label": "状态",
+      "mutates": false,
+      "nodes": [
+        "env1",
+        "ssh1",
+        "st1"
+      ]
+    },
+    "apply-config": {
+      "label": "应用配置",
+      "mutates": true,
+      "nodes": [
+        "env1",
+        "ssh1",
+        "aMk",
+        "aNg",
+        "aFrpcT",
+        "aFrpcS",
+        "aBizS",
+        "aUpNg",
+        "aUpFrpcT",
+        "aUpFrpcS",
+        "aUpBizS",
+        "aInstall",
+        "fmtUpNg",
+        "fmtUpFrpcT",
+        "fmtUpFrpcS",
+        "fmtUpBizS"
+      ]
+    }
   }
 }

@@ -65,7 +65,12 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 .devnode .body .stat .srow b.bad { color: var(--err); }
 .devnode .body .stat .srow b.mono { font-family: Consolas, monospace; }
 
+/* 连接端口用普通指针（覆盖 Svelte Flow 默认十字准星） */
+.svelte-flow__handle { cursor: default; }
+
+/* required 星标 / serializable 徽章 */
+.devnode .body .req { color: var(--warn); margin-left: 2px; font-weight: 700; }
+.devnode .body .sbadge { display: inline-block; margin-left: 4px; padding: 0 4px; font-size: 9px; line-height: 1.5;
+  border: 1px solid var(--ok); color: var(--ok); border-radius: 4px; vertical-align: 1px; }
+
 .devnode.onpath { outline: 2px dashed var(--warn); outline-offset: 2px; }
-.devnode .pathidx { position: absolute; top: -10px; left: -10px; background: var(--warn); color: #08131f;
-  border-radius: 999px; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 11px; }

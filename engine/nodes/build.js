@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { cmd, writeLF, copyTree } from "../exec.js";
+import { cmd, writeLF, copyTree, expandHome } from "../exec.js";
 import { compress, makeStageDir } from "../tarball.js";
 import { renderTemplateFile } from "../render.js";
 import { resolveDeployVersion } from "../gitops.js";
@@ -28,7 +28,7 @@ export default [
             { key: "prefix", label: "release 名前缀", kind: "string", default: "", placeholder: "如 kids-ledger" },
         ],
         async run(ctx, node, inputs) {
-            const repoDir = node.data.repoDir;
+            const repoDir = path.resolve(expandHome(node.data.repoDir));
             if (!repoDir || !fs.existsSync(repoDir)) throw new Error(`git.ref 仓库不存在: ${repoDir}`);
             const { versionId, buildTime, restore } = await resolveDeployVersion(repoDir, inputs.ref || undefined, { dryRun: ctx.dryRun, log: ctx.log });
             // git.ref 的作用域 = 整个任务：清理注册到任务级（finalize 逆序执行）

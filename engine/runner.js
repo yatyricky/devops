@@ -13,7 +13,7 @@ export const ENVS_DIR = path.join(ROOT, "envs");
 
 /**
  * 任务运行器：串行队列 + 日志采集 + .runs/<id>.json 持久化 + audit.jsonl 审计。
- * CLI 与 GUI 共用。一个任务 = workflow.json 里的一条命名路径。
+ * CLI 与 GUI 共用。一个任务 = workflow.json 里选出的节点子图（引擎内按拓扑层级并发执行）。
  */
 
 fs.mkdirSync(RUNS_DIR, { recursive: true });

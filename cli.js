@@ -4,8 +4,8 @@
  *
  * 用法：
  *   node cli.js list                                  # 工作流列表（local-config.workflows + 仓库 workflows/）
- *   node cli.js tasks <wf>                            # 列出任务（路径概览）
- *   node cli.js run <wf> <task> [options]             # 运行任务路径
+ *   node cli.js tasks <wf>                            # 列出任务（节点集合概览）
+ *   node cli.js run <wf> <task> [options]             # 运行任务（子图拓扑并发）
  *     <wf>   工作流名或 JSON 文件路径
  *     --dry-run            全节点打印计划，不产生副作用
  *     --input k=v          任务输入（对应 task.input 节点，可多次）
@@ -97,7 +97,7 @@ try {
 if (cmd === "tasks") {
     console.log(`${C.c}${wf.doc.name}${C.R}  ${wf.path}`);
     for (const [name, t] of Object.entries(/** @type {any} */(wf.doc).tasks)) {
-        console.log(`  ${C.y}${name}${C.R}${t.mutates ? C.m + " *变更" + C.R : ""}：${t.path.join(" → ")}`);
+        console.log(`  ${C.y}${name}${C.R}${t.mutates ? C.m + " *变更" + C.R : ""}：${t.nodes.join(", ")}  ${C.dim}（节点集合，顺序无关）${C.R}`);
     }
     process.exit(0);
 }
