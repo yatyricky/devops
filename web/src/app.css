@@ -61,11 +61,6 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 .devnode .body .badge .rm { cursor: pointer; margin-left: 3px; }
 .devnode .body input.winvalid { border-color: var(--err); }
 .devnode .body .errline { display: block; color: var(--err); font-size: 11px; margin-top: 3px; }
-.devnode .body .stat { margin-top: 6px; border-top: 1px dashed var(--line); padding-top: 4px; }
-.devnode .body .stat .srow { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--dim); }
-.devnode .body .stat .srow b { color: var(--fg); font-weight: 500; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.devnode .body .stat .srow b.bad { color: var(--err); }
-.devnode .body .stat .srow b.mono { font-family: Consolas, monospace; }
 
 /* 连接端口用普通指针（覆盖 Svelte Flow 默认十字准星） */
 .svelte-flow__handle { cursor: default; }
@@ -77,10 +72,27 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 
 .devnode.onpath { outline: 2px dashed var(--warn); outline-offset: 2px; }
 
+/* 任务运行状态外框：不在任务中=半透明灰；ok=绿框；failed=红框；running=绿色虚线跑马灯 */
+.devnode.offtask { opacity: .45; filter: grayscale(.7); }
+.devnode.st-ok { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok); }
+.devnode.st-fail { border-color: var(--err); box-shadow: 0 0 0 1.5px var(--err); }
+.devnode.st-run { outline: 2px dashed var(--ok); outline-offset: 3px; animation: breathe 1.5s ease-in-out infinite; }
+@keyframes breathe {
+  0%, 100% { outline-color: rgba(76, 195, 138, .12); }
+  50% { outline-color: rgba(76, 195, 138, .95); }
+}
+
 /* 节点类型描述（教程一句话，暗色小字） */
 .devnode .ndesc { padding: 4px 10px 0; font-size: 10px; color: var(--dim); line-height: 1.5; }
 
 .devnode .body .trow .wired { flex: none; font-size: 12px; }
 
-/* 卡片底部节点 id（调试用） */
-.devnode .nid { padding: 1px 10px 5px; font: italic 9px/1.4 Consolas, monospace; color: var(--dim); opacity: .7; }
+/* 卡片底部：ID + 便笺按钮一行；备注 TextArea 折叠在其上方 */
+.devnode .nidrow { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 1px 10px 5px; }
+.devnode .nid { font: italic 9px/1.4 Consolas, monospace; color: var(--dim); opacity: .7;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devnode .notebtn { font-size: 9px; padding: 0 6px; line-height: 1.5; flex: none; opacity: .6; }
+.devnode .notebtn:hover { opacity: 1; }
+.devnode .notebtn.hasnote { border-color: var(--ok); color: var(--ok); opacity: 1; }
+.devnode .noterow { display: block; padding: 4px 10px 2px; border-top: 1px dashed var(--line); }
+.devnode .noterow textarea { width: 100%; font-size: 12px; resize: vertical; }

@@ -37,6 +37,8 @@ export function loadWorkflow(fp) {
     }
     const problems = validateWorkflow(doc);
     if (problems.length) throw new Error(`workflow 校验失败 ${path.basename(fp)}:\n  - ${problems.join("\n  - ")}`);
+    // 工作流没有独立的名字概念：显示身份 = title（别名），缺省用文件名。回填 name 供审计/门禁/CLI 统一引用。
+    doc.name = doc.title || path.basename(fp, ".json");
     return doc;
 }
 
@@ -69,7 +71,6 @@ export function validateWorkflow(doc) {
     /** @type {string[]} */
     const problems = [];
     if (!doc || typeof doc !== "object") return ["文档不是对象"];
-    if (!doc.name) problems.push("缺少 name");
     if (!Array.isArray(doc.nodes)) problems.push("缺少 nodes 数组");
     if (!Array.isArray(doc.edges)) problems.push("缺少 edges 数组");
     if (!doc.tasks || typeof doc.tasks !== "object") problems.push("缺少 tasks 对象");
@@ -98,6 +99,14 @@ export function validateWorkflow(doc) {
                 if (!["string", "number", "boolean"].includes(f?.type)) {
                     problems.push(`节点 ${n.id}：字段 ${f?.key ?? "?"} 类型非法: ${f?.type}（可用 string/number/boolean）`);
                 }
+            }
+        }
+        // tar.pack：白名单与黑名单互斥
+        if (n.type === "tar.pack") {
+            const hasEntries = Array.isArray(n.data.entries) && n.data.entries.length > 0;
+            const hasExcludes = Array.isArray(n.data.excludes) && n.data.excludes.length > 0;
+            if (hasEntries && hasExcludes) {
+                problems.push(`节点 ${n.id}：打包条目与不打包条目只能二选一（白名单或黑名单）`);
             }
         }
     }
@@ -262,8 +271,15 @@ export async function executeTask(ctx, doc, taskName) {
             inputValues[e.targetHandle] = coerce(executed.get(e.source)?.[e.sourceHandle], declaredType(node, e.targetHandle) ?? outDef?.type ?? "any");
         }
         ctx.log(`──── [${def.title}] ${node.id}`);
-        const out = (await def.run(ctx, node, inputValues)) ?? {};
-        executed.set(id, out);
+        ctx.markNode?.(id, "running");
+        try {
+            const out = (await def.run(ctx, node, inputValues)) ?? {};
+            executed.set(id, out);
+            ctx.markNode?.(id, "ok");
+        } catch (e) {
+            ctx.markNode?.(id, "failed");
+            throw e;
+        }
     }
 
     while (pending.size) {

@@ -1,10 +1,7 @@
-import fs from "fs";
-import path from "path";
 import inputNodes from "./input.js";
 import buildNodes from "./build.js";
 import remoteNodes from "./remote.js";
 import utilNodes from "./util.js";
-import { expandHome } from "../exec.js";
 
 /**
  * 节点类型注册表——引擎与前端共享的唯一事实源。
@@ -17,6 +14,7 @@ export const NODE_TYPES = Object.fromEntries(
 /**
  * 某节点实例的有效输入列表 = 声明输入 + 动态输入。
  * 动态输入来源：
+ *   countInputs（path.resolve 等）：控件 key 为整数 N → 生成 prefix1..prefixN 的同型输入口；
  *   fieldInputs（struct.make）：data.fields 的每个字段 → 同名同型输入口（值可连线覆盖手填）；
  *   dynamicInputs（文本占位符）：
  *   {{name}}     → 名为 name 的 string 输入插槽（值整个来自连线）
@@ -30,11 +28,21 @@ export function getInputs(node) {
     const declared = (def.inputs ?? []).map(i => ({ ...i, dynamic: false }));
     /** @type {any[]} */
     let all = declared;
+    if (def.countInputs) {
+        const { key, prefix, type, min, max } = def.countInputs;
+        const n = Math.max(min, Math.min(max, Math.trunc(Number(node.data?.[key]) || min)));
+        const ports = [];
+        for (let i = 1; i <= n; i++) {
+            const id = `${prefix}${i}`;
+            if (!all.some(d => d.id === id)) ports.push({ id, type, required: true, dynamic: true });
+        }
+        all = [...all, ...ports];
+    }
     if (def.fieldInputs) {
         const fieldPorts = (node.data?.fields ?? [])
-            .filter(f => f.key && !declared.some(d => d.id === f.key))
+            .filter(f => f.key && !all.some(d => d.id === f.key))
             .map(f => ({ id: f.key, type: f.type ?? "string", required: false, dynamic: true }));
-        all = [...declared, ...fieldPorts];
+        all = [...all, ...fieldPorts];
     }
     if (!def.dynamicInputs) return all;
     const text = String(node.data?.[def.dynamicInputs.source] ?? "");
@@ -52,16 +60,6 @@ export function getInputs(node) {
 
 /** 动态出口规则：按节点 data 与图上下文解析输出插槽（前端 types.js 有同规则镜像）。 */
 const DYNAMIC_OUTPUTS = {
-    /** fs.path：合法文件夹 → [dir]，合法文件 → [file]，未配置/不存在 → []。 */
-    fsPath(node) {
-        const typed = String(node.data?.path ?? "").trim();
-        if (!typed) return [];
-        let st;
-        try { st = fs.statSync(path.resolve(expandHome(typed))); } catch { return []; }
-        return st.isDirectory()
-            ? [{ id: "dir", type: "folder" }]
-            : [{ id: "file", type: "file" }];
-    },
     /** struct.split：回溯入边的上游 struct.make 字段定义，按序输出同名字段；未接线 → []。 */
     structSplit(node, graph) {
         const edge = (graph?.edges ?? []).find(e => e.kind !== "seq" && e.target === node.id);
@@ -100,6 +98,8 @@ export function nodeTypesMeta() {
         widgets: d.widgets ?? [],
         ...(d.pathStat ? { pathStat: true } : {}),
         ...(d.refsPicker ? { refsPicker: true } : {}),
+        ...(d.scriptsPicker ? { scriptsPicker: true } : {}),
+        ...(d.countInputs ? { countInputs: d.countInputs } : {}),
         ...(d.outputValueKey ? { outputValueKey: d.outputValueKey } : {}),
         ...(d.dynamicInputs ? { dynamicInputs: d.dynamicInputs } : {}),
         ...(d.fieldInputs ? { fieldInputs: true } : {}),

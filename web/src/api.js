@@ -16,7 +16,7 @@ export async function api(path, opts = {}) {
 /**
  * 流式跟踪任务日志；连接被掐断时自动轮询补齐到终态。
  * @param {string} id
- * @param {{ log: (msg: string) => void, status: (st: string, error?: string) => void, end: (st: string) => void }} h
+ * @param {{ log: (msg: string) => void, status: (st: string, error?: string) => void, node?: (nodeStatus: Record<string,string> | null) => void, end: (st: string) => void }} h
  */
 export async function streamJob(id, h) {
   let terminal = false;
@@ -38,6 +38,7 @@ export async function streamJob(id, h) {
         const evt = JSON.parse(line.slice(6));
         if (evt.type === "log") h.log(evt.line.msg ?? String(evt.line));
         else if (evt.type === "status") h.status(evt.status, evt.error);
+        else if (evt.type === "node") h.node?.(evt.nodeStatus);
         else if (evt.type === "end") { terminal = true; h.end(evt.status); }
       }
     }
@@ -52,6 +53,7 @@ export async function streamJob(id, h) {
     try { run = await api(`/api/jobs/${id}`); } catch { return; }
     if (!run) return;
     for (; seen < (run.logLines || []).length; seen++) h.log(run.logLines[seen].msg);
+    h.node?.(run.nodeStatus ?? null);
     if (run.status === "ok" || run.status === "failed") {
       h.status(run.status, run.error);
       h.end(run.status);

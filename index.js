@@ -11,6 +11,7 @@ import child_process from "child_process";
 import { loadUiConfig, rememberWorkflow, forgetWorkflow } from "./engine/config.js";
 import { loadWorkflows, findWorkflow } from "./engine/registry.js";
 import { nodeTypesMeta } from "./engine/nodes/index.js";
+import { readNpmScripts } from "./engine/nodes/build.js";
 import { loadWorkflow, validateWorkflow } from "./engine/workflow.js";
 import { enqueueWorkflowTask, listRuns, getRun, getCurrentJob } from "./engine/runner.js";
 import { getRefs } from "./engine/gitops.js";
@@ -106,34 +107,16 @@ app.post("/api/refs", async (req, res) => {
     }
 });
 
-// ── 本地路径 stat（fs.path 节点卡片展示：权限/大小/修改时间）────
-app.post("/api/fs/stat", async (req, res) => {
+// ── npm scripts（npm.run 卡片下拉：解析 <path>/package.json 的 scripts 键集）────
+app.post("/api/npm/scripts", (req, res) => {
     const p = expandHome(String(req.body?.path || "").trim());
-    if (!p) return res.json({ exists: false, error: "empty" });
+    if (!p) return res.status(400).json({ error: "path required" });
     try {
-        const st = await fs.promises.stat(p);
-        res.json({
-            exists: true,
-            isDir: st.isDirectory(),
-            size: st.size,
-            mtime: st.mtime.toISOString(),
-            mode: modeToString(st),
-        });
+        res.json(readNpmScripts(path.resolve(p)));
     } catch (e) {
-        res.json({ exists: false, error: e.code ?? e.message });
+        res.status(400).json({ error: `读取 ${path.basename(p)}/package.json 失败: ${e.message}` });
     }
 });
-
-/** stat.mode → "drwxrwxrwx" 风格字符串。Windows 下 libuv 不给执行位（目录 0666/0777 视实现），
- *  按惯例目录有 r 即有 x，只读属性表现为去掉 w 位。 */
-function modeToString(st) {
-    const isDir = st.isDirectory();
-    let m = st.mode;
-    if (isDir) m |= ((m & 0o444) >> 2);   // r → x
-    const bit = (n, c) => (m & n ? c : "-");
-    const tri = shift => `${bit(4 << shift, "r")}${bit(2 << shift, "w")}${bit(1 << shift, "x")}`;
-    return (isDir ? "d" : "-") + tri(6) + tri(3) + tri(0);
-}
 
 // ── git refs（任意仓库目录；git.getRefs 卡片刷新用）────
 app.post("/api/git/refs", async (req, res) => {
@@ -195,6 +178,7 @@ app.post("/api/jobs/:id/stream", (req, res) => {
 
     let sentLines = 0;
     let lastStatus = "";
+    let lastNodeStatus = "";
     /** @type {NodeJS.Timeout | null} */
     let timer = null;
     /** @type {NodeJS.Timeout | null} */
@@ -206,6 +190,12 @@ app.post("/api/jobs/:id/stream", (req, res) => {
         if (!run) { send({ type: "end", status: "unknown" }); stop(); res.end(); return; }
         for (; sentLines < run.logLines.length; sentLines++) {
             send({ type: "log", line: run.logLines[sentLines] });
+        }
+        // 节点执行状态快照（GUI 卡片外框）变化即推
+        const ns = JSON.stringify(run.nodeStatus ?? null);
+        if (ns !== lastNodeStatus) {
+            lastNodeStatus = ns;
+            send({ type: "node", nodeStatus: run.nodeStatus ?? null });
         }
         if (run.status !== lastStatus) {
             lastStatus = run.status;

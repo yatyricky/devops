@@ -7,7 +7,7 @@
 import assert from "assert";
 import path from "path";
 import url from "url";
-import { canConnect } from "../engine/types.js";
+import { canConnect, SOCKET_TYPES } from "../engine/types.js";
 import { validateWorkflow } from "../engine/workflow.js";
 import { NODE_TYPES, getInputs, getOutputs } from "../engine/nodes/index.js";
 import { loadWorkflows } from "../engine/registry.js";
@@ -25,15 +25,16 @@ async function test(name, fn) {
 }
 
 // ── 类型系统 ────
-await test("类型: 同型可连，struct→any 放行，any→具体/跨具体类型拒绝", () => {
+await test("类型: 同型可连，struct→any 放行，any→具体/跨具体类型拒绝；无路径类型", () => {
     assert.ok(canConnect("struct", "struct"));
     assert.ok(canConnect("struct", "any"));
     assert.ok(canConnect("string", "any"));
+    assert.ok(canConnect("string", "string"));
     assert.ok(!canConnect("any", "string"), "any 输出不可入 string 输入");
     assert.ok(!canConnect("string", "struct"), "string 不可入 struct");
-    assert.ok(!canConnect("file", "string"), "file/string 严格区分");
     assert.ok(!canConnect("ssh", "struct"));
     assert.ok(!canConnect("string", "number"), "number 输入只收 number");
+    assert.ok(!SOCKET_TYPES.includes("folder") && !SOCKET_TYPES.includes("file"), "路径类型已整体移除");
 });
 
 // ── 节点注册表 ────
@@ -210,29 +211,29 @@ await test("执行: fan-out 批次并发（1 先行，2/3 同批）", async () =
     await executeTask({ log: m => lines.push(String(m)), dryRun: true, inputs: {}, mask: s => s }, doc, "t");
     const text = lines.join("\n");
     assert.ok(text.includes("批次并发 2"), "2、3 应同批并发", text);
-    const i1 = text.indexOf("[常量] 1");
+    const i1 = text.indexOf("[输入.字符串] 1");
     assert.ok(i1 !== -1 && i1 < text.indexOf("预览：b2") && i1 < text.indexOf("预览：b3"), "1 应先于 2/3", text);
 });
 await test("执行: 分支失败任务失败（同批好分支已落地）", async () => {
     const { executeTask } = await import("../engine/workflow.js");
     const doc = structuredClone(fanDoc);
     doc.nodes[1].data.title = "b2";
-    doc.nodes[2] = { id: "3", type: "fs.path", position: [0, 0], data: { path: "Z:/definitely-missing-xyz" } };
+    doc.nodes[2] = { id: "3", type: "git.checkout", position: [0, 0], data: {} };
     doc.tasks = { t: { label: "t", mutates: false, nodes: ["1", "2", "3"] } };
     /** @type {string[]} */
     const lines = [];
     await assert.rejects(
         () => executeTask({ log: m => lines.push(String(m)), dryRun: true, inputs: {}, mask: s => s }, doc, "t"),
-        /路径不存在/,
+        /未连接仓库目录/,
     );
     assert.ok(lines.join("\n").includes("预览：b2"), "同批好分支应已执行");
 });
 
 // ── git.checkout 切换分支 ────
-await test("注册表: git.checkout 输入 folder/string、输出 original(string)", () => {
+await test("注册表: git.checkout 输入全 string、输出 original(string)", () => {
     const d = NODE_TYPES["git.checkout"];
     assert.ok(d, "git.checkout 已注册");
-    assert.deepStrictEqual(d.inputs.map(i => [i.id, i.type]), [["repoDir", "folder"], ["ref", "string"]]);
+    assert.deepStrictEqual(d.inputs.map(i => [i.id, i.type]), [["repoDir", "string"], ["ref", "string"]]);
     assert.deepStrictEqual(d.outputs.map(o => [o.id, o.type]), [["original", "string"]]);
 });
 
@@ -255,15 +256,15 @@ await test("git.checkout 执行: 切换输出 original；original 链式切回�
         const doc = {
             name: "gco-t",
             nodes: [
-                { id: "p", type: "fs.path", position: [0, 0], data: { path: dir } },
+                { id: "p", type: "string.const", position: [0, 0], data: { value: dir } },
                 { id: "c1", type: "git.checkout", position: [0, 0], data: {} },
                 { id: "c2", type: "git.checkout", position: [0, 0], data: {} },
                 { id: "ref1", type: "string.const", position: [0, 0], data: { value: "v1" } },
                 { id: "ref2", type: "string.const", position: [0, 0], data: { value: mainBranch } },
             ],
             edges: [
-                { id: "e0", source: "p", sourceHandle: "dir", target: "c1", targetHandle: "repoDir" },
-                { id: "e1", source: "p", sourceHandle: "dir", target: "c2", targetHandle: "repoDir" },
+                { id: "e0", source: "p", sourceHandle: "value", target: "c1", targetHandle: "repoDir" },
+                { id: "e1", source: "p", sourceHandle: "value", target: "c2", targetHandle: "repoDir" },
                 { id: "e2", source: "ref1", sourceHandle: "value", target: "c1", targetHandle: "ref" },
                 { id: "s1", kind: "seq", source: "c1", sourceHandle: "__seqOut", target: "c2", targetHandle: "__seqIn" },
                 { id: "e3", source: "c1", sourceHandle: "original", target: "c2", targetHandle: "ref" },
@@ -290,15 +291,16 @@ await test("git.checkout 执行: 切换输出 original；original 链式切回�
     }
 });
 
-// ── fs.path 输入路径节点 ────
-await test("注册表: fs.path 动态出口标志 + folder 类型连线规则", () => {
-    const d = NODE_TYPES["fs.path"];
-    assert.ok(d, "fs.path 已注册");
-    assert.strictEqual(d.dynamicOutputs, "fsPath", "动态出口规则");
-    assert.ok(canConnect("folder", "folder"), "folder→folder");
-    assert.ok(canConnect("folder", "any"), "folder→any");
-    assert.ok(!canConnect("folder", "string"), "folder 不静默转 string");
-    assert.ok(!canConnect("file", "folder"), "file/folder 严格区分");
+// ── 输入.字符串（string.const）────
+await test("注册表: 输入.字符串在输入分类，输出 string，widget 可序列化", () => {
+    const d = NODE_TYPES["string.const"];
+    assert.ok(d, "string.const 已注册");
+    assert.strictEqual(d.category, "输入");
+    assert.strictEqual(d.title, "输入.字符串");
+    assert.deepStrictEqual(d.inputs, []);
+    assert.deepStrictEqual(d.outputs, [{ id: "value", type: "string" }]);
+    assert.strictEqual(d.widgets[0].serializable, true, "值控件可序列化");
+    assert.ok(!("fs.path" in NODE_TYPES), "fs.path 已删除");
 });
 
 await test("expandHome: ~ 解析为用户主目录，非 ~ 路径原样", async () => {
@@ -311,51 +313,11 @@ await test("expandHome: ~ 解析为用户主目录，非 ~ 路径原样", async 
     assert.strictEqual(expandHome("C:/x/y"), "C:/x/y");
 });
 
-await test("fs.path 执行: 文件夹/文件分别从 dir/file 输出；~ 输出 resolve 后完整路径；路径不存在抛错", async () => {
-    const { executeTask } = await import("../engine/workflow.js");
-    const os = await import("os");
-    const fsp = await import("fs/promises");
-    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "fspath-"));
-    const fp = path.join(dir, "a.txt");
-    await fsp.writeFile(fp, "hello");
-    // ~ 用例：临时目录建在用户主目录下，节点里写 ~/basename
-    const homeDir = await fsp.mkdtemp(path.join(os.homedir(), "fspath-home-"));
-    try {
-        const doc = {
-            name: "fs-t",
-            nodes: [
-                { id: "pd", type: "fs.path", position: [0, 0], data: { path: dir } },
-                { id: "pf", type: "fs.path", position: [0, 0], data: { path: fp } },
-                { id: "ph", type: "fs.path", position: [0, 0], data: { path: `~/${path.basename(homeDir)}` } },
-                { id: "miss", type: "fs.path", position: [0, 0], data: { path: path.join(dir, "missing") } },
-            ],
-            edges: [],
-            tasks: { t: { label: "t", mutates: false, nodes: ["pd", "pf", "ph"] } },
-        };
-        /** @type {string[]} */
-        const lines = [];
-        await executeTask({ log: m => lines.push(String(m)), dryRun: true, inputs: {}, mask: s => s }, doc, "t");
-        const text = lines.join("\n");
-        assert.ok(text.includes("（文件夹"), "目录识别", text);
-        assert.ok(text.includes("（文件，"), "文件识别", text);
-        assert.ok(text.includes(path.resolve(dir)), "目录节点输出 resolve 后完整路径", text);
-        assert.ok(text.includes(path.resolve(fp)), "文件节点输出 resolve 后完整路径", text);
-        assert.ok(text.includes(path.resolve(homeDir)), "~ 应展开为完整主目录路径", text);
-        await assert.rejects(
-            () => executeTask({ log: () => {}, dryRun: true, inputs: {}, mask: s => s }, { ...doc, tasks: { t: { label: "t", mutates: false, nodes: ["miss"] } } }, "t"),
-            /路径不存在/,
-        );
-    } finally {
-        await fsp.rm(dir, { recursive: true, force: true });
-        await fsp.rm(homeDir, { recursive: true, force: true });
-    }
-});
-
 // ── git.getRefs ────
-await test("注册表: git.getRefs 输入 folder、输出 string、refsPicker 标志", () => {
+await test("注册表: git.getRefs 输入 string、输出 string、refsPicker 标志", () => {
     const d = NODE_TYPES["git.getRefs"];
     assert.ok(d?.refsPicker, "refsPicker 标志");
-    assert.deepStrictEqual(d.inputs, [{ id: "repoDir", type: "folder", required: true }]);
+    assert.deepStrictEqual(d.inputs, [{ id: "repoDir", type: "string", required: true }]);
     assert.strictEqual(d.outputs[0].id, "ref");
     assert.strictEqual(d.outputs[0].type, "string");
 });
@@ -365,10 +327,10 @@ await test("git.getRefs 执行: 输出所选 ref", async () => {
     const doc = {
         name: "refs-t",
         nodes: [
-            { id: "p", type: "fs.path", position: [0, 0], data: { path: path.resolve(__dirname, "..") } },
+            { id: "p", type: "string.const", position: [0, 0], data: { value: path.resolve(__dirname, "..") } },
             { id: "g", type: "git.getRefs", position: [0, 0], data: { ref: "v1.0" } },
         ],
-        edges: [{ id: "e", source: "p", sourceHandle: "dir", target: "g", targetHandle: "repoDir" }],
+        edges: [{ id: "e", source: "p", sourceHandle: "value", target: "g", targetHandle: "repoDir" }],
         tasks: { t: { label: "t", mutates: false, nodes: ["p", "g"] } },
     };
     const lines = [];
@@ -394,15 +356,6 @@ await test("注册表: struct.make fieldInputs 动态输入与 struct 输出", (
     assert.deepStrictEqual(inputs.map(i => `${i.id}:${i.type}:${i.required ? "必填" : "可选"}`), ["SERVER_TYPE:string:可选", "PORT:number:可选"]);
     assert.deepStrictEqual(getOutputs(structMake), [{ id: "struct", type: "struct" }]);
     assert.ok(NODE_TYPES["struct.make"].fieldInputs, "fieldInputs 标志");
-});
-
-await test("动态出口 fsPath: 合法文件夹/文件/不存在 三态", () => {
-    const dirDoc = { nodes: [{ id: "f", type: "fs.path", position: [0, 0], data: { path: ROOT } }], edges: [] };
-    assert.deepStrictEqual(getOutputs(dirDoc.nodes[0], dirDoc), [{ id: "dir", type: "folder" }]);
-    const fileDoc = { nodes: [{ id: "f", type: "fs.path", position: [0, 0], data: { path: path.join(ROOT, "package.json") } }], edges: [] };
-    assert.deepStrictEqual(getOutputs(fileDoc.nodes[0], fileDoc), [{ id: "file", type: "file" }]);
-    const noneDoc = { nodes: [{ id: "f", type: "fs.path", position: [0, 0], data: { path: "Z:/definitely-missing-xyz" } }], edges: [] };
-    assert.deepStrictEqual(getOutputs(noneDoc.nodes[0], noneDoc), []);
 });
 
 await test("动态出口 structSplit: 回溯上游构造器字段；未接线为空", () => {
@@ -480,6 +433,166 @@ await test("prod 门禁: struct SERVER_TYPE=prod 需确认（dry-run 放行）",
     );
     const { id } = enqueueWorkflowTask(doc, path.join(ROOT, "gate.json"), "deploy", { dryRun: true });
     assert.ok(getRun(id));
+});
+
+// ── npm.run / path.resolve ────
+await test("注册表: npm.run 输入 path(string)、无输出、script 控件 serializable + scriptsPicker", () => {
+    const d = NODE_TYPES["npm.run"];
+    assert.ok(d, "npm.run 已注册");
+    assert.deepStrictEqual(d.inputs, [{ id: "path", type: "string", required: true }]);
+    assert.deepStrictEqual(d.outputs, [], "无输出");
+    assert.strictEqual(d.scriptsPicker, true);
+    assert.strictEqual(d.widgets[0].serializable, true);
+});
+
+await test("npm.run 执行: dry-run 打印计划不执行；真实执行跑通脚本；非法脚本报错列出可用项", async () => {
+    const { executeTask } = await import("../engine/workflow.js");
+    const os = await import("os");
+    const fsp = await import("fs/promises");
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "npmrun-"));
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ scripts: { hello: "node -e \"process.stdout.write('ran-ok')\"" } }));
+    try {
+        const doc = {
+            name: "npmrun-t",
+            nodes: [
+                { id: "p", type: "string.const", position: [0, 0], data: { value: dir } },
+                { id: "n", type: "npm.run", position: [0, 0], data: { script: "hello" } },
+            ],
+            edges: [{ id: "e", source: "p", sourceHandle: "value", target: "n", targetHandle: "path" }],
+            tasks: { t: { label: "t", mutates: false, nodes: ["p", "n"] } },
+        };
+        /** @type {string[]} */
+        const lines = [];
+        await executeTask({ log: m => lines.push(String(m)), dryRun: true, inputs: {}, mask: s => s }, doc, "t");
+        assert.ok(lines.join("\n").includes("[dry-run] npm run hello"), "dry-run 计划");
+        const lines2 = [];
+        await executeTask({ log: m => lines2.push(String(m)), dryRun: false, inputs: {}, mask: s => s }, doc, "t");
+        assert.ok(lines2.join("\n").includes("ran-ok"), "真实执行输出", lines2.join("\n"));
+        await assert.rejects(
+            () => executeTask({ log: () => {}, dryRun: true, inputs: {}, mask: s => s }, { ...doc, nodes: [doc.nodes[0], { ...doc.nodes[1], data: { script: "nope" } }] }, "t"),
+            /不在 package\.json scripts 中.*hello/s,
+        );
+    } finally {
+        await fsp.rm(dir, { recursive: true, force: true });
+    }
+});
+
+await test("path.resolve: count 驱动动态端口 p1..pN；执行拼接 resolve（~ 首段展开、相对段）", async () => {
+    const { executeTask } = await import("../engine/workflow.js");
+    const os = await import("os");
+    const node3 = { id: "r", type: "path.resolve", position: [0, 0], data: { count: 3 } };
+    assert.deepStrictEqual(
+        getInputs(node3).map(i => i.id),
+        ["p1", "p2", "p3"],
+        "count=3 → 三个动态端口",
+    );
+    const node9 = { ...node3, data: { count: 9 } };
+    assert.strictEqual(getInputs(node9).length, 9, "count=9 → 九个端口");
+    const nodeBad = { ...node3, data: { count: 99 } };
+    assert.strictEqual(getInputs(nodeBad).length, 16, "count 越界收敛到上限 16");
+
+    const home = (await import("os")).homedir();
+    const doc = {
+        name: "pres-t",
+        nodes: [
+            { id: "s1", type: "string.const", position: [0, 0], data: { value: "~" } },
+            { id: "s2", type: "string.const", position: [0, 0], data: { value: "sub" } },
+            { id: "s3", type: "string.const", position: [0, 0], data: { value: "dee" } },
+            { id: "r", type: "path.resolve", position: [0, 0], data: { count: 3 } },
+            { id: "p", type: "log.print", position: [0, 0], data: {} },
+        ],
+        edges: [
+            { id: "e1", source: "s1", sourceHandle: "value", target: "r", targetHandle: "p1" },
+            { id: "e2", source: "s2", sourceHandle: "value", target: "r", targetHandle: "p2" },
+            { id: "e3", source: "s3", sourceHandle: "value", target: "r", targetHandle: "p3" },
+            { id: "e4", source: "r", sourceHandle: "value", target: "p", targetHandle: "value" },
+        ],
+        tasks: { t: { label: "t", mutates: false, nodes: ["s1", "s2", "s3", "r", "p"] } },
+    };
+    const lines = [];
+    await executeTask({ log: m => lines.push(String(m)), dryRun: false, inputs: {}, mask: s => s }, doc, "t");
+    const joined = lines.join("\n");
+    assert.ok(joined.includes(path.resolve(home, "sub", "dee")), "~ 首段展开 + 相对段拼接", joined);
+});
+
+// ── tar.pack 三模式 + 运行状态标记 ────
+await test("tar.pack: 单输出 archive；白/黑/全三模式；双配置 validate 报错", async () => {
+    const d = NODE_TYPES["tar.pack"];
+    assert.deepStrictEqual(d.outputs, [{ id: "archive", type: "string" }], "仅 archive 一个输出");
+    const { executeTask } = await import("../engine/workflow.js");
+    const { listArchive } = await import("../engine/tarball.js");
+    const os = await import("os");
+    const fsp = await import("fs/promises");
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "tarpack-"));
+    fs.mkdirSync(path.join(dir, "keep"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "skip"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "root.txt"), "r");
+    fs.writeFileSync(path.join(dir, "keep", "a.txt"), "a");
+    fs.writeFileSync(path.join(dir, "skip", "b.txt"), "b");
+    const runPack = async (data) => {
+        const doc = {
+            name: "tp", nodes: [
+                { id: "p", type: "string.const", position: [0, 0], data: { value: dir } },
+                { id: "t", type: "tar.pack", position: [0, 0], data },
+            ],
+            edges: [{ id: "e", source: "p", sourceHandle: "value", target: "t", targetHandle: "dir" }],
+            tasks: { t: { label: "t", mutates: false, nodes: ["p", "t"] } },
+        };
+        const lines = [];
+        await executeTask({ log: m => lines.push(String(m)), dryRun: false, inputs: {}, mask: s => s, registerGitRestore: () => {}, registerSession: () => {}, trackRemoteFile: () => {}, markNode: () => {} }, doc, "t");
+        return lines.join("\n");
+    };
+    try {
+        // 全部
+        let out = await runPack({});
+        let tgz = out.match(/\[tar\] (\S+\.tgz)/)[1];
+        let entries = await listArchive(path.join(ROOT, ".tmp", tgz));
+        assert.ok(entries.some(e => e.includes("root.txt")) && entries.some(e => e.includes("skip")), "全模式含全部内容");
+        assert.ok(entries.every(e => !e.startsWith("./") && e !== "."), "全部模式无 ./ 前缀（内容在包顶层）", entries.join(","));
+        // 白名单
+        out = await runPack({ entries: ["keep"] });
+        tgz = out.match(/\[tar\] (\S+\.tgz)/)[1];
+        entries = await listArchive(path.join(ROOT, ".tmp", tgz));
+        assert.ok(entries.some(e => e.includes("a.txt")) && !entries.some(e => e.includes("skip")), "白名单仅打包条目");
+        // 黑名单
+        out = await runPack({ excludes: ["skip"] });
+        tgz = out.match(/\[tar\] (\S+\.tgz)/)[1];
+        entries = await listArchive(path.join(ROOT, ".tmp", tgz));
+        assert.ok(entries.some(e => e.includes("root.txt")) && entries.some(e => e.includes("a.txt")) && !entries.some(e => e.includes("skip")), "黑名单排除路径段");
+        // 双配置：validate 与 run 两处报错
+        const both = { entries: ["keep"], excludes: ["skip"] };
+        const vErr = validateWorkflow({
+            name: "tp2", nodes: [{ id: "t", type: "tar.pack", position: [0, 0], data: both }], edges: [],
+            tasks: { t: { label: "t", mutates: false, nodes: ["t"] } },
+        });
+        assert.match(vErr.join("; "), /只能二选一/);
+        await assert.rejects(() => runPack(both), /只能二选一/);
+    } finally {
+        await fsp.rm(dir, { recursive: true, force: true });
+        for (const f of fs.readdirSync(path.join(ROOT, ".tmp")).filter(f => f.endsWith(".tgz"))) {
+            fs.rmSync(path.join(ROOT, ".tmp", f), { force: true });
+        }
+    }
+});
+
+await test("运行状态: executeTask 标记 running→ok；失败节点 failed", async () => {
+    const { executeTask } = await import("../engine/workflow.js");
+    const doc = structuredClone(fanDoc);
+    doc.nodes[2] = { id: "3", type: "git.checkout", position: [0, 0], data: {} };
+    doc.tasks = { t: { label: "t", mutates: false, nodes: ["1", "2", "3"] } };
+    /** @type {Record<string, string>} */
+    const st = {};
+    const ctx = { log: () => {}, dryRun: true, inputs: {}, mask: s => s, markNode: (id, s) => { st[id] = s; } };
+    await assert.rejects(() => executeTask(ctx, doc, "t"), /未连接仓库目录/);
+    assert.strictEqual(st["1"], "ok");
+    assert.strictEqual(st["2"], "ok");
+    assert.strictEqual(st["3"], "failed");
+    // 成功路径：全部 ok
+    const st2 = {};
+    const docOk = structuredClone(fanDoc);
+    docOk.tasks = { t: { label: "t", mutates: false, nodes: ["1", "2", "3"] } };
+    await executeTask({ log: () => {}, dryRun: true, inputs: {}, mask: s => s, markNode: (id, s) => { st2[id] = s; } }, docOk, "t");
+    assert.deepStrictEqual(st2, { 1: "ok", 2: "ok", 3: "ok" });
 });
 
 await test("注册表: 工作流加载器正常（旧 wf 已存档 _attic，等待重写）", () => {

@@ -83,6 +83,8 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
         endedAt: null,
         error: null,
         logLines: [],
+        /** @type {Record<string, string>} nodeId → running|ok|failed（GUI 卡片外框状态） */
+        nodeStatus: {},
     };
     runs.set(id, run);
 
@@ -116,6 +118,11 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
             registerGitRestore(fn) { this.gitRestores.push(fn); },
             registerSession(ssh) { this.sessions.push(ssh); },
             trackRemoteFile(ssh, p) { this.remoteFiles.push({ ssh, path: p }); },
+            /** 节点执行状态标记（GUI 卡片外框：running/ok/failed）；随 run 持久化 + SSE 快照推送 */
+            markNode(nodeId, status) {
+                run.nodeStatus = { ...run.nodeStatus, [nodeId]: status };
+                persist(run);
+            },
         };
 
         try {

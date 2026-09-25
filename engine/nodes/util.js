@@ -1,8 +1,34 @@
+import path from "path";
+import { expandHome } from "../exec.js";
+
 /**
- * 工具节点：取字段、常量、字符串拼接（动态插槽）、打印预览。
+ * 工具节点：路径拼接、取字段、字符串拼接（动态插槽）、打印预览。
  */
 
 export default [
+    {
+        type: "path.resolve",
+        title: "Path Resolve",
+        category: "工具",
+        color: "#56b6c2",
+        countInputs: { key: "count", prefix: "p", type: "string", min: 1, max: 16 },
+        desc: "把 N 段路径拼成完整路径（path.resolve 语义）：首段可以是 ~ / 盘符 / 绝对路径，后续为相对段；若后续段是绝对路径则以该段为基准。输入端口数量由 count 控件决定。",
+        inputs: [],
+        outputs: [{ id: "value", type: "string" }],
+        widgets: [{ key: "count", label: "路径段数（1-16）", kind: "number", serializable: true, default: 2 }],
+        async run(ctx, node, inputs) {
+            const count = node.data.count ?? 2;
+            const segs = [];
+            for (let i = 1; i <= count; i++) {
+                const v = String(inputs[`p${i}`] ?? "").trim();
+                if (!v) throw new Error(`path.resolve：路径段 p${i} 为空`);
+                segs.push(expandHome(v));
+            }
+            const full = path.resolve(...segs);
+            ctx.log(`[path.resolve] ${segs.join(" + ")} → ${full}`);
+            return { value: full };
+        },
+    },
     {
         type: "field.get",
         desc: "从 any 结构里按字段名取值（输出 string）。字段不存在即报错，防静默空值。",
@@ -18,19 +44,6 @@ export default [
             const v = inputs.obj?.[key];
             if (v === undefined) throw new Error(`字段不存在: ${key}（可用：${Object.keys(inputs.obj ?? {}).join(", ")}）`);
             return { value: String(v) };
-        },
-    },
-    {
-        type: "string.const",
-        desc: "输出一个常量字符串。",
-        title: "常量",
-        category: "工具",
-        color: "#c8d3f0",
-        inputs: [],
-        outputs: [{ id: "value", type: "string" }],
-        widgets: [{ key: "value", label: "值", kind: "string", default: "" }],
-        async run(ctx, node) {
-            return { value: String(node.data.value ?? "") };
         },
     },
     {

@@ -12,7 +12,9 @@
   let metas = $state([]);
   let wfList = $state([]);
   let currentPath = $state("");
-  let name = $state(""), title = $state(""), repoDir = $state("");
+  let title = $state("");          // 显示名（工作流唯一可编辑标识；文件路径即身份）
+  let docRepoDir = $state("");     // 透传字段：旧文档里的 repoDir 原样保留，不再提供编辑框
+  let displayName = $derived(title || (currentPath ? currentPath.split(/[\\/]/).pop().replace(/\.json$/i, "") : ""));
   let nodes = $state([]), edges = $state([]), tasks = $state({});
   let autoDirty = $state(false);   // 关键变更未落盘（自动写盘管）
   let layoutDirty = $state(false); // 布局（节点位置）未保存（手动"保存"管）
@@ -24,7 +26,7 @@
   let definer = $state(/** @type {{ nodes: string[], name: string, label: string, mutates: boolean, problems: string[] } | null} */ (null));
   let hoverTask = $state(/** @type {string | null} */ (null));
   let runModal = $state(/** @type {{ task: string, label: string, mutates: boolean, inputs: {name:string,label:string,fallback:string,value:string}[], dryRun: boolean, needProd: boolean, prodVal: string } | null} */(null));
-  let openModal = $state(/** @type {{ mode: "open" | "new", path: string, name: string, title: string } | null} */(null));
+  let openModal = $state(/** @type {{ mode: "open" | "new", path: string, title: string } | null} */(null));
   let logRef = $state(null);
 
   const typeMap = $derived(ui.nodeTypesMap);
@@ -33,17 +35,9 @@
   let selectedNodeIds = $derived(new Set(nodes.filter(n => n.selected).map(n => n.id)));
 
   // 节点卡片经 context 拿编辑/删除回调与连线查询（xyflow 自建组件树，props 传不进节点组件）
-  let stats = $state(/** @type {Record<string, any>} */ ({}));
   setContext("devnode-actions", {
     ondata: onData,
     ondelete: deleteNode,
-    /** fs.path 卡片 stat 结果上报（驱动动态出口与边的自动清理）。
-     *  幂等：值未变不更新——stat effect 与 xyflow 节点回写会互相触发，非幂等会造成无限渲染循环。 */
-    onstat(id, st) {
-      const prev = stats[id];
-      if (prev === st || (prev && st && prev.exists === st.exists && prev.isDir === st.isDir)) return;
-      stats = { ...stats, [id]: st };
-    },
     /** 某输入口是否已连线（struct 字段口连线时隐藏手填控件） */
     isWiredAsTarget(nodeId, handleId) {
       return edges.some(e => e.kind !== "seq" && e.target === nodeId && e.targetHandle === handleId);
@@ -91,7 +85,8 @@
   }
   function loadDoc(fp, doc) {
     currentPath = fp;
-    name = doc.name; title = doc.title ?? doc.name; repoDir = doc.repoDir ?? "";
+    title = doc.title ?? doc.name ?? fp.split(/[\\/]/).pop().replace(/\.json$/i, "");
+    docRepoDir = doc.repoDir ?? "";
     nodes = (doc.nodes ?? []).map(n => ({
       id: n.id, type: n.type,
       position: { x: n.position[0], y: n.position[1] },
@@ -107,11 +102,14 @@
     }).map(e => ({ ...e, ...(e.kind === "seq" ? { class: "seq" } : {}) }));
     tasks = doc.tasks ?? {};
     hoverTask = null; definer = null;
+    ui.runTaskNodes = null; ui.nodeRunStatus = null;
     ignoreDirtyUntil = Date.now() + 1000;
   }
   function toDoc() {
     return {
-      name, title, version: 1, repoDir,
+      ...(title ? { title } : {}),
+      version: 1,
+      ...(docRepoDir ? { repoDir: docRepoDir } : {}),
       nodes: nodes.map(n => ({ id: n.id, type: n.type, position: [Math.round(n.position.x), Math.round(n.position.y)], data: stripDecor(n.data) })),
       edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, ...(e.kind ? { kind: e.kind } : {}) })),
       tasks: JSON.parse(JSON.stringify(tasks)),
@@ -144,12 +142,13 @@
       const { path: fp } = openModal;
       if (openModal.mode === "new") {
         const doc = {
-          name: openModal.name, title: openModal.title || openModal.name, version: 1, repoDir: "",
+          ...(openModal.title ? { title: openModal.title } : {}),
+          version: 1,
           nodes: [
-            { id: "env1", type: "env.file", position: [80, 200], data: { envFile: `${openModal.name}.env`, schema: {} } },
+            { id: "cfg1", type: "struct.make", position: [80, 200], data: { fields: [{ key: "SERVER_TYPE", type: "string", value: "test" }] } },
             { id: "ssh1", type: "ssh.session", position: [340, 200], data: {} },
           ],
-          edges: [{ id: "e1", source: "env1", sourceHandle: "env", target: "ssh1", targetHandle: "env" }],
+          edges: [{ id: "e1", source: "cfg1", sourceHandle: "struct", target: "ssh1", targetHandle: "env" }],
           tasks: {},
         };
         await api("/api/workflows/save", { method: "POST", body: JSON.stringify({ path: fp, doc }) });
@@ -199,34 +198,51 @@
   const nodeByIdMap = $derived(new Map(nodes.map(n => [n.id, n])));
 
   /**
-   * 连线校验（Svelte Flow 拖拽中实时调用 + 连接完成时裁决；false 则库不建立连线）。
-   * 规则：同四元组（source/sourceHandle/target/targetHandle）唯一——同输入的多条"备选"连线
-   * 必须来自不同 source；类型按插槽规则匹配；顺序边同对节点唯一。
-   * 注意：不能在这里 toast（拖拽中高频调用），拒绝的反馈就是线吸不上去。
+   * 连线裁决：null = 可连；否则返回拒绝原因（isValidConnection 与 connectend 提示共用）。
+   * Svelte Flow 拖拽中实时调用 isValidConnection（高频、不可 toast）；拖放落在目标 handle
+   * 上但被拒时由 onConnectEnd 弹出原因。
    * @param {any} p connection { source, target, sourceHandle, targetHandle }
+   * @returns {string | null}
    */
-  function isValidConnection(p) {
-    if (!p?.source || !p?.target) return false;
-    if (p.source === p.target) return false;
+  function connectionRejectReason(p) {
+    if (!p?.source || !p?.target) return "连线不完整";
+    if (p.source === p.target) return "不能连接节点自身";
     // 顺序边：无类型语义，同对节点只允许一条
     if (p.sourceHandle === "__seqOut" && p.targetHandle === "__seqIn") {
-      return !edges.some(e => (e.kind === "seq" || e.class === "seq") && e.source === p.source && e.target === p.target);
+      if (edges.some(e => (e.kind === "seq" || e.class === "seq") && e.source === p.source && e.target === p.target)) return "顺序连线已存在";
+      return null;
     }
     const src = nodeByIdMap.get(p.source), tgt = nodeByIdMap.get(p.target);
-    if (!src || !tgt) return false;
+    if (!src || !tgt) return "端点节点不存在";
     const sMeta = typeMap[src.type], tMeta = typeMap[tgt.type];
-    if (!sMeta || !tMeta) return false;
-    // 动态出口节点（fs.path / struct.split）必须经 effectiveOutputs 解析，声明 outputs 为空
+    if (!sMeta || !tMeta) return "节点类型未知";
+    // 动态出口节点（struct.split）必须经 effectiveOutputs 解析，声明 outputs 为空
     const outs = sMeta.dynamicOutputs
-      ? effectiveOutputs(sMeta, src.data, { stat: stats[src.id], edges, nodes, id: src.id })
+      ? effectiveOutputs(sMeta, src.data, { edges, nodes, id: src.id })
       : (sMeta.outputs ?? []);
     const o = (p.sourceHandle ? outs.find(x => x.id === p.sourceHandle) : outs[0]) ?? outs[0];
     const inps = effectiveInputs(tMeta, tgt.data);
     const i = p.targetHandle ? inps.find(x => x.id === p.targetHandle) : inps[0];
-    if (!o || !i) return false;
-    if (!canConnect(o.type, i.type)) return false;
+    if (!o || !i) return "插槽不存在（节点配置可能已变化）";
+    if (!canConnect(o.type, i.type)) return `类型不兼容：${o.type}（${src.id}.${o.id}）→ ${i.type}（${tgt.id}.${i.id}）`;
     // 四元组唯一（防重复拖拽/事件重放产生的完全相同的边）
-    return !edges.some(e => e.source === p.source && e.sourceHandle === o.id && e.target === p.target && e.targetHandle === i.id);
+    if (edges.some(e => e.source === p.source && e.sourceHandle === o.id && e.target === p.target && e.targetHandle === i.id)) return "完全相同的连线已存在";
+    return null;
+  }
+  /** @param {any} p */
+  function isValidConnection(p) {
+    return connectionRejectReason(p) === null;
+  }
+  /** 拖放结束落在目标 handle 上但被拒 → toast 原因（拖空白取消不打扰；拖拽过程中也不打扰） */
+  function onConnectEnd(/** @type {any} */ _e, /** @type {any} */ cs) {
+    if (!cs || cs.isValid === true || !cs.toHandle || !cs.fromHandle) return;
+    const reason = connectionRejectReason({
+      source: cs.fromHandle.nodeId,
+      sourceHandle: cs.fromHandle.id,
+      target: cs.toHandle.nodeId,
+      targetHandle: cs.toHandle.id,
+    });
+    if (reason) showToast(`连线被拒：${reason}`);
   }
 
   /**
@@ -269,14 +285,14 @@
   });
 
   // ── 动态出口：源节点的有效出口不含某边的 sourceHandle 时，该边自动消失 ────
-  // 例：fs.path 从文件夹改成文件/留空 → folder 出口上的连线随之断开。出口列表未知（[] 由规则明确给出）也删。
+  // 例：struct.split 的上游字段删除 → 对应出口上的连线随之断开。出口列表未知（[] 由规则明确给出）也删。
   $effect(() => {
     const dead = edges.filter(e => {
       if (e.kind === "seq") return false;
       const src = nodes.find(n => n.id === e.source);
       const meta = typeMap[src?.data?.__type ?? src?.type];
       if (!src || !meta) return false;
-      const outs = effectiveOutputs(meta, src.data, { stat: stats[e.source], edges, nodes, id: e.source });
+      const outs = effectiveOutputs(meta, src.data, { edges, nodes, id: e.source });
       return !outs.some(o => o.id === e.sourceHandle);
     });
     if (dead.length) {
@@ -300,9 +316,25 @@
       prodVal: "",
     };
   }
+  /** 定义任务模式下点任务按钮 = 载入该任务进入编辑（保存同名任务即覆盖） */
+  function editTask(taskName) {
+    const t = tasks[taskName];
+    definer = {
+      nodes: [...(t.nodes ?? t.path ?? [])],
+      name: taskName,
+      label: t.label ?? taskName,
+      mutates: !!t.mutates,
+      problems: [],
+    };
+  }
+  /** 点画布背景：清除最近一次任务的运行状态（卡片外框/透明度回归正常） */
+  function clearRunStatus() {
+    ui.nodeRunStatus = null;
+    ui.runTaskNodes = null;
+  }
   async function doRun() {
     const m = runModal;
-    if (m.needProd && !m.dryRun && m.prodVal !== name) { showToast(`需输入工作流名 "${name}" 确认`); return; }
+    if (m.needProd && !m.dryRun && m.prodVal !== displayName) { showToast(`需输入显示名 "${displayName}" 确认`); return; }
     const inputs = Object.fromEntries(m.inputs.map(i => [i.name, i.value || i.fallback]).filter(([, v]) => v !== ""));
     try {
       const { id } = await api("/api/jobs", { method: "POST", body: JSON.stringify({
@@ -311,7 +343,11 @@
         ...(m.needProd && !m.dryRun ? { confirmProd: m.prodVal } : {}),
       }) });
       runModal = null;
-      await logRef?.follow(id, `${name}/${m.task}${m.dryRun ? " (dry-run)" : ""}`);
+      // 卡片外框状态：任务选点集（集外半透明灰）+ 节点执行状态清零，随流式事件更新
+      ui.runTaskNodes = new Set(tasks[m.task].nodes ?? tasks[m.task].path ?? []);
+      ui.nodeRunStatus = {};
+      await logRef?.follow(id, `${displayName}/${m.task}${m.dryRun ? " (dry-run)" : ""}`,
+        ns => { ui.nodeRunStatus = ns ?? {}; });
     } catch (e) { showToast(e.message); }
   }
 
@@ -342,8 +378,8 @@
         <option value={w.path}>{w.error ? `✗ ${w.path}` : `${w.name}${w.serverType === "prod" ? " ⚠PROD" : ""}`}</option>
       {/each}
     </select>
-    <button onclick={() => (openModal = { mode: "open", path: "", name: "", title: "" })}>打开…</button>
-    <button onclick={() => (openModal = { mode: "new", path: "", name: "", title: "" })}>新建…</button>
+    <button onclick={() => (openModal = { mode: "open", path: "", title: "" })}>打开…</button>
+    <button onclick={() => (openModal = { mode: "new", path: "", title: "" })}>新建…</button>
     <button class="primary" disabled={!dirty} onclick={() => save()}>{dirty ? "保存 *" : "保存"}</button>
     <span class="badge">{busyText}</span>
     <input class="token" type="password" placeholder="token" bind:value={tokenVal} onchange={tokenChange} />
@@ -352,15 +388,13 @@
 
   <div class="taskbar">
     <span class="wfmeta">
-      <input style="width:110px" placeholder="name" bind:value={name} onchange={() => markCritical()} />
-      <input style="width:150px" placeholder="标题" bind:value={title} onchange={() => markCritical()} />
-      <input style="width:260px" placeholder="应用仓库 repoDir" bind:value={repoDir} onchange={() => markCritical()} />
+      <input style="width:220px" placeholder="显示名" bind:value={title} onchange={() => markCritical()} />
     </span>
     <span class="sep"></span>
     {#each Object.entries(tasks) as [tn, t] (tn)}
       <button class:onpath-btn={hoverTask === tn}
         onmouseenter={() => (hoverTask = tn)} onmouseleave={() => (hoverTask = null)}
-        onclick={() => openRun(tn)}>
+        onclick={() => (definer ? editTask(tn) : openRun(tn))}>
         {t.label ?? tn}{t.mutates ? " ⚠" : ""}
       </button>
       <button class="danger mini" title="删除任务" onclick={() => deleteTask(tn)}>✕</button>
@@ -378,7 +412,9 @@
         bind:nodes bind:edges
         nodeTypes={components}
         onnodeclick={onNodeClick}
+        onpaneclick={clearRunStatus}
         onconnect={onConnect}
+        onconnectend={onConnectEnd}
         isValidConnection={isValidConnection}
         ondelete={onDelete}
         deleteKey={["Backspace", "Delete"]}
@@ -398,6 +434,7 @@
       {#if definer}
         <div class="definer">
           <b>定义任务</b>：点选节点（顺序无关，将构成一个或多个 DAG 并发执行；当前 {definer.nodes.length} 个）
+          {#if tasks[definer.name]}<span class="dim">—— 编辑现有任务「{tasks[definer.name].label ?? definer.name}」，保存即覆盖</span>{/if}
           <div class="chips">
             {#each definer.nodes as id (id)}<span class="badge mono">{id}</span>{/each}
           </div>
@@ -421,12 +458,12 @@
 </div>
 
 {#if openModal}
-  <div class="overlay" role="presentation" onclick={e => { if (e.target === e.currentTarget) openModal = null; }}>
+  <!-- 关闭只走显式按钮；点背景不关闭，防长表单误触丢内容 -->
+  <div class="overlay">
     <div class="modal">
       <h3>{openModal.mode === "new" ? "新建工作流" : "打开工作流"}</h3>
       {#if openModal.mode === "new"}
-        <label>工作流名（英文）<input bind:value={openModal.name} placeholder="my-app" /></label>
-        <label>标题<input bind:value={openModal.title} placeholder="显示名" /></label>
+        <label>显示名（别名，可留空 = 用文件名）<input bind:value={openModal.title} placeholder="我的部署流程" /></label>
       {/if}
       <label>JSON 文件完整路径（可在磁盘任意位置）<input class="mono" bind:value={openModal.path} placeholder="C:/Users/yatyr/workspace/devops/workflows/my-app.json" /></label>
       <div class="row">
@@ -438,7 +475,7 @@
 {/if}
 
 {#if runModal}
-  <div class="overlay" role="presentation" onclick={e => { if (e.target === e.currentTarget) runModal = null; }}>
+  <div class="overlay">
     <div class="modal">
       <h3>运行 {runModal.label}</h3>
       {#if runModal.inputs.length}
@@ -450,7 +487,7 @@
       {/if}
       <label class="mut"><input type="checkbox" bind:checked={runModal.dryRun} /> dry-run（只打印计划，不产生副作用）</label>
       {#if runModal.needProd && !runModal.dryRun}
-        <label style="color:var(--err)">PROD：输入工作流名 <b>{name}</b> 确认<input bind:value={runModal.prodVal} placeholder={name} /></label>
+        <label style="color:var(--err)">PROD：输入显示名 <b>{displayName}</b> 确认<input bind:value={runModal.prodVal} placeholder={displayName} /></label>
       {/if}
       <div class="row">
         <button class="primary" onclick={doRun}>运行</button>

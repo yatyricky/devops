@@ -1,7 +1,7 @@
 /** 与 engine/types.js 同规则的客户端镜像 + 动态插槽/出口计算。 */
 
 export const TYPE_COLORS = {
-  struct: "#4da3ff", ssh: "#ff9e64", file: "#4cc38a", folder: "#56b6c2", string: "#c8d3f0",
+  struct: "#4da3ff", ssh: "#ff9e64", string: "#c8d3f0",
   number: "#e5c07b", boolean: "#c678dd", any: "#8a97a8",
 };
 
@@ -21,6 +21,16 @@ export function effectiveInputs(meta, data) {
   const declared = (meta?.inputs ?? []).map(i => ({ ...i, dynamic: false }));
   /** @type {any[]} */
   let all = declared;
+  if (meta?.countInputs) {
+    const { key, prefix, type, min, max } = meta.countInputs;
+    const n = Math.max(min, Math.min(max, Math.trunc(Number(data?.[key]) || min)));
+    const ports = [];
+    for (let i = 1; i <= n; i++) {
+      const id = `${prefix}${i}`;
+      if (!all.some(d => d.id === id)) ports.push({ id, type, required: true, dynamic: true });
+    }
+    all = [...all, ...ports];
+  }
   if (meta?.fieldInputs) {
     const fieldPorts = (data?.fields ?? [])
       .filter(f => f.key && !declared.some(d => d.id === f.key))
@@ -40,30 +50,13 @@ export function effectiveInputs(meta, data) {
   return [...all, ...dynamic];
 }
 
-/** fs.path 路径文本合法性：绝对路径或 ~ 开头（~ = 用户主目录）。 */
-export function pathCheck(p) {
-  if (!p) return false;
-  const home = /^~(?:[\\/]|$)/.test(p);
-  if (!home && !/^(?:[a-zA-Z]:[\\/]|\\\\)/.test(p)) return false;
-  if (/[<>|"?*\x00-\x1f]/.test(p)) return false;
-  return home || !/[<>:"|?*\x00-\x1f]/.test(p.slice(2));
-}
-
 /**
  * 节点有效输出 = 声明输出，或按 dynamicOutputs 规则解析（engine/nodes/index.js 同规则镜像）。
  * @param {any} meta node-types 注册表条目
  * @param {any} data 节点 data
- * @param {{stat?: any, edges?: any[], nodes?: any[], id?: string}} env
- *   fsPath 需 stat（{exists,isDir}；null = 查询中，保守显示双口）；structSplit 需 edges+nodes+id 回溯上游。
+ * @param {{edges?: any[], nodes?: any[], id?: string}} env structSplit 回溯上游需要
  */
 export function effectiveOutputs(meta, data, env = {}) {
-  if (meta?.dynamicOutputs === "fsPath") {
-    const p = String(data?.path ?? "").trim();
-    if (!p || !pathCheck(p)) return [];
-    if (!env.stat) return [{ id: "dir", type: "folder" }, { id: "file", type: "file" }];
-    if (!env.stat.exists) return [];
-    return env.stat.isDir ? [{ id: "dir", type: "folder" }] : [{ id: "file", type: "file" }];
-  }
   if (meta?.dynamicOutputs === "structSplit") {
     const e = (env.edges ?? []).find(x => x.kind !== "seq" && x.target === env.id);
     const src = (env.nodes ?? []).find(n => n.id === e?.source);

@@ -1,11 +1,8 @@
-import fs from "fs";
-import path from "path";
-import { expandHome } from "../exec.js";
-
 /**
- * 输入类节点：任务输入 / 路径 / struct 构造与析构。
- * 机密模型（2026-09-24）：workflow JSON 本身即机密文件——env 字段以 struct 字段直接定义在图里，
+ * 输入类节点：任务输入 / 字符串输入 / struct 构造与析构。
+ * 机密模型：workflow JSON 本身即机密文件——env 字段以 struct 字段直接定义在图里，
  * 哪个字段被哪个节点消费由连线一目了然。
+ * 路径即字符串：不存在独立的路径插槽类型（远端路径在运行前无法探知状态，类型化无意义）。
  */
 
 export default [
@@ -32,29 +29,16 @@ export default [
         },
     },
     {
-        type: "fs.path",
-        title: "输入路径",
+        type: "string.const",
+        title: "输入.字符串",
         category: "输入",
-        color: "#56b6c2",
-        pathStat: true,
-        dynamicOutputs: "fsPath",
-        outputValueKey: "path",
-        desc: "指向本机文件或文件夹（支持 ~/ 开头）。出口随实际类型自动变化：合法文件夹 → folder，合法文件 → file，未配置/非法 → 无出口；连线随出口消失自动断开。",
+        color: "#c8d3f0",
+        desc: "输出一个字符串常量：只需要一个 string 时的最干净输入方式（比 Struct 轻量）。",
         inputs: [],
-        outputs: [],
-        widgets: [{ key: "path", label: "路径", kind: "string", serializable: true, default: "", placeholder: "C:/... 或 ~/...（~ = 用户目录）" }],
+        outputs: [{ id: "value", type: "string" }],
+        widgets: [{ key: "value", label: "值", kind: "string", serializable: true, default: "" }],
         async run(ctx, node) {
-            const typed = String(node.data.path ?? "").trim();
-            if (!typed) throw new Error("fs.path 未配置路径");
-            // 输出 resolve 后的完整绝对路径（~ 展开 + 分隔符/.. 归一），下游节点直接可用
-            const full = path.resolve(expandHome(typed));
-            /** @type {import("fs").Stats} */
-            let st;
-            try { st = await fs.promises.stat(full); } catch { throw new Error(`fs.path 路径不存在: ${full}`); }
-            const isDir = st.isDirectory();
-            ctx.log(`[fs.path] ${typed} → ${full}（${isDir ? "文件夹" : "文件"}，${st.size} B）`);
-            // 双插槽：只有与实际类型匹配的输出有值，另一个为 undefined
-            return { dir: isDir ? full : undefined, file: isDir ? undefined : full };
+            return { value: String(node.data.value ?? "") };
         },
     },
     {

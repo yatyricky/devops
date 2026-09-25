@@ -1,14 +1,20 @@
 import fs from "fs";
 import path from "path";
-import { cmd, writeLF, copyTree, expandHome } from "../exec.js";
+import { cmd, writeLF, copyTree, expandHome, rmrf } from "../exec.js";
 import { compress, makeStageDir } from "../tarball.js";
 import { renderTemplateFile } from "../render.js";
 import { resolveDeployVersion } from "../gitops.js";
 import { ROOT, TMP_DIR } from "../runner.js";
 
 /**
- * 构建/版本类节点：git 版本、本地命令、env 生成、暂存、打包、模板渲染。
+ * 构建/版本类节点：git 版本、本地命令、env 生成、暂存、打包、模板渲染、npm 脚本。
  */
+
+/** 读取目录下 package.json 的 scripts 键集（npm.run 卡片下拉与执行校验共用）。 */
+export function readNpmScripts(dir) {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    return Object.keys(pkg.scripts ?? {});
+}
 
 export default [
     {
@@ -46,7 +52,7 @@ export default [
         category: "版本",
         color: "#f07178",
         inputs: [
-            { id: "repoDir", type: "folder", required: true },
+            { id: "repoDir", type: "string", required: true },
             { id: "ref", type: "string", required: true },
         ],
         outputs: [{ id: "original", type: "string" }],
@@ -79,7 +85,7 @@ export default [
         category: "版本",
         color: "#f07178",
         refsPicker: true,
-        inputs: [{ id: "repoDir", type: "folder", required: true }],
+        inputs: [{ id: "repoDir", type: "string", required: true }],
         outputs: [{ id: "ref", type: "string" }],
         widgets: [],
         async run(ctx, node) {
@@ -123,7 +129,7 @@ export default [
             { id: "version", type: "string", required: false },
             { id: "dir", type: "string", required: false },
         ],
-        outputs: [{ id: "file", type: "file" }],
+        outputs: [{ id: "file", type: "string" }],
         widgets: [
             { key: "target", label: "目标路径（相对 dir 输入或 ROOT；绝对路径直用）", kind: "string", default: "" },
             { key: "mapping", label: "映射（文件键 ← env 键）", kind: "kv", default: {} },
@@ -181,7 +187,7 @@ export default [
     },
     {
         type: "tar.pack",
-        desc: "把目录按条目打成 t.gz，输出归档路径与文件名（供上传）。",
+        desc: "把目录打成 t.gz，输出压缩包完整路径。三种模式：不配置条目 = 打包全部；仅打包条目 = 白名单；仅不打包条目 = 黑名单（按路径段排除）。两者都配属配置错误。",
         title: "打包 tgz",
         category: "构建",
         color: "#4cc38a",
@@ -189,28 +195,52 @@ export default [
             { id: "dir", type: "string", required: true },
             { id: "name", type: "string", required: false },
         ],
-        outputs: [
-            { id: "archive", type: "file" },
-            { id: "archiveName", type: "string" },
-        ],
+        outputs: [{ id: "archive", type: "string" }],
         widgets: [
-            { key: "entries", label: "打包条目（相对 dir）", kind: "list", default: [] },
+            { key: "entries", label: "打包条目（白名单，相对 dir）", kind: "list", default: [] },
+            { key: "excludes", label: "不打包条目（黑名单，路径段）", kind: "list", default: [] },
             { key: "prefix", label: "文件名前缀（name 未连线时用）", kind: "string", default: "" },
         ],
         async run(ctx, node, inputs) {
             const entries = node.data.entries ?? [];
-            if (!entries.length) throw new Error("tar.pack 未配置条目");
+            const excludes = node.data.excludes ?? [];
+            if (entries.length && excludes.length) {
+                throw new Error("tar.pack：打包条目与不打包条目只能二选一（白名单或黑名单）");
+            }
             const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
             const base = inputs.name || `${node.data.prefix || "archive"}-${ts}`;
             const archiveName = `${base}.tgz`;
             const archivePath = path.join(TMP_DIR, archiveName);
-            if (ctx.dryRun) {
-                ctx.log(`[dry-run] 打包 ${inputs.dir} 的 [${entries.join(", ")}] → ${archiveName}`);
-                return { archive: archivePath, archiveName };
+
+            /** @type {string[]} 待打包条目 */
+            let packEntries;
+            /** @type {string | null} 黑名单模式的一次性暂存目录 */
+            let stage = null;
+            if (!entries.length && !excludes.length) {
+                // 顶层条目打包：内容直接位于包顶层（与白/黑名单产物形状一致），不用 "." 惯用法（会存成 ./ 前缀）
+                packEntries = fs.readdirSync(inputs.dir);
+                if (!packEntries.length) throw new Error(`tar.pack：目录为空，无可打包内容: ${inputs.dir}`);
+            } else if (entries.length) {
+                packEntries = entries;
+            } else {
+                stage = makeStageDir(TMP_DIR, `tarpack-${node.id}`);
+                copyTree(inputs.dir, stage, rel => !excludes.some(x => rel.split("/").includes(x) || rel.endsWith(String(x))));
+                packEntries = fs.readdirSync(stage);
             }
-            await compress(inputs.dir, entries, archivePath);
-            ctx.log(`[tar] ${archiveName}`);
-            return { archive: archivePath, archiveName };
+
+            if (ctx.dryRun) {
+                const what = packEntries[0] === "." ? "全部内容" : `[${packEntries.join(", ")}]`;
+                ctx.log(`[dry-run] 打包 ${inputs.dir} 的 ${what} → ${archiveName}${stage ? "（黑名单：暂存后打包）" : ""}`);
+                if (stage) rmrf(stage);
+                return { archive: archivePath };
+            }
+            try {
+                await compress(stage ?? inputs.dir, packEntries, archivePath);
+                ctx.log(`[tar] ${archiveName}`);
+                return { archive: archivePath };
+            } finally {
+                if (stage) rmrf(stage);
+            }
         },
     },
     {
@@ -220,7 +250,7 @@ export default [
         category: "构建",
         color: "#4cc38a",
         inputs: [{ id: "vars", type: "any", required: false }],
-        outputs: [{ id: "file", type: "file" }],
+        outputs: [{ id: "file", type: "string" }],
         widgets: [
             { key: "template", label: "模板路径（相对 templates/ 或绝对）", kind: "string", default: "" },
             { key: "extra", label: "附加变量", kind: "kv", default: {} },
@@ -245,6 +275,35 @@ export default [
                 ctx.log("────────────────────────────");
             }
             return { file: fpOut };
+        },
+    },
+    {
+        type: "npm.run",
+        title: "Npm Run",
+        category: "构建",
+        color: "#4cc38a",
+        scriptsPicker: true,
+        desc: "在指定目录执行 npm run <脚本>：脚本下拉点「刷新」解析该目录 package.json 的 scripts（序列化值不在集合中时默认取第一项）。通用执行节点——不感知构建产物，产物定位交给下游节点。",
+        inputs: [{ id: "path", type: "string", required: true }],
+        outputs: [],
+        widgets: [{ key: "script", label: "脚本（npm run）", kind: "string", serializable: true, default: "" }],
+        async run(ctx, node, inputs) {
+            const dir = path.resolve(expandHome(String(inputs.path ?? "").trim()));
+            if (!dir || dir === path.parse(dir).root) throw new Error("npm.run 未连接项目目录");
+            const script = String(node.data.script ?? "").trim();
+            if (!script) throw new Error("npm.run 未选择脚本");
+            let scripts;
+            try { scripts = readNpmScripts(dir); } catch (e) { throw new Error(`npm.run 读取 ${dir}/package.json 失败: ${e.message}`); }
+            if (!scripts.includes(script)) {
+                throw new Error(`npm.run：脚本 "${script}" 不在 package.json scripts 中（可用: ${scripts.join(", ") || "无"}）`);
+            }
+            if (ctx.dryRun) {
+                ctx.log(`[dry-run] npm run ${script}（cwd: ${dir}）`);
+                return {};
+            }
+            ctx.log(`[npm.run] npm run ${script}（cwd: ${dir}）`);
+            await cmd(`npm run ${script}`, { cwd: dir, log: ctx.log });
+            return {};
         },
     },
 ];

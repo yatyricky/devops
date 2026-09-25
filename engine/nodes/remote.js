@@ -104,7 +104,7 @@ export default [
         color: "#ff9e64",
         inputs: [
             { id: "ssh", type: "ssh", required: true },
-            { id: "local", type: "file", required: true },
+            { id: "local", type: "string", required: true },
             { id: "path", type: "string", required: true },
         ],
         outputs: [{ id: "remoteFile", type: "string" }],

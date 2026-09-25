@@ -1,13 +1,13 @@
 <script>
   import { getContext } from "svelte";
   import { Handle, Position, useUpdateNodeInternals } from "@xyflow/svelte";
-  import { TYPE_COLORS, effectiveInputs, effectiveOutputs, pathCheck } from "./types.js";
+  import { TYPE_COLORS, effectiveInputs, effectiveOutputs } from "./types.js";
   import { api } from "./api.js";
   import { ui } from "./store.svelte.js";
 
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
-  const { ondata, ondelete, onstat, isWiredAsTarget, getSourceNode, resolveInput } = getContext("devnode-actions");
+  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput } = getContext("devnode-actions");
   const updateNodeInternals = useUpdateNodeInternals();
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
@@ -15,12 +15,13 @@
   let inputs = $derived(effectiveInputs(meta, data));
   let color = $derived(meta?.color ?? "#8a97a8");
   let onPath = $derived(hl === true);
+  // ── 任务运行状态（卡片外框）：集外半透明灰；running 跑马灯 / ok 绿框 / failed 红框 ────
+  let runSt = $derived(ui.nodeRunStatus?.[id]);
+  let offTask = $derived(ui.runTaskNodes != null && !ui.runTaskNodes.has(id));
 
-  // ── 动态出口：fsPath 按卡片 stat；structSplit 回溯上游字段定义 ────
-  let stat = $state(null);
+  // ── 动态出口：structSplit 回溯上游字段定义 ────
   let outputs = $derived.by(() => {
     if (!meta) return [];
-    if (meta.dynamicOutputs === "fsPath") return effectiveOutputs(meta, data, { stat });
     if (meta.dynamicOutputs === "structSplit") {
       const src = getSourceNode?.(id, "struct");
       return (src?.data?.fields ?? []).filter(f => f.key).map(f => ({ id: f.key, type: f.type ?? "string" }));
@@ -68,50 +69,13 @@
     newVals[key] = "";
   }
 
-  // ── fs.path：路径校验（绝对路径或 ~ 开头，~ = 用户主目录）+ stat 展示 ────
-  let pathValid = $derived(meta?.pathStat ? pathCheck(String(data?.path ?? "").trim()) : true);
-  let statErr = $state("");
-  $effect(() => {
-    if (!meta?.pathStat) return;
-    const p = String(data?.path ?? "").trim();
-    stat = null; statErr = "";
-    if (!p || !pathCheck(p)) return;
-    const t = setTimeout(async () => {
-      try {
-        // 5s 超时：请求挂死时落到错误提示，不永久停留在「查询中」
-        const s = await api("/api/fs/stat", { method: "POST", body: JSON.stringify({ path: p }), signal: AbortSignal.timeout?.(5000) });
-        if (String(data?.path ?? "").trim() !== p) return; // 路径已变，丢弃过期响应
-        stat = s;
-        onstat?.(id, s);
-      } catch (e) {
-        if (String(data?.path ?? "").trim() !== p) return;
-        statErr = e?.name === "TimeoutError" ? "查询超时" : e.message;
-        onstat?.(id, null);
-      }
-    }, 300);
-    return () => clearTimeout(t);
-  });
-  function fmtSize(n) {
-    if (n == null) return "—";
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
-    if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-    return `${(n / 1024 ** 3).toFixed(2)} GB`;
-  }
-  function fmtTime(iso) {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    const z = n => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`;
-  }
-
   // ── git.getRefs：刷新 refs + 下拉选择 ────
   let refs = $state([]);
   let refsErr = $state("");
   let refreshing = $state(false);
   async function refreshRefs() {
     const repoDir = resolveInput?.(id, "repoDir");
-    if (!repoDir) { refsErr = "未连接文件夹输入"; return; }
+    if (!repoDir) { refsErr = "未连接仓库目录输入"; return; }
     refreshing = true; refsErr = "";
     try {
       refs = await api("/api/git/refs", { method: "POST", body: JSON.stringify({ repoDir }) });
@@ -122,20 +86,35 @@
     }
   }
 
-  // ── 卡片错误：整卡红框描边 + stat 区错误行 ────
-  let cardError = $derived.by(() => {
-    if (meta?.pathStat) {
-      const p = String(data?.path ?? "").trim();
-      if (!p) return "";
-      if (!pathValid) return "路径非法（需绝对路径或 ~ 开头）";
-      if (statErr) return statErr;
-      if (!stat) return "";
-      if (!stat.exists) return "路径不存在";
-      return "";
+  // ── npm.run：scripts 下拉手动刷新（点「刷新」解析 <path>/package.json，同 git refs 模式）────
+  let scripts = $state([]);
+  let scriptsErr = $state("");
+  let scriptsRefreshing = $state(false);
+  async function refreshScripts() {
+    const p = String(resolveInput?.(id, "path") ?? "").trim();
+    if (!p) { scriptsErr = "未连接目录输入"; return; }
+    scriptsRefreshing = true; scriptsErr = "";
+    try {
+      scripts = await api("/api/npm/scripts", { method: "POST", body: JSON.stringify({ path: p }) });
+      // 已序列化的值不在集合中 → 默认取第一项（回写保持 serializable 值有效）
+      const cur = String(get("script") ?? "");
+      if (scripts.length && !scripts.includes(cur)) set("script", scripts[0]);
+    } catch (e) {
+      scriptsErr = e.message;
+    } finally {
+      scriptsRefreshing = false;
     }
+  }
+
+  // ── 卡片错误：整卡红框描边 ────
+  let cardError = $derived.by(() => {
     if (meta?.refsPicker && refsErr) return refsErr;
     return "";
   });
+
+  // ── 节点备注：便笺按钮折叠展开，内容存 data.note 随图保存 ────
+  let noteOpen = $state(false);
+  let noteText = $derived(String(data?.note ?? ""));
 
   // ── struct 字段行：值控件按类型变化；字段口连线后隐藏手填 ────
   const numOk = v => String(v ?? "").trim() !== "" && Number.isFinite(Number(v));
@@ -150,7 +129,8 @@
   }
 </script>
 
-<div class="devnode" class:selected class:onpath={onPath} class:error={!!cardError}>
+<div class="devnode" class:selected class:onpath={onPath} class:error={!!cardError}
+  class:offtask={offTask && !runSt} class:st-ok={runSt === "ok"} class:st-fail={runSt === "failed"} class:st-run={runSt === "running"}>
   {#snippet trash(size = 12)}
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -245,6 +225,18 @@
                 <button class="mini" onclick={() => listAdd(w.key)}>＋</button>
               </span>
             </span>
+          {:else if meta?.scriptsPicker && w.key === "script"}
+            <span class="trow">
+              <select value={get(w.key) ?? ""} onchange={e => set(w.key, e.target.value)}>
+                {#each scripts as s (s)}<option value={s}>{s}</option>{/each}
+              </select>
+              <button class="mini" disabled={scriptsRefreshing} onclick={refreshScripts}>{scriptsRefreshing ? "…" : "刷新"}</button>
+            </span>
+            {#if scriptsErr}<span class="errline">⚠ {scriptsErr}</span>{/if}
+          {:else if w.kind === "number"}
+            <input class:winvalid={String(get(w.key) ?? "").trim() !== "" && !numOk(get(w.key))}
+              value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
+              onchange={e => set(w.key, numOk(e.target.value) ? Number(e.target.value) : e.target.value)} />
           {:else if w.kind === "struct"}
             <span class="tblwrap">
               {#each get(w.key) ?? [] as f, i}
@@ -279,8 +271,7 @@
               </span>
             </span>
           {:else}
-            <input class:winvalid={meta.pathStat && w.key === "path" && !pathValid}
-              value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
+            <input value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
               oninput={e => set(w.key, e.target.value)} />
           {/if}
         </label>
@@ -300,30 +291,16 @@
         {#if refsErr}<span class="errline">⚠ {refsErr}</span>{/if}
       </label>
     {/if}
-
-    {#if meta?.pathStat}
-      <div class="stat">
-        {#if !String(get("path") ?? "").trim()}
-          <span class="srow"><span>状态</span><b>未配置</b></span>
-        {:else if !pathValid}
-          <span class="srow"><span>状态</span><b class="bad">路径非法（需绝对路径或 ~ 开头）</b></span>
-        {:else if statErr}
-          <span class="srow"><span>状态</span><b class="bad">{statErr}</b></span>
-        {:else}
-          <span class="srow"><span>状态</span>
-            <b class:bad={stat && !stat.exists}>{stat ? (stat.exists ? (stat.isDir ? "文件夹" : "文件") : "不存在") : "查询中…"}</b>
-          </span>
-          {#if stat?.exists}
-            <span class="srow"><span>权限</span><b class="mono">{stat.mode}</b></span>
-            <span class="srow"><span>大小</span><b>{stat.isDir ? "—" : fmtSize(stat.size)}</b></span>
-            <span class="srow"><span>修改</span><b>{fmtTime(stat.mtime)}</b></span>
-          {/if}
-        {/if}
-        {#if cardError}
-          <span class="srow errline">⚠ {cardError}</span>
-        {/if}
-      </div>
-    {/if}
   </div>
-  <div class="nid nodrag" title="节点 id">{id}</div>
+  {#if noteOpen}
+    <div class="noterow nodrag nowheel">
+      <span class="wlab">备注<span class="sbadge" title="可序列化：纯文本字面量">s</span></span>
+      <textarea rows="2" value={noteText} placeholder="节点备注…"
+        oninput={e => set("note", e.target.value)}></textarea>
+    </div>
+  {/if}
+  <div class="nidrow">
+    <span class="nid nodrag" title="节点 id">{id}</span>
+    <button class="notebtn nodrag" class:hasnote={!!noteText} title="备注" onclick={() => (noteOpen = !noteOpen)}>便笺</button>
+  </div>
 </div>
