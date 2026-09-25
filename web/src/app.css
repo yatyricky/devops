@@ -81,3 +81,6 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 .devnode .ndesc { padding: 4px 10px 0; font-size: 10px; color: var(--dim); line-height: 1.5; }
 
 .devnode .body .trow .wired { flex: none; font-size: 12px; }
+
+/* 卡片底部节点 id（调试用） */
+.devnode .nid { padding: 1px 10px 5px; font: italic 9px/1.4 Consolas, monospace; color: var(--dim); opacity: .7; }

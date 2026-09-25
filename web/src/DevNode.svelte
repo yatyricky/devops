@@ -312,4 +312,5 @@
       </div>
     {/if}
   </div>
+  <div class="nid nodrag" title="节点 id">{id}</div>
 </div>
