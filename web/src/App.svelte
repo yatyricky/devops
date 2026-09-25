@@ -95,7 +95,14 @@
       position: { x: n.position[0], y: n.position[1] },
       data: { ...n.data, __type: n.type },
     }));
-    edges = (doc.edges ?? []).map(e => ({ ...e, ...(e.kind === "seq" ? { class: "seq" } : {}) }));
+    // 存量数据修复：历史版本会在连线时产生同四元组重复边（库自动加边 + 旧代码手动加边），这里去重
+    const seen = new Set();
+    edges = (doc.edges ?? []).filter(e => {
+      const k = `${e.source}|${e.sourceHandle ?? ""}|${e.target}|${e.targetHandle ?? ""}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).map(e => ({ ...e, ...(e.kind === "seq" ? { class: "seq" } : {}) }));
     tasks = doc.tasks ?? {};
     hoverTask = null; definer = null;
     ignoreDirtyUntil = Date.now() + 1000;
@@ -177,27 +184,46 @@
 
   /** id → 节点（画布态，含 data.__type） */
   const nodeByIdMap = $derived(new Map(nodes.map(n => [n.id, n])));
-  /** @param {any} p 连线参数 */
-  function onConnect(p) {
-    const src = nodes.find(n => n.id === p.source), tgt = nodes.find(n => n.id === p.target);
-    if (!src || !tgt || src === tgt) return;
-    // 顺序边：无类型语义，只查重
+
+  /**
+   * 连线校验（Svelte Flow 拖拽中实时调用 + 连接完成时裁决；false 则库不建立连线）。
+   * 规则：同四元组（source/sourceHandle/target/targetHandle）唯一——同输入的多条"备选"连线
+   * 必须来自不同 source；类型按插槽规则匹配；顺序边同对节点唯一。
+   * 注意：不能在这里 toast（拖拽中高频调用），拒绝的反馈就是线吸不上去。
+   * @param {any} p connection { source, target, sourceHandle, targetHandle }
+   */
+  function isValidConnection(p) {
+    if (!p?.source || !p?.target) return false;
+    if (p.source === p.target) return false;
+    // 顺序边：无类型语义，同对节点只允许一条
     if (p.sourceHandle === "__seqOut" && p.targetHandle === "__seqIn") {
-      if (edges.some(e => e.kind === "seq" && e.source === p.source && e.target === p.target)) { showToast("顺序连线已存在"); return; }
-      edges = [...edges, { id: genId("e"), source: p.source, target: p.target, sourceHandle: "__seqOut", targetHandle: "__seqIn", kind: "seq", class: "seq" }];
-      dirty = true;
-      return;
+      return !edges.some(e => (e.kind === "seq" || e.class === "seq") && e.source === p.source && e.target === p.target);
     }
+    const src = nodeByIdMap.get(p.source), tgt = nodeByIdMap.get(p.target);
+    if (!src || !tgt) return false;
     const sMeta = typeMap[src.type], tMeta = typeMap[tgt.type];
-    if (!sMeta || !tMeta) return;
+    if (!sMeta || !tMeta) return false;
     const outs = sMeta.outputs ?? [];
     const o = (p.sourceHandle ? outs.find(x => x.id === p.sourceHandle) : outs[0]) ?? outs[0];
     const inps = effectiveInputs(tMeta, tgt.data);
     const i = p.targetHandle ? inps.find(x => x.id === p.targetHandle) : inps[0];
-    if (!o || !i) return;
-    if (!canConnect(o.type, i.type)) { showToast(`类型不兼容：${o.type} → ${i.type}`); return; }
-    // 大图允许同一输入接多条备选连线（不同任务各取其一）；唯一性在任务定义时校验
-    edges = [...edges, { id: genId("e"), source: p.source, target: p.target, sourceHandle: o.id, targetHandle: i.id }];
+    if (!o || !i) return false;
+    if (!canConnect(o.type, i.type)) return false;
+    // 四元组唯一（防重复拖拽/事件重放产生的完全相同的边）
+    return !edges.some(e => e.source === p.source && e.sourceHandle === o.id && e.target === p.target && e.targetHandle === i.id);
+  }
+
+  /**
+   * 连接完成回调：Svelte Flow 在 onconnect 之前已自行把边加入 edges（Handle.svelte
+   * onConnectExtended → store.addEdge），这里绝不能再手动 push（会产生同端点重复边）。
+   * 只做：标脏 + 给顺序边补虚线样式字段（库加的边不带我们的装饰字段）。
+   * @param {any} p connection
+   */
+  function onConnect(p) {
+    if (p.sourceHandle === "__seqOut" && p.targetHandle === "__seqIn") {
+      edges = edges.map(e => (e.source === p.source && e.target === p.target && e.sourceHandle === "__seqOut" && e.targetHandle === "__seqIn" && !e.class)
+        ? { ...e, kind: "seq", class: "seq" } : e);
+    }
     dirty = true;
   }
   /** @param {{ nodes: any[], edges: any[] }} m xyflow 内置删除键（DEL/Backspace）触发 */
@@ -335,6 +361,7 @@
         nodeTypes={components}
         onnodeclick={onNodeClick}
         onconnect={onConnect}
+        isValidConnection={isValidConnection}
         ondelete={onDelete}
         deleteKey={["Backspace", "Delete"]}
         onmoveend={onMoveEnd}
