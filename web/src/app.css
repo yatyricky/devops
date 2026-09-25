@@ -53,7 +53,9 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 .devnode .body .trow { display: flex; gap: 3px; margin: 2px 0; align-items: center; }
 .devnode .body .trow .arr { color: var(--dim); flex: none; }
 .devnode .body .trow input { flex: 1; min-width: 0; }
+.devnode .body .trow select { flex: none; width: auto; min-width: 0; }
 .devnode .body button.mini { padding: 1px 6px; font-size: 11px; flex: none; }
+.devnode .body button.mini { display: inline-flex; align-items: center; justify-content: center; }
 .devnode .body .badges { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 3px; }
 .devnode .body .badge { font-size: 10px; padding: 0 6px; }
 .devnode .body .badge .rm { cursor: pointer; margin-left: 3px; }

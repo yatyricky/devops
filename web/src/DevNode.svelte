@@ -138,9 +138,19 @@
 </script>
 
 <div class="devnode" class:selected class:onpath={onPath} class:error={!!cardError}>
+  {#snippet trash(size = 12)}
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  {/snippet}
+
   <div class="head" style="background:{color}">
     <span class="htitle">{meta?.title ?? data.__type}</span>
-    <button class="del nodrag" title="删除节点" onclick={() => ondelete?.(id)}>✕</button>
+    <button class="del nodrag" title="删除节点" onclick={() => ondelete?.(id)}>{@render trash(11)}</button>
   </div>
   {#if meta?.desc}<div class="ndesc">{meta.desc}</div>{/if}
   <div class="body nowheel">
@@ -242,7 +252,7 @@
                     <input class:winvalid={f.type === "number" && !numOk(f.value)} placeholder="值" value={f.value ?? ""}
                       onchange={e => setField(w.key, i, "value", e.target.value)} />
                   {/if}
-                  <button class="mini danger" onclick={() => set(w.key, (get(w.key) ?? []).filter((_, j) => j !== i))}>✕</button>
+                  <button class="mini danger" title="删除字段" onclick={() => set(w.key, (get(w.key) ?? []).filter((_, j) => j !== i))}>{@render trash(11)}</button>
                 </span>
               {/each}
               <span class="trow">
