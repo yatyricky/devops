@@ -148,9 +148,17 @@ app.post("/api/git/refs", async (req, res) => {
 
 // ── 任务 ────
 app.post("/api/jobs", (req, res) => {
-    const { workflow: wfRef, task, ...options } = req.body || {};
+    const { workflow: wfRef, task, doc, ...options } = req.body || {};
     try {
-        const wf = findWorkflow(String(wfRef || ""));
+        let wf;
+        if (doc) {
+            // GUI 内存态执行：load 后一切以内存为准，未保存的改动也能直接运行
+            const problems = validateWorkflow(doc);
+            if (problems.length) return res.status(400).json({ error: `内存态校验失败:\n  - ${problems.join("\n  - ")}` });
+            wf = { path: String(req.body?.workflowPath || `memory:${doc.name}`), doc };
+        } else {
+            wf = findWorkflow(String(wfRef || ""));
+        }
         const { id } = enqueueWorkflowTask(wf.doc, wf.path, String(task), options);
         res.json({ id });
     } catch (e) {

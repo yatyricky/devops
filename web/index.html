@@ -12,13 +12,27 @@
 <body>
   <div id="app" style="height:100%"></div>
   <script>
+    // rAF 兜底：部分内嵌 webview 的 requestAnimationFrame 永不投递（渲染帧缺失），
+    // 导致 ResizeObserver 回调、Svelte Flow 的 handle 重测等全部失效。
+    // 竞争式包装：原生 rAF 与 40ms setTimeout 同时排队，先到先执行（done 防重入）。
+    // 正常浏览器 rAF 16ms 先到，行为不变；失效环境由 setTimeout 兜底。
+    (() => {
+      const _raf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null;
+      const run = (cb) => {
+        let done = false;
+        const fire = (t) => { if (done) return; done = true; cb(t ?? performance.now()); };
+        if (_raf) _raf(fire);
+        setTimeout(() => fire(), 40);
+      };
+      window.requestAnimationFrame = run;
+    })();
     window.__errs = [];
     window.addEventListener("error", e => window.__errs.push(String(e.message).slice(0, 300)));
     window.addEventListener("unhandledrejection", e => window.__errs.push("P:" + String(e.reason).slice(0, 300)));
     const _ce = console.error;
     console.error = (...a) => { window.__errs.push("C:" + a.map(String).join(" ").slice(0, 300)); _ce(...a); };
-    // ResizeObserver 探针 + 失效兜底：部分内嵌 webview 不投递 RO 回调，
-    // 若 800ms 内零回调则启用 250ms 轮询对比尺寸并手动触发（正常浏览器零开销）。
+    // ResizeObserver 探针 + 失效兜底：若 rAF 恢复后 RO 仍不投递（800ms 内零回调），
+    // 用 250ms 轮询对比尺寸并手动触发回调（含首次观察即回调的 RO 语义）。
     window.__roObserve = [];
     window.__roFire = 0;
     const _RO = window.ResizeObserver;
@@ -41,16 +55,9 @@
       setInterval(() => {
         for (const [t, v] of _targets) {
           const w = t.offsetWidth, h = t.offsetHeight;
-          if (v.last === null) {
-            // RO 语义：初次观察即回调一次
-            v.last = { w, h };
-            try { v.cb([{ target: t, contentRect: { width: w, height: h, x: 0, y: 0, top: 0, left: 0 } }], null); } catch { /* 忽略 */ }
-            continue;
-          }
-          if (v.last.w !== w || v.last.h !== h) {
-            v.last = { w, h };
-            try { v.cb([{ target: t, contentRect: { width: w, height: h, x: 0, y: 0, top: 0, left: 0 } }], null); } catch { /* 忽略 */ }
-          }
+          const fire = () => { try { v.cb([{ target: t, contentRect: { width: w, height: h, x: 0, y: 0, top: 0, left: 0 } }], null); } catch { /* 忽略 */ } };
+          if (v.last === null) { v.last = { w, h }; fire(); continue; }
+          if (v.last.w !== w || v.last.h !== h) { v.last = { w, h }; fire(); }
         }
       }, 250);
     }, 800);

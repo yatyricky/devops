@@ -14,7 +14,9 @@
   let currentPath = $state("");
   let name = $state(""), title = $state(""), repoDir = $state("");
   let nodes = $state([]), edges = $state([]), tasks = $state({});
-  let dirty = $state(false);
+  let autoDirty = $state(false);   // 关键变更未落盘（自动写盘管）
+  let layoutDirty = $state(false); // 布局（节点位置）未保存（手动"保存"管）
+  let dirty = $derived(autoDirty || layoutDirty);
   let toast = $state("");
   let busyText = $state("空闲");
 
@@ -85,7 +87,7 @@
     const { doc } = await api("/api/workflows/open", { method: "POST", body: JSON.stringify({ path: fp }) });
     loadDoc(fp, doc);
     wfList = await api("/api/workflows");
-    dirty = false;
+    autoDirty = false; layoutDirty = false;
   }
   function loadDoc(fp, doc) {
     currentPath = fp;
@@ -118,13 +120,24 @@
   function stripDecor(data) {
     return Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith("__")));
   }
-  async function save() {
+  // ── 保存：关键变更（serializable 编辑 / node·edge·tasks 增删改）自动写盘（防抖）；
+  //    节点位置等展示信息仍依赖手动保存（layoutDirty）。 ────
+  let autoSaveTimer = null;
+  /** @param {boolean} [silent] 自动保存静默（不 toast）；布局脏不由自动保存清除 */
+  async function save(silent = false) {
+    clearTimeout(autoSaveTimer);
     try {
       await api("/api/workflows/save", { method: "POST", body: JSON.stringify({ path: currentPath, doc: toDoc() }) });
-      dirty = false;
-      showToast("已保存");
+      autoDirty = false;
+      if (!silent) showToast("已保存");
       wfList = await api("/api/workflows");
     } catch (e) { showToast(`保存失败：${e.message}`); }
+  }
+  /** 关键变更标脏 + 防抖自动写盘（600ms 合并连续编辑） */
+  function markCritical() {
+    autoDirty = true;
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => save(true), 600);
   }
   async function doOpen() {
     try {
@@ -154,7 +167,7 @@
     for (const w of meta.widgets) data[w.key] = w.default ?? (w.kind === "boolean" ? true : "");
     const id = genId(meta.type.split(".")[1] ?? "n");
     nodes = [...nodes, { id, type: meta.type, position: { x: 120 + (nodes.length % 6) * 40, y: 120 + Math.floor(nodes.length / 6) * 60 }, data }];
-    dirty = true;
+    markCritical();
   }
   /** @param {string} nodeId @param {string} key @param {any} value 卡片编辑 → 更新节点 data；动态插槽变更时清理失效边 */
   function onData(nodeId, key, value) {
@@ -166,12 +179,12 @@
     const kept = edges.filter(e => e.target !== node.id || valid.has(e.targetHandle));
     nodes = nodes.map(n => (n.id === nodeId ? { ...n, data: nextData } : n));
     if (kept.length !== edges.length) edges = kept;
-    dirty = true;
+    markCritical();
   }
   function deleteNode(id) {
     nodes = nodes.filter(n => n.id !== id);
     edges = edges.filter(e => e.source !== id && e.target !== id);
-    dirty = true;
+    markCritical();
   }
   /** @param {{ event: any, node: any }} m 定义任务模式下点选节点（切换选入/移出，顺序无关）；其余选中交给 xyflow */
   function onNodeClick({ node }) {
@@ -203,7 +216,10 @@
     if (!src || !tgt) return false;
     const sMeta = typeMap[src.type], tMeta = typeMap[tgt.type];
     if (!sMeta || !tMeta) return false;
-    const outs = sMeta.outputs ?? [];
+    // 动态出口节点（fs.path / struct.split）必须经 effectiveOutputs 解析，声明 outputs 为空
+    const outs = sMeta.dynamicOutputs
+      ? effectiveOutputs(sMeta, src.data, { stat: stats[src.id], edges, nodes, id: src.id })
+      : (sMeta.outputs ?? []);
     const o = (p.sourceHandle ? outs.find(x => x.id === p.sourceHandle) : outs[0]) ?? outs[0];
     const inps = effectiveInputs(tMeta, tgt.data);
     const i = p.targetHandle ? inps.find(x => x.id === p.targetHandle) : inps[0];
@@ -224,13 +240,13 @@
       edges = edges.map(e => (e.source === p.source && e.target === p.target && e.sourceHandle === "__seqOut" && e.targetHandle === "__seqIn" && !e.class)
         ? { ...e, kind: "seq", class: "seq" } : e);
     }
-    dirty = true;
+    markCritical();
   }
   /** @param {{ nodes: any[], edges: any[] }} m xyflow 内置删除键（DEL/Backspace）触发 */
   function onDelete({ nodes: delNodes, edges: delEdges }) {
-    if (delNodes.length || delEdges.length) dirty = true;
+    if (delNodes.length || delEdges.length) markCritical();
   }
-  function onMoveEnd() { if (Date.now() > ignoreDirtyUntil) dirty = true; }
+  function onMoveEnd() { if (Date.now() > ignoreDirtyUntil) layoutDirty = true; }
 
   // ── 任务子图高亮（悬停任务 / 定义任务）：集合语义，id → true ────
   let activeSet = $derived.by(() => {
@@ -265,7 +281,7 @@
     });
     if (dead.length) {
       edges = edges.filter(e => !dead.includes(e));
-      dirty = true;
+      markCritical();
       showToast(`已断开 ${dead.length} 条连线（源节点出口已变化）`);
     }
   });
@@ -291,6 +307,7 @@
     try {
       const { id } = await api("/api/jobs", { method: "POST", body: JSON.stringify({
         workflow: currentPath, task: m.task, dryRun: m.dryRun, inputs,
+        doc: toDoc(), // 内存态执行：未保存的改动也能直接跑（后端校验后以内存为准）
         ...(m.needProd && !m.dryRun ? { confirmProd: m.prodVal } : {}),
       }) });
       runModal = null;
@@ -304,9 +321,10 @@
     if (problems.length) { definer.problems = problems; return; }
     tasks[definer.name] = { label: definer.label || definer.name, mutates: definer.mutates, nodes: [...definer.nodes] };
     definer = null;
-    dirty = true;
+
+    markCritical();
   }
-  function deleteTask(n) { delete tasks[n]; dirty = true; }
+  function deleteTask(n) { delete tasks[n]; markCritical(); }
 
   // token
   let tokenVal = $state(localStorage.getItem("devops-token") ?? "");
@@ -326,7 +344,7 @@
     </select>
     <button onclick={() => (openModal = { mode: "open", path: "", name: "", title: "" })}>打开…</button>
     <button onclick={() => (openModal = { mode: "new", path: "", name: "", title: "" })}>新建…</button>
-    <button class="primary" disabled={!dirty} onclick={save}>{dirty ? "保存 *" : "保存"}</button>
+    <button class="primary" disabled={!dirty} onclick={() => save()}>{dirty ? "保存 *" : "保存"}</button>
     <span class="badge">{busyText}</span>
     <input class="token" type="password" placeholder="token" bind:value={tokenVal} onchange={tokenChange} />
     {#if toast}<span class="toast">{toast}</span>{/if}
@@ -334,9 +352,9 @@
 
   <div class="taskbar">
     <span class="wfmeta">
-      <input style="width:110px" placeholder="name" bind:value={name} onchange={() => (dirty = true)} />
-      <input style="width:150px" placeholder="标题" bind:value={title} onchange={() => (dirty = true)} />
-      <input style="width:260px" placeholder="应用仓库 repoDir" bind:value={repoDir} onchange={() => (dirty = true)} />
+      <input style="width:110px" placeholder="name" bind:value={name} onchange={() => markCritical()} />
+      <input style="width:150px" placeholder="标题" bind:value={title} onchange={() => markCritical()} />
+      <input style="width:260px" placeholder="应用仓库 repoDir" bind:value={repoDir} onchange={() => markCritical()} />
     </span>
     <span class="sep"></span>
     {#each Object.entries(tasks) as [tn, t] (tn)}

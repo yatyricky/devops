@@ -1,6 +1,6 @@
 <script>
   import { getContext } from "svelte";
-  import { Handle, Position } from "@xyflow/svelte";
+  import { Handle, Position, useUpdateNodeInternals } from "@xyflow/svelte";
   import { TYPE_COLORS, effectiveInputs, effectiveOutputs, pathCheck } from "./types.js";
   import { api } from "./api.js";
   import { ui } from "./store.svelte.js";
@@ -8,6 +8,7 @@
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
   const { ondata, ondelete, onstat, isWiredAsTarget, getSourceNode, resolveInput } = getContext("devnode-actions");
+  const updateNodeInternals = useUpdateNodeInternals();
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
   let hl = $derived(ui.pathHighlight[id]);
@@ -26,6 +27,18 @@
     }
     return meta.outputs ?? [];
   });
+
+// 动态插槽（structSplit 出口 / {{}} 动态输入）增删 handle 时节点外框尺寸不变，
+  // ResizeObserver 不触发 → 内部 handleBounds 不重测 → 指向新 handle 的边不渲染、
+  // 也不发起新连接。必须在 handle 集变化后显式告知 Svelte Flow 重测。
+  // 依赖必须基于【动态解析后】的 inputs/outputs（struct.split 的 meta.outputs 恒为空）。
+  $effect(() => {
+    const sig = JSON.stringify([inputs.map(i => i.id), outputs.map(o => o.id)]);
+    if (!id || !sig) return;
+    // 等新 Handle DOM 挂载完成后再重测（rAF 对齐渲染帧）
+    requestAnimationFrame(() => updateNodeInternals(id));
+  });
+
 
   // ── widget 编辑（原 Inspector 逻辑上卡片）────
   /** @param {string} k @param {any} v */
