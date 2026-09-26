@@ -5,6 +5,7 @@
 - 前端：Svelte 5 + Svelte Flow（Vite 构建，暗色画布）
 - 引擎：Node.js，4 个直接依赖（express / node-ssh / tar / dotenv）
 - 无容器、无 agent、无云依赖；所有部署**人工触发**，prod 需输入工作流名确认
+- **代理约束见 [AGENTS.md](AGENTS.md)**：未经用户明确要求，禁止连接远程服务器、禁止运行工作流任务
 
 ## 核心概念
 
