@@ -20,7 +20,7 @@ workflow 执行器（engine/workflow.js）
         图校验（类型/悬空边/required 闭包/插槽唯一/环依赖）→
         任务子图执行（选点构成 1 个或多个 DAG；层内并发，层间按拓扑序）
         │
-节点注册表（engine/nodes/：input / build / remote / util，22 种，含 struct 构造/析构）
+节点注册表（engine/nodes/：input / build / remote / util，含 struct 构造/析构）
         每个节点 = 元数据（输入/输出插槽与类型、widget 表单定义、动态插槽/出口规则、desc 描述）+ run(ctx, node, inputs)
         │
 引擎原语（engine/ssh|env|render|tarball|gitops|exec）
@@ -93,6 +93,6 @@ mv .<name>.tmp <releases>/<name>   ← 原子发布
 ## 新增一个应用工作流
 
 1. GUI「新建」→ 弹窗确认存放路径（任意位置，自动记住）→ 空白图起步；
-2. 拖入 `struct.make`（定义 SERVER_TYPE 等字段）+ `ssh.session` + 需要的构建/远端节点，连线；
+2. 拖入 `ssh.session`（选 ~/.ssh/config 别名）+ 需要的构建/远端节点，连线；
 3. 「定义任务」在画布上点选节点（顺序无关；required 闭包 / 插槽唯一 / 无环即时校验）→ 命名 → 保存；重复定义 deploy/rollback/status；
 4. CLI 对照：`node cli.js run <名或路径> deploy --dry-run`。

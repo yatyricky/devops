@@ -145,10 +145,9 @@
           ...(openModal.title ? { title: openModal.title } : {}),
           version: 1,
           nodes: [
-            { id: "cfg1", type: "struct.make", position: [80, 200], data: { fields: [{ key: "SERVER_TYPE", type: "string", value: "test" }] } },
-            { id: "ssh1", type: "ssh.session", position: [340, 200], data: {} },
+            { id: "ssh1", type: "ssh.session", position: [80, 200], data: {} },
           ],
-          edges: [{ id: "e1", source: "cfg1", sourceHandle: "struct", target: "ssh1", targetHandle: "env" }],
+          edges: [],
           tasks: {},
         };
         await api("/api/workflows/save", { method: "POST", body: JSON.stringify({ path: fp, doc }) });

@@ -119,41 +119,6 @@ export default [
         },
     },
     {
-        type: "write.env",
-        desc: "把 env 结构按映射（文件键 ← env 键）写成 .env 文件，可注入 VERSION；输出文件路径。",
-        title: "生成 .env",
-        category: "构建",
-        color: "#4cc38a",
-        inputs: [
-            { id: "env", type: "env", required: true },
-            { id: "version", type: "string", required: false },
-            { id: "dir", type: "string", required: false },
-        ],
-        outputs: [{ id: "file", type: "string" }],
-        widgets: [
-            { key: "target", label: "目标路径（相对 dir 输入或 ROOT；绝对路径直用）", kind: "string", default: "" },
-            { key: "mapping", label: "映射（文件键 ← env 键）", kind: "kv", default: {} },
-        ],
-        async run(ctx, node, inputs) {
-            if (!node.data.target) throw new Error("write.env 未配置目标路径");
-            const modEnv = { ...inputs.env, ...(inputs.version !== undefined ? { VERSION: inputs.version } : {}) };
-            const lines = Object.entries(node.data.mapping ?? {})
-                .map(([fileKey, envKey]) => `${fileKey}=${modEnv[/** @type {string} */(envKey)] ?? ""}`);
-            const raw = node.data.target;
-            const fp = inputs.dir
-                ? path.join(inputs.dir, raw)
-                : path.isAbsolute(raw) ? raw : path.join(ROOT, raw);
-            const content = lines.join("\n") + "\n";
-            if (ctx.dryRun) {
-                ctx.log(`[dry-run] 写 ${fp}：\n${content.trimEnd().split("\n").map(l => `    ${ctx.mask(l)}`).join("\n")}`);
-            } else {
-                writeLF(fp, content);
-                ctx.log(`[env] 已写入 ${fp}（${lines.length} 键）`);
-            }
-            return { file: fp };
-        },
-    },
-    {
         type: "stage.copy",
         desc: "把若干条目复制到一次性暂存目录（按路径段排除），输出暂存目录供打包。",
         title: "暂存复制",

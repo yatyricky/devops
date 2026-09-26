@@ -1,4 +1,5 @@
 import { sshConnect, sshRun, sshPut } from "../ssh.js";
+import { resolveAlias } from "../sshconfig.js";
 import { shellQuote as sq } from "../release.js";
 
 /**
@@ -44,24 +45,38 @@ function substitute(text, inputs) {
 export default [
     {
         type: "ssh.session",
-        desc: "建立 SSH 会话（SHA256 指纹锁定，agent/私钥认证），输出 ssh 供全部远端节点使用。",
+        desc: "按 ~/.ssh/config 的别名建立 SSH 会话（同 ssh <alias>：HostName/User/Port/IdentityFile），可选 SHA256 指纹锁定，输出 ssh 供全部远端节点使用。",
         title: "SSH 会话",
         category: "远端",
         color: "#ff9e64",
-        inputs: [{ id: "env", type: "struct", required: true }],
+        sshAliasesPicker: true,
+        inputs: [],
         outputs: [{ id: "ssh", type: "ssh" }],
-        widgets: [],
-        async run(ctx, node, inputs) {
-            const env = inputs.env;
+        widgets: [
+            { key: "alias", label: "SSH 别名（~/.ssh/config Host）", kind: "string", default: "", placeholder: "如 vultr-tokyo" },
+            { key: "fingerprint", label: "指纹（选填，SHA256 base64/hex，锁定主机）", kind: "string", default: "" },
+        ],
+        async run(ctx, node) {
+            const r = resolveAlias(node.data.alias);
+            const fpLocked = !!node.data.fingerprint;
             if (ctx.dryRun) {
-                ctx.log(`[dry-run] SSH 连接 ${env.REMOTE_USER}@${env.REMOTE_HOST}（指纹${env.REMOTE_HOST_FINGERPRINT ? "已锁定" : "未锁定，将警告"}）`);
+                ctx.log(`[dry-run] SSH ${node.data.alias} → ${r.user}@${r.host}:${r.port}${r.identityFile ? `（私钥 ${r.identityFile}）` : ""}（${r.fromConfig ? "来自 ssh config" : "未在 config 中找到，按主机名直连"}；指纹${fpLocked ? "已锁定" : "未锁定，将警告"}）`);
                 return { ssh: { dryRun: true } };
             }
-            ctx.log(`[ssh] 连接 ${env.REMOTE_USER}@${env.REMOTE_HOST}...`);
-            const ssh = await sshConnect(env.REMOTE_HOST, env.REMOTE_USER, env.REMOTE_HOST_FINGERPRINT, {
-                log: ctx.log,
-                keyFile: env.REMOTE_KEY_FILE || undefined,
-            });
+            ctx.log(`[ssh] 连接 ${node.data.alias} → ${r.user}@${r.host}:${r.port}...`);
+            let ssh;
+            try {
+                ssh = await sshConnect(r.host, r.user, node.data.fingerprint, {
+                    log: ctx.log,
+                    keyFile: r.identityFile,
+                    port: r.port,
+                });
+            } catch (e) {
+                if (/Encrypted private/.test(e.message)) {
+                    throw new Error(`私钥 ${r.identityFile} 有口令保护且引擎无法交互输入。两条路：① ssh-add "${r.identityFile}" 加载进 Windows agent（服务已在跑）；② 换用已加载的密钥或无口令私钥。原始错误：${e.message}`);
+                }
+                throw e;
+            }
             ctx.registerSession(ssh);
             ctx.log("[ssh] 已建立");
             return { ssh };

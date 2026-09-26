@@ -61,6 +61,8 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 .devnode .body .badge .rm { cursor: pointer; margin-left: 3px; }
 .devnode .body input.winvalid { border-color: var(--err); }
 .devnode .body .errline { display: block; color: var(--err); font-size: 11px; margin-top: 3px; }
+.devnode .body .kvline { display: block; color: var(--dim); font-size: 11px; margin-top: 3px;
+  font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 连接端口用普通指针（覆盖 Svelte Flow 默认十字准星） */
 .svelte-flow__handle { cursor: default; }

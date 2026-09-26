@@ -1,39 +1,44 @@
-# Bug 记录机制 + 两个 bug 修复 + 内存态/自动写盘改造
+# ssh.session 改别名直连 + 移除"生成 .env"
 
-## 0. bug 记录机制（新增 docs/buglog.md，当前不存在）
+## 结论依据（已探查）
 
-- 每条记录：日期 / 现象 / 根因 / 修复方式 / 回归验证步骤 / 状态。
-- 文件头写明工作约定：**新需求或新 bug 若与既有修复方式冲突，先停下提请用户决策，不得静默推翻**。
-- 回填最近 4 条已修 bug（连线双写、struct select 挤压、动态插槽边不渲染、垃圾桶/图标类 UI 项），本次两条新 bug 修完后追加。
+- node-ssh 13.2.1 无 ssh-config/别名支持（typings 确认）→ **自建 `~/.ssh/config` 解析器**（你的 config 为平铺 Host 块：vultr-tokyo / dogyun-hongkong / tencent-shanghai，含 HostName/User/Port/IdentityFile）。
+- `write.env` 只在 `_attic/`（永不加载）出现，且其 `env` 输入类型本就不在 SOCKET_TYPES（当前已无法连线）→ **移除零破坏**。
+- live 工作流（kids-ledger-prod.json）的 ssh.session 无任何连线 → 输入改造不破坏现有文件。
+- 只有 `ssh.session` 读 `inputs.env`，其余远端节点全部只消费 ssh 会话句柄 → 改造面收敛。
 
-## 1. Bug1：struct 改已连线字段 key 后重连，连线不渲染（保存刷新才恢复）
+## 改动清单
 
-**根因**（已勘察确认）：structSplit 动态出口增删 handle 时节点外框尺寸不变，Svelte Flow 的 ResizeObserver 不触发，内部 handleBounds 不重测——指向新 handle 的边因找不到锚点而不渲染；保存刷新后初始化即带新 handle 所以正常。库官方为此提供 `useUpdateNodeInternals()`。
+### 1. 新增 `engine/sshconfig.js`（~40 行手写解析器，不加依赖）
+- 解析 `~/.ssh/config`：按 Host 块切分，提取 HostName / User / Port / IdentityFile（多个取第一个存在的，`~` 展开）；Host 多模式空格分隔、大小写不敏感匹配；`Match`/`Include` 块跳过并标注不支持。
+- `resolveAlias(alias)` → `{ host, user, port, identityFile }`；别名未命中时**镜像 ssh 行为回退**：host=alias、user=本机用户名（日志注明"未在 config 中找到，按主机名直连"）。
+- `listAliases()` → 别名数组（下拉用）。
+- `sshConnect`（engine/ssh.js）增加 `opts.port` 透传（默认 22）；指纹未锁定的警告文案从"REMOTE_HOST_FINGERPRINT env"改为指向卡片指纹控件。
 
-**修复**：`DevNode.svelte` 中调用该 hook，`$effect` 监听 handle 集签名（inputs/outputs 的 id 列表 JSON），变化后 `requestAnimationFrame` 里 `updateNodeInternals(id)` 强制重测。
+### 2. `ssh.session` 节点重做（engine/nodes/remote.js）
+- **inputs: []**（无输入）；outputs 不变 `ssh`。
+- **widgets**：`alias`（string，必填，SSH 别名）+ `fingerprint`（string，选填，SHA256 主机指纹锁定——保留既有安全模型）。
+- run：`resolveAlias(node.data.alias)` → `sshConnect(host, user, fingerprint, { keyFile: identityFile, port })`；dry-run 打印解析出的 host/user/port/指纹状态。别名未填 → 明确报错。
+- 动态出口等其余远端节点不动。
 
-## 2. 修改1：load 后一切以内存态为准
+### 3. 别名下拉 + 解析信息展示（复用 refsPicker/scriptsPicker 既有模式）
+- `index.js` 新增 `POST /api/ssh/aliases`：返回 `{ aliases: [...], resolved: {host,user,port,identityFile}|null }`（resolved 按 body.alias 解析，未命中为 null）。
+- `ssh.session` meta 加 `sshAliasesPicker: true`（nodeTypesMeta 已有转发模式）；`DevNode.svelte` 加与 refsPicker 同构的块：select + 刷新按钮 + resolved 一行小字（host/user/port），错误走现有 cardError 红框。
 
-**现状痛点**：GUI 跑任务时后端 `findWorkflow` 从磁盘读——未保存的新任务/新改动跑不了（"保存一下接口才正常"）。
+### 4. 移除 write.env
+- 删 `engine/nodes/build.js` 中该节点定义；注册表自然少一种（26→25）。
+- `doOpen` 新建工作流模板（App.svelte）：去掉 `cfg1.struct → ssh1.env` 边（ssh.session 已无输入），模板保留 ssh.session 单节点。
+- 删除死代码 `engine/presets.js`（引用不存在的 env.file、无人 import）；grep 确认 `engine/env.js` 是否仍被引用，无引用则一并删。
+- 文档同步：README 节点表（写.env 移除、ssh.session 新形态、计数修正）、docs/architecture.md 相关行、docs/operations.md 的 env 连接模型段落改为别名模型。
 
-**修复**：`POST /api/jobs` 的 body 新增可选 `doc`——GUI 的 `doRun` 把内存图 `toDoc()` 一起传，后端 `validateWorkflow(doc)` 通过后直接用内存 doc 入队（不再读盘）；不带 doc 的请求（CLI）维持读盘，CLI 行为不变。
+### 5. 测试与验证
+- `tools/verify-dryrun.js`："类型不兼容"fixture 用 ssh.session.env 输入会失效 → 改为 `ssh.session.ssh → cmd.exec.cwd`（ssh→string 不兼容，语义不变）。
+- 全量 verify 跑绿。
+- 浏览器回归：ssh.session 卡片出现别名下拉（3 个真实别名）+ 选中后显示解析结果；dry-run 任务日志打印解析出的 host/user。
+- **真实连通烟测**（无害只读）：临时 node 一行脚本用 resolveAlias + sshConnect 连 `vultr-tokyo` 执行 `echo ok`，验证 IdentityFile/端口链路端到端。
+- git 提交。
 
-## 3. 修改2：关键变更自动写盘，坐标仍手动
-
-- `save(silent)` 支持静默模式；新增防抖调度 `markCritical()`（600ms 合并连续编辑，如输入框逐字符）。
-- **自动写盘**的调用点：serializable widget 编辑（`onData` 里按 widget 元数据判断）、节点/边增删（addNode / deleteNode / onDelete / onConnect）、任务定义与删除、name/title/repoDir 修改。
-- **不自动**：节点位置（onMoveEnd 仅置 dirty，保留手动"保存"按钮价值）。
-- dirty 拆分为 `autoDirty`（自动保存清）与 `layoutDirty`（位置改动，手动保存清）；保存按钮状态 = 两者或。
-- 自动保存成功不弹 toast（避免频繁打扰），顶部保存按钮状态即可反映。
-
-## 4. 验证
-
-1. `npm -C web run build`；刷新画布。
-2. Bug1 回归：选中 Struct 构造器 → 改一个已连线字段 key → 旧边断开 → 从新 key 重连 → **边立即渲染**（无需保存刷新）。
-3. 修改2 回归：改 serializable 字段/拖一条新线 → 不点保存，直接查磁盘 JSON 已更新；拖动节点位置 → 磁盘不变、保存按钮出现 *。
-4. 修改1 回归：新定义一个任务（不点保存）→ GUI 直接运行成功（后端收到内存 doc）。
-5. 全量 `node tools/verify-dryrun.js` 不回归。
-
-## 5. 收尾
-
-buglog 追加本次两条（含回归步骤）→ git 提交。
+## 不做 / 边界
+- 不支持 Include / Match / ProxyJump / ProxyCommand（你的 config 用不到；解析器遇到会明确报错而非静默错连）。
+- 不改其余远端节点、不动 prod 门禁（env.file 已不在，门禁现按工作流内 env 判断的路径保持原样）。
+- `_attic/` 旧文件不迁移（永不加载）。

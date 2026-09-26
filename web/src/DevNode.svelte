@@ -86,6 +86,25 @@
     }
   }
 
+  // ── ssh.session：别名下拉手动刷新（读 ~/./.ssh/config，无需连线输入）────
+  let sshAliases = $state([]);
+  let sshResolved = $state(null);
+  let sshErr = $state("");
+  let sshRefreshing = $state(false);
+  async function refreshSshAliases() {
+    sshRefreshing = true; sshErr = "";
+    try {
+      const r = await api("/api/ssh/aliases", { method: "POST", body: JSON.stringify({ alias: get("alias") ?? "" }) });
+      sshAliases = r.aliases ?? [];
+      sshResolved = r.resolved ?? null;
+      sshErr = r.resolved?.error ?? "";
+    } catch (e) {
+      sshErr = e.message;
+    } finally {
+      sshRefreshing = false;
+    }
+  }
+
   // ── npm.run：scripts 下拉手动刷新（点「刷新」解析 <path>/package.json，同 git refs 模式）────
   let scripts = $state([]);
   let scriptsErr = $state("");
@@ -276,6 +295,24 @@
           {/if}
         </label>
       {/each}
+    {/if}
+
+    {#if meta?.sshAliasesPicker}
+      <label class="wrow nodrag">
+        <span class="wlab">SSH 别名（~/.ssh/config）</span>
+        <span class="trow">
+          <input list="ssh-aliases-{id}" value={get("alias") ?? ""} placeholder="如 vultr-tokyo"
+            oninput={e => set("alias", e.target.value)} onchange={refreshSshAliases} />
+          <button class="mini" disabled={sshRefreshing} onclick={refreshSshAliases}>{sshRefreshing ? "…" : "刷新"}</button>
+        </span>
+        <datalist id="ssh-aliases-{id}">
+          {#each sshAliases as a (a)}<option value={a}></option>{/each}
+        </datalist>
+        {#if sshResolved && !sshResolved.error}
+          <span class="kvline">→ {sshResolved.user}@{sshResolved.host}:{sshResolved.port}{sshResolved.identityFile ? `（${sshResolved.identityFile}）` : ""}{sshResolved.fromConfig ? "" : "（config 未命中，直连）"}</span>
+        {/if}
+        {#if sshErr}<span class="errline">⚠ {sshErr}</span>{/if}
+      </label>
     {/if}
 
     {#if meta?.refsPicker}

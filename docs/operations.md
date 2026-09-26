@@ -4,9 +4,9 @@
 
 1. **目标机准备**：Ubuntu + systemd + nginx；部署用户配好 NOPASSWD sudo（引擎用 `sudo -n`，缺失即快速失败）；
    kids-ledger 需 node ≥ 22.5（`node:sqlite`）；xlgbis 需 nvm + pnpm（远端命令默认走 `bash -lc` 登录 shell）。
-2. **填 env**：`cp envs/<app>.example.env envs/<app>.env`，填 `REMOTE_HOST / REMOTE_USER / DEPLOY_DIR` 等。
+2. **填 env**：`cp envs/<app>.example.env envs/<app>.env`，填 `DEPLOY_DIR` 等；SSH 连接改为在 GUI 的 SSH 会话卡片上选 `~/.ssh/config` 别名（同 `ssh <alias>`），不再使用 REMOTE_HOST/REMOTE_USER。
 3. **取指纹并锁定**：先跑一次 `node cli.js run <app> status --dry-run` 不连网；然后直接跑 `status`（无 `--dry-run`），
-   首次连接日志会打印服务器公钥 SHA256 指纹（base64），填回 env 的 `REMOTE_HOST_FINGERPRINT`。
+   首次连接日志会打印服务器公钥 SHA256 指纹（base64），填回 SSH 会话卡片的「指纹」控件。
    之后所有连接做 timingSafeEqual 比对，不匹配直接拒绝。
 4. **下发主机配置**：GUI「应用配置」或 `node cli.js run <app> apply-config`——安装 nginx 站点、systemd 单元、
    frp 配置（xlgbis）。模板在工作流旁 `workflows/tpl/<app>/`，随工作流版本管理。
@@ -50,7 +50,7 @@ node cli.js run kids-ledger rollback --input release=kids-ledger-master-a1b2c3d-
 
 - envs/*.env、local-config.json、.runs/、.tmp/ 均已 gitignore——不要把真实 env 提交进仓库；
 - GUI 默认只绑 127.0.0.1；需要局域网访问时改 local-config.json 的 host 并**务必设置 token**（GUI 右上角填一次）；
-- SSH 认证走 Windows openssh agent（命名管管道）或 env 里 `REMOTE_KEY_FILE` 私钥；生产部署前必须锁定指纹。
+- SSH 认证走 ~/.ssh/config 别名（IdentityFile）或 Windows openssh agent（加密私钥先 `ssh-add` 加载）；生产部署前必须在卡片「指纹」控件锁定主机指纹。
 
 ## 故障排查
 

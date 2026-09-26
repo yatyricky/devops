@@ -52,10 +52,10 @@ await test("注册表: 动态插槽由 {{name}}/{{obj.key}} 生成", () => {
 await test("图校验: 类型不兼容的边被拒", () => {
     const problems = validateWorkflow({
         name: "t", nodes: [
-            { id: "a", type: "string.const", position: [0, 0], data: { value: "x" } },
-            { id: "b", type: "ssh.session", position: [0, 0], data: {} },
+            { id: "a", type: "ssh.session", position: [0, 0], data: { alias: "x" } },
+            { id: "b", type: "cmd.exec", position: [0, 0], data: { commands: "echo hi" } },
         ],
-        edges: [{ id: "e", source: "a", sourceHandle: "value", target: "b", targetHandle: "env" }],
+        edges: [{ id: "e", source: "a", sourceHandle: "ssh", target: "b", targetHandle: "cwd" }],
         tasks: {},
     });
     assert.ok(problems.some(p => p.includes("类型不兼容")), problems.join("; "));

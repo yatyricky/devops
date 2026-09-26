@@ -50,7 +50,7 @@ node cli.js run kids-ledger rollback --input release=<name>
 ├─ cli.js                 # CLI 入口（与 GUI 共用 runner）
 ├─ engine/
 │  ├─ types.js            # 插槽类型规则（前后端同规则）
-│  ├─ nodes/              # 节点注册表：input/build/remote/util 四类 22 种
+│  ├─ nodes/              # 节点注册表：input/build/remote/util 四类
 │  ├─ workflow.js         # 图校验 + 任务路径执行器（依赖闭包拓扑）
 │  ├─ runner.js           # 串行队列/.runs 持久化/审计/prod 门禁/副作用收尾
 │  ├─ registry.js         # 工作流发现（local-config.workflows + 仓库 workflows/）
@@ -61,14 +61,14 @@ node cli.js run kids-ledger rollback --input release=<name>
 └─ tools/verify-dryrun.js # 引擎自检（12 项断言）
 ```
 
-## 节点类型（22 种）
+## 节点类型
 
 | 分类 | 节点 |
 |---|---|
 | 输入 | `env.file`（→env）、`params`（→any）、`task.input`（→string，运行时弹窗/CLI `--input` 收集） |
 | 版本 | `git.ref`（fetch+干净校验+checkout，任务结束自动恢复原分支） |
-| 构建 | `cmd.exec`、`write.env`、`stage.copy`（多源暂存+排除）、`tar.pack`、`template.render`（`./`=工作流目录） |
-| 远端 | `ssh.session`、`ssh.exec`（动态插槽）、`ssh.upload`（任务结束自动清理远端临时文件）、`remote.extract`（**原子**：.tmp 解压→expect 校验→mv 成正式 release）、`remote.deps`、`remote.chown`、`remote.symlink`、`remote.service`、`remote.check`（断言正则） |
+| 构建 | `cmd.exec`、`stage.copy`（多源暂存+排除）、`tar.pack`、`template.render`（`./`=工作流目录） |
+| 远端 | `ssh.session`（按 ~/.ssh/config 别名直连，同 `ssh <alias>`；可选指纹锁定）、`ssh.exec`（动态插槽）、`ssh.upload`（任务结束自动清理远端临时文件）、`remote.extract`（**原子**：.tmp 解压→expect 校验→mv 成正式 release）、`remote.deps`、`remote.chown`、`remote.symlink`、`remote.service`、`remote.check`（断言正则） |
 | 工具 | `field.get`（env/params 取单值）、`string.const`、`string.format`（动态插槽拼接）、`log.print`（预览端点） |
 
 ## 验证

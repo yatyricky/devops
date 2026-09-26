@@ -18,7 +18,7 @@ import path from "path";
  * @param {string} host
  * @param {string} user
  * @param {string} fingerprint SHA256 指纹（hex 或 base64）。空串 = 未锁定（仅日志提示，不阻断——用于首次取指纹）。
- * @param {{ log?: (msg: string) => void, keyFile?: string, passphrase?: string }} [opts]
+ * @param {{ log?: (msg: string) => void, keyFile?: string, passphrase?: string, port?: number }} [opts]
  * @returns {Promise<NodeSSH>}
  */
 export async function sshConnect(host, user, fingerprint, opts = {}) {
@@ -29,6 +29,7 @@ export async function sshConnect(host, user, fingerprint, opts = {}) {
     await ssh.connect({
         host,
         username: user,
+        ...(opts.port ? { port: opts.port } : {}),
         ...(agent ? { agent } : {}),
         ...(opts.keyFile ? { privateKeyPath: opts.keyFile, passphrase: opts.passphrase } : {}),
         forceIPv4: true,
@@ -40,7 +41,7 @@ export async function sshConnect(host, user, fingerprint, opts = {}) {
             const gotHex = String(hashedKey).toLowerCase();
             if (!fingerprint) {
                 log(`[WARN] No fingerprint configured for ${host}. Server key SHA256 (base64): ${Buffer.from(gotHex, "hex").toString("base64").replace(/=+$/, "")}`);
-                log(`[WARN] Add this value to REMOTE_HOST_FINGERPRINT in the env file to pin it.`);
+                log(`[WARN] 把该值填入 SSH 会话卡片的「指纹」控件以锁定。`);
                 return true;
             }
             const expectBuf = /^[0-9a-f]+$/i.test(fingerprint)

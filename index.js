@@ -15,6 +15,7 @@ import { readNpmScripts } from "./engine/nodes/build.js";
 import { loadWorkflow, validateWorkflow } from "./engine/workflow.js";
 import { enqueueWorkflowTask, listRuns, getRun, getCurrentJob } from "./engine/runner.js";
 import { getRefs } from "./engine/gitops.js";
+import { listAliases, resolveAlias } from "./engine/sshconfig.js";
 import { expandHome } from "./engine/exec.js";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
@@ -102,6 +103,20 @@ app.post("/api/refs", async (req, res) => {
     try {
         const wf = findWorkflow(String(req.body?.workflow || ""));
         res.json(await getRefs(wf.doc.repoDir, { log: () => {} }));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// ── SSH 别名（ssh.session 卡片下拉：~/.ssh/config 的 Host 列表 + 当前别名解析结果）────
+app.post("/api/ssh/aliases", (req, res) => {
+    const alias = String(req.body?.alias || "").trim();
+    try {
+        const aliases = listAliases();
+        const resolved = alias
+            ? (() => { try { const r = resolveAlias(alias); return { host: r.host, user: r.user, port: r.port, identityFile: r.identityFile, fromConfig: r.fromConfig }; } catch (e) { return { error: e.message }; } })()
+            : null;
+        res.json({ aliases, resolved });
     } catch (e) {
         res.status(400).json({ error: e.message });
     }

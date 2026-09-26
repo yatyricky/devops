@@ -99,6 +99,7 @@ export function nodeTypesMeta() {
         ...(d.pathStat ? { pathStat: true } : {}),
         ...(d.refsPicker ? { refsPicker: true } : {}),
         ...(d.scriptsPicker ? { scriptsPicker: true } : {}),
+        ...(d.sshAliasesPicker ? { sshAliasesPicker: true } : {}),
         ...(d.countInputs ? { countInputs: d.countInputs } : {}),
         ...(d.outputValueKey ? { outputValueKey: d.outputValueKey } : {}),
         ...(d.dynamicInputs ? { dynamicInputs: d.dynamicInputs } : {}),
