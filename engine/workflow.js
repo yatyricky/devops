@@ -160,6 +160,7 @@ export function validateWorkflow(doc) {
         const selected = new Set(t.nodes);
 
         // 逐插槽统计任务内携带边；required 闭包/覆盖在此一并判定
+        // 必填语义：required = 必须有「值」——连线或端口字面量（data.lit）任一满足即可
         for (const id of t.nodes) {
             const node = nodeById.get(id);
             let ins;
@@ -167,13 +168,14 @@ export function validateWorkflow(doc) {
             for (const inp of ins) {
                 const inEdges = doc.edges.filter(e => e.kind !== "seq" && e.target === id && e.targetHandle === inp.id);
                 const carriedCnt = inEdges.filter(e => selected.has(e.source)).length;
+                const hasLit = node.data?.lit?.[inp.id] !== undefined;
                 if (carriedCnt >= 2) {
                     problems.push(`任务 ${name}：输入 ${id}.${inp.id} 有 ${carriedCnt} 条连线，只能有一个输入`);
-                } else if (inp.required && carriedCnt === 0) {
+                } else if (inp.required && carriedCnt === 0 && !hasLit) {
                     if (inEdges.length > 0) {
                         problems.push(`任务 ${name}：节点 ${id} 的必填输入 ${inp.id} 依赖节点 ${inEdges.map(e => e.source).join("/")}，未选入`);
                     } else {
-                        problems.push(`任务 ${name}：节点 ${id} 的必填输入 ${inp.id} 未连线`);
+                        problems.push(`任务 ${name}：节点 ${id} 的必填输入 ${inp.id} 未连线且未填值`);
                     }
                 }
             }
@@ -269,6 +271,13 @@ export async function executeTask(ctx, doc, taskName) {
             const srcNode = nodeById.get(e.source);
             const outDef = getOutputs(srcNode, doc).find(o => o.id === e.sourceHandle);
             inputValues[e.targetHandle] = coerce(executed.get(e.source)?.[e.sourceHandle], declaredType(node, e.targetHandle) ?? outDef?.type ?? "any");
+        }
+        // 端口字面量兜底：未连线的 string/number/boolean 输入用 data.lit 的值（连线优先）
+        for (const inp of getInputs(node)) {
+            if (inp.fromField || !(["string", "number", "boolean"].includes(inp.type))) continue;
+            if (inputValues[inp.id] === undefined && node.data?.lit?.[inp.id] !== undefined) {
+                inputValues[inp.id] = coerce(node.data.lit[inp.id], inp.type);
+            }
         }
         ctx.log(`──── [${def.title}] ${node.id}`);
         ctx.markNode?.(id, "running");

@@ -41,7 +41,7 @@ export function getInputs(node) {
     if (def.fieldInputs) {
         const fieldPorts = (node.data?.fields ?? [])
             .filter(f => f.key && !all.some(d => d.id === f.key))
-            .map(f => ({ id: f.key, type: f.type ?? "string", required: false, dynamic: true }));
+            .map(f => ({ id: f.key, type: f.type ?? "string", required: false, dynamic: true, fromField: true }));
         all = [...all, ...fieldPorts];
     }
     if (!def.dynamicInputs) return all;

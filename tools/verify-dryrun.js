@@ -595,6 +595,56 @@ await test("运行状态: executeTask 标记 running→ok；失败节点 failed"
     assert.deepStrictEqual(st2, { 1: "ok", 2: "ok", 3: "ok" });
 });
 
+await test("注册表: ssh.close 输入 ssh、无输出无控件；sshClose 幂等", async () => {
+    const d = NODE_TYPES["ssh.close"];
+    assert.ok(d, "ssh.close 已注册");
+    assert.deepStrictEqual(d.inputs, [{ id: "ssh", type: "ssh", required: true }]);
+    assert.deepStrictEqual(d.outputs, []);
+    assert.deepStrictEqual(d.widgets, []);
+    const { sshClose } = await import("../engine/ssh.js");
+    assert.doesNotThrow(() => { sshClose({ dryRun: true }); sshClose(null); });
+});
+
+// ── 端口字面量（data.lit）────
+await test("字面量: 必填输入可由 data.lit 满足（无连线）", () => {
+    const problems = validateWorkflow({
+        name: "lit", nodes: [
+            { id: "lg", type: "log.print", position: [0, 0], data: {} },
+        ],
+        edges: [],
+        tasks: { t: { label: "t", mutates: false, nodes: ["lg"] } },
+    });
+    assert.ok(problems.some(p => p.includes("未连线且未填值")), "无 lit 无线应报错", problems.join("; "));
+    const ok = validateWorkflow({
+        name: "lit2", nodes: [
+            { id: "lg", type: "log.print", position: [0, 0], data: { lit: { value: "hello" } } },
+        ],
+        edges: [],
+        tasks: { t: { label: "t", mutates: false, nodes: ["lg"] } },
+    });
+    assert.deepStrictEqual(ok, [], "lit 满足必填");
+});
+
+await test("执行: 字面量注入（number 矫正）且连线覆盖字面量", async () => {
+    const { executeTask } = await import("../engine/workflow.js");
+    const doc = {
+        name: "litrun", nodes: [
+            { id: "s", type: "string.const", position: [0, 0], data: { value: "wired" } },
+            { id: "fmt", type: "string.format", position: [0, 0], data: { format: "\"{{a}}{{b}}\"" } },
+            { id: "p", type: "log.print", position: [0, 0], data: {} },
+        ],
+        edges: [
+            { id: "e1", source: "s", sourceHandle: "value", target: "fmt", targetHandle: "a" },
+            { id: "e2", source: "fmt", sourceHandle: "value", target: "p", targetHandle: "value" },
+        ],
+        tasks: { t: { label: "t", mutates: false, nodes: ["s", "fmt", "p"] } },
+    };
+    doc.nodes[1].data.lit = { b: 5 };
+    const lines = [];
+    await executeTask({ log: m => lines.push(String(m)), dryRun: false, inputs: {}, mask: s => s }, doc, "t");
+    assert.ok(lines.join("\n").includes('"wired5"'), "连线 a + 字面量 b(number→5) 同节点共存", lines.join("\n"));
+});
+
 await test("注册表: 工作流加载器正常（旧 wf 已存档 _attic，等待重写）", () => {
     assert.ok(Array.isArray(loadWorkflows()));
 });

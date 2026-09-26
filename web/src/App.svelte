@@ -6,6 +6,7 @@
   import { ui } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
   import Palette from "./Palette.svelte";
+  import CanvasDrop from "./CanvasDrop.svelte";
   import LogDrawer from "./LogDrawer.svelte";
 
   // ── 全局状态 ────
@@ -65,9 +66,15 @@
     metas = await api("/api/node-types");
     ui.nodeTypesMap = Object.fromEntries(metas.map(m => [m.type, m]));
     wfList = await api("/api/workflows");
+    await refreshUsage();
     const first = wfList.find(w => w.name);
     if (first) await selectWorkflow(first.path);
   })(); });
+
+  /** 「未测试」清单（手工维护，存 local-config.untestedNodeTypes） */
+  async function refreshUsage() {
+    try { ui.untestedNodeTypes = new Set((await api("/api/node-usage")).untested ?? []); } catch { /* 静默 */ }
+  }
 
   const busyTimer = setInterval(async () => {
     try {
@@ -129,6 +136,7 @@
       autoDirty = false;
       if (!silent) showToast("已保存");
       wfList = await api("/api/workflows");
+      refreshUsage();
     } catch (e) { showToast(`保存失败：${e.message}`); }
   }
   /** 关键变更标脏 + 防抖自动写盘（600ms 合并连续编辑） */
@@ -160,12 +168,14 @@
   }
 
   // ── 画布操作 ────
-  function addNode(meta) {
+  function addNode(meta, position = null) {
     const data = { __type: meta.type };
     for (const w of meta.widgets) data[w.key] = w.default ?? (w.kind === "boolean" ? true : "");
     const id = genId(meta.type.split(".")[1] ?? "n");
-    nodes = [...nodes, { id, type: meta.type, position: { x: 120 + (nodes.length % 6) * 40, y: 120 + Math.floor(nodes.length / 6) * 60 }, data }];
+    const pos = position ?? { x: 120 + (nodes.length % 6) * 40, y: 120 + Math.floor(nodes.length / 6) * 60 };
+    nodes = [...nodes, { id, type: meta.type, position: pos, data }];
     markCritical();
+    return id;
   }
   /** @param {string} nodeId @param {string} key @param {any} value 卡片编辑 → 更新节点 data；动态插槽变更时清理失效边 */
   function onData(nodeId, key, value) {
@@ -179,9 +189,36 @@
     if (kept.length !== edges.length) edges = kept;
     markCritical();
   }
+  // ── 删除节点：被任务引用时弹窗确认，确认后从任务中移除（后果由用户承担）────
+  /** @param {string[]} ids @returns {string[]} 引用这些节点的任务名（去重保序） */
+  function taskNamesUsing(ids) {
+    const set = new Set(ids);
+    return Object.entries(tasks).filter(([, t]) => (t.nodes ?? t.path ?? []).some(x => set.has(x))).map(([n]) => n);
+  }
+  /** @param {string[]} ids @returns {boolean} false = 用户取消删除 */
+  function confirmTaskRemoval(ids) {
+    const usedBy = taskNamesUsing(ids);
+    if (!usedBy.length) return true;
+    return confirm(
+      `节点 ${ids.join("、")} 被以下任务引用：${usedBy.join("、")}。\n` +
+      `确认删除？节点将从这些任务中移除，可能造成不可预期的后果，由你自己承担。`,
+    );
+  }
+  /** @param {string[]} ids */
+  function stripFromTasks(ids) {
+    const set = new Set(ids);
+    for (const t of Object.values(tasks)) {
+      const cur = t.nodes ?? t.path;
+      if (!cur) continue;
+      const next = cur.filter(x => !set.has(x));
+      if (next.length !== cur.length) { t.nodes = next; delete t.path; }
+    }
+  }
   function deleteNode(id) {
+    if (!confirmTaskRemoval([id])) return;
     nodes = nodes.filter(n => n.id !== id);
     edges = edges.filter(e => e.source !== id && e.target !== id);
+    stripFromTasks([id]);
     markCritical();
   }
   /** @param {{ event: any, node: any }} m 定义任务模式下点选节点（切换选入/移出，顺序无关）；其余选中交给 xyflow */
@@ -254,12 +291,24 @@
     if (p.sourceHandle === "__seqOut" && p.targetHandle === "__seqIn") {
       edges = edges.map(e => (e.source === p.source && e.target === p.target && e.sourceHandle === "__seqOut" && e.targetHandle === "__seqIn" && !e.class)
         ? { ...e, kind: "seq", class: "seq" } : e);
+    } else if (p.targetHandle) {
+      // 建立数据连线即清除目标端口字面量（连线优先；断开后双 radio 回到未设置态）
+      const tNode = nodes.find(n => n.id === p.target);
+      if (tNode?.data?.lit?.[p.targetHandle] !== undefined) {
+        const next = { ...tNode.data.lit };
+        delete next[p.targetHandle];
+        onData(p.target, "lit", next);
+      }
     }
     markCritical();
   }
   /** @param {{ nodes: any[], edges: any[] }} m xyflow 内置删除键（DEL/Backspace）触发 */
+  function onBeforeDelete({ nodes: delNodes }) {
+    return confirmTaskRemoval(delNodes.map(n => n.id));
+  }
   function onDelete({ nodes: delNodes, edges: delEdges }) {
-    if (delNodes.length || delEdges.length) markCritical();
+    if (delNodes.length) { stripFromTasks(delNodes.map(n => n.id)); markCritical(); }
+    else if (delEdges.length) markCritical();
   }
   function onMoveEnd() { if (Date.now() > ignoreDirtyUntil) layoutDirty = true; }
 
@@ -300,6 +349,13 @@
       showToast(`已断开 ${dead.length} 条连线（源节点出口已变化）`);
     }
   });
+
+  /** 调色板拖放到画布：在鼠标落点创建节点 */
+  function dropAddNode(type, flowPosition) {
+    const meta = typeMap[type];
+    if (!meta) return;
+    addNode(meta, { x: Math.round(flowPosition.x), y: Math.round(flowPosition.y) });
+  }
 
   // ── 任务运行 ────
   function openRun(taskName) {
@@ -416,6 +472,7 @@
         onconnectend={onConnectEnd}
         isValidConnection={isValidConnection}
         ondelete={onDelete}
+        onbeforedelete={onBeforeDelete}
         deleteKey={["Backspace", "Delete"]}
         onmoveend={onMoveEnd}
         fitView
@@ -425,6 +482,7 @@
         <Background />
         <Controls />
         <MiniMap nodeColor={n => typeMap[n.type]?.color ?? "#8a97a8"} pannable zoomable />
+        <CanvasDrop ondropat={dropAddNode} />
       </SvelteFlow>
     {/key}
 

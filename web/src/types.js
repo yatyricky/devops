@@ -33,9 +33,9 @@ export function effectiveInputs(meta, data) {
   }
   if (meta?.fieldInputs) {
     const fieldPorts = (data?.fields ?? [])
-      .filter(f => f.key && !declared.some(d => d.id === f.key))
-      .map(f => ({ id: f.key, type: f.type ?? "string", required: false, dynamic: true }));
-    all = [...declared, ...fieldPorts];
+      .filter(f => f.key && !all.some(d => d.id === f.key))
+      .map(f => ({ id: f.key, type: f.type ?? "string", required: false, dynamic: true, fromField: true }));
+    all = [...all, ...fieldPorts];
   }
   if (!meta?.dynamicInputs) return all;
   const text = String(data?.[meta.dynamicInputs.source] ?? "");
@@ -88,7 +88,7 @@ export function validateTaskSelection(sel, edges, nodesById, metasMap) {
   for (const id of sel) if (!nodesById.has(id)) problems.push(`引用不存在的节点: ${id}`);
   if (new Set(sel).size !== sel.length) problems.push("节点重复");
 
-  // 逐插槽统计任务内携带边；required 闭包/覆盖
+  // 逐插槽统计任务内携带边；required 闭包/覆盖（有值即满足：连线或端口字面量）
   for (const id of sel) {
     const node = nodesById.get(id);
     const meta = metasMap[node?.data?.__type ?? node?.type];
@@ -96,10 +96,11 @@ export function validateTaskSelection(sel, edges, nodesById, metasMap) {
     for (const inp of effectiveInputs(meta, node.data)) {
       const inEdges = edges.filter(e => e.kind !== "seq" && e.target === id && e.targetHandle === inp.id);
       const carried = inEdges.filter(e => selected.has(e.source)).length;
+      const hasLit = node?.data?.lit?.[inp.id] !== undefined;
       if (carried >= 2) problems.push(`输入 ${id}.${inp.id} 有 ${carried} 条连线，只能有一个输入`);
-      else if (inp.required && carried === 0) {
+      else if (inp.required && carried === 0 && !hasLit) {
         if (inEdges.length) problems.push(`节点 ${id} 的必填输入 ${inp.id} 依赖节点 ${inEdges.map(e => e.source).join("/")}，未选入`);
-        else problems.push(`节点 ${id} 的必填输入 ${inp.id} 未连线`);
+        else problems.push(`节点 ${id} 的必填输入 ${inp.id} 未连线且未填值`);
       }
     }
   }

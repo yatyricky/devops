@@ -120,5 +120,6 @@ export async function sshPut(ssh, localPath, remotePath, opts = {}) {
  * @param {NodeSSH} ssh
  */
 export function sshClose(ssh) {
-    ssh?.dispose();
+    // 幂等：显式关闭后任务收尾（finalize）会再次调用；已关闭/无 dispose 时静默
+    try { ssh?.dispose?.(); } catch { /* 已关闭 */ }
 }

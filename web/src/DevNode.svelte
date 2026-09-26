@@ -41,6 +41,20 @@
   });
 
 
+  // ── 端口字面量：string/number/boolean 输入的行内控件（连线优先，被连线时 disabled 显示来源值）────
+  function getLit(h) { return data?.lit?.[h]; }
+  /** @param {string} h @param {any} v 空/undefined = 清除字面量 */
+  function setLit(h, v) {
+    const next = { ...(data?.lit ?? {}) };
+    if (v === undefined || v === "") delete next[h]; else next[h] = v;
+    set("lit", next);
+  }
+  /** wired 时的来源值预览：一跳静态可解则显示，运行时产出显示占位 */
+  function resolvePreview(inp) {
+    const v = resolveInput?.(id, inp.id);
+    return v === undefined || v === null || v === "" ? "（运行时）" : String(v);
+  }
+
   // ── widget 编辑（原 Inspector 逻辑上卡片）────
   /** @param {string} k @param {any} v */
   function set(k, v) { ondata?.(id, k, v); }
@@ -167,9 +181,25 @@
   {#if meta?.desc}<div class="ndesc">{meta.desc}</div>{/if}
   <div class="body nowheel">
     {#each inputs as inp (inp.id)}
-      <div class="kv in" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}` : undefined}>
+      <div class="kv in" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}（可连线或直接填值）` : undefined}>
         <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[inp.type]}" />
-        <span class="lbl">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填">*</span>{/if}</span>
+        <span class="lbl">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
+        {#if !inp.fromField && (inp.type === "string" || inp.type === "number" || inp.type === "boolean")}
+          {#if isWiredAsTarget?.(id, inp.id)}
+            <input class="inlit" disabled title="值来自连线" value={resolvePreview(inp)} />
+          {:else if inp.type === "boolean"}
+            <span class="boolpair nodrag">
+              <button type="button" class:lit={getLit(inp.id) === true} title="是" onclick={() => setLit(inp.id, true)}>是</button>
+              <button type="button" class:lit={getLit(inp.id) === false} title="否" onclick={() => setLit(inp.id, false)}>否</button>
+            </span>
+          {:else}
+            <input class="inlit" type={inp.type === "number" ? "number" : "text"}
+              class:winvalid={inp.type === "number" && getLit(inp.id) !== undefined && !numOk(getLit(inp.id))}
+              title={inp.type === "number" ? "数值" : "字符串"}
+              value={getLit(inp.id) ?? ""}
+              onchange={e => setLit(inp.id, inp.type === "number" ? (e.target.value === "" ? undefined : e.target.value) : e.target.value)} />
+          {/if}
+        {/if}
       </div>
     {/each}
     {#if outputs.length}
@@ -186,6 +216,26 @@
       <span class="lbl seqsym">顺序 ▸</span>
       <Handle id="__seqOut" type="source" position={Position.Right} style="background:#8a97a8" />
     </div>
+
+    {#if meta?.sshAliasesPicker}
+      <label class="wrow nodrag">
+        <span class="wlab">SSH 别名（~/.ssh/config）</span>
+        <span class="trow">
+          <select value={get("alias") ?? ""} onchange={e => { set("alias", e.target.value); refreshSshAliases(); }}>
+            {#if !(get("alias") ?? "")}<option value="" disabled hidden>— 选择别名 —</option>{/if}
+            {#if (get("alias") ?? "") && !sshAliases.includes(get("alias"))}
+              <option value={get("alias")}>{get("alias")}（config 未命中，保留）</option>
+            {/if}
+            {#each sshAliases as a (a)}<option value={a}>{a}</option>{/each}
+          </select>
+          <button class="mini" disabled={sshRefreshing} onclick={refreshSshAliases}>{sshRefreshing ? "…" : "刷新"}</button>
+        </span>
+        {#if sshResolved && !sshResolved.error}
+          <span class="kvline">→ {sshResolved.user}@{sshResolved.host}:{sshResolved.port}{sshResolved.identityFile ? `（${sshResolved.identityFile}）` : ""}{sshResolved.fromConfig ? "" : "（config 未命中，直连）"}</span>
+        {/if}
+        {#if sshErr}<span class="errline">⚠ {sshErr}</span>{/if}
+      </label>
+    {/if}
 
     {#if meta?.widgets?.length}
       <div class="sep"></div>
@@ -297,23 +347,6 @@
       {/each}
     {/if}
 
-    {#if meta?.sshAliasesPicker}
-      <label class="wrow nodrag">
-        <span class="wlab">SSH 别名（~/.ssh/config）</span>
-        <span class="trow">
-          <input list="ssh-aliases-{id}" value={get("alias") ?? ""} placeholder="如 vultr-tokyo"
-            oninput={e => set("alias", e.target.value)} onchange={refreshSshAliases} />
-          <button class="mini" disabled={sshRefreshing} onclick={refreshSshAliases}>{sshRefreshing ? "…" : "刷新"}</button>
-        </span>
-        <datalist id="ssh-aliases-{id}">
-          {#each sshAliases as a (a)}<option value={a}></option>{/each}
-        </datalist>
-        {#if sshResolved && !sshResolved.error}
-          <span class="kvline">→ {sshResolved.user}@{sshResolved.host}:{sshResolved.port}{sshResolved.identityFile ? `（${sshResolved.identityFile}）` : ""}{sshResolved.fromConfig ? "" : "（config 未命中，直连）"}</span>
-        {/if}
-        {#if sshErr}<span class="errline">⚠ {sshErr}</span>{/if}
-      </label>
-    {/if}
 
     {#if meta?.refsPicker}
       <label class="wrow nodrag">

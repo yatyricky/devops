@@ -1,9 +1,12 @@
 <script>
   /** 节点调色板：按分类列出注册表；点击在画布中心附近添加节点。 */
+  import { ui } from "./store.svelte.js";
   let { metas, onadd } = $props();
   let open = $state(true);
   let collapsed = $state({});
   let groups = $derived([...new Set(metas.map(m => m.category))]);
+  /** 「未测试」徽章 = 手工维护清单（local-config.untestedNodeTypes） */
+  let untested = $derived(ui.untestedNodeTypes ? metas.filter(m => ui.untestedNodeTypes.has(m.type)).map(m => m.type) : []);
   function toggleGroup(g) { collapsed = { ...collapsed, [g]: !collapsed[g] }; }
 </script>
 
@@ -19,8 +22,11 @@
         </button>
         {#if !collapsed[g]}
           {#each metas.filter(m => m.category === g) as m (m.type)}
-            <button class="item" title={m.type} onclick={() => onadd(m)}>
+            <button class="item" title={m.type} draggable="true"
+              ondragstart={e => e.dataTransfer.setData("application/x-devops-node", m.type)}
+              onclick={() => onadd(m)}>
               <span class="dot" style="background:{m.color}"></span>{m.title}
+              {#if untested.includes(m.type)}<span class="untested" title="未出现在任何已注册工作流中">未测试</span>{/if}
             </button>
           {/each}
         {/if}
@@ -44,4 +50,6 @@
   .arrow { width: 10px; flex: none; }
   .item { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; margin: 2px 0; padding: 3px 8px; font-size: 12px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .untested { flex: none; font-size: 9px; line-height: 1.4; padding: 0 4px; border: 1px solid var(--warn);
+    color: var(--warn); border-radius: 4px; opacity: .8; margin-left: auto; }
 </style>

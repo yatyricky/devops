@@ -8,7 +8,7 @@ import fs from "fs";
 import path from "path";
 import url from "url";
 import child_process from "child_process";
-import { loadUiConfig, rememberWorkflow, forgetWorkflow } from "./engine/config.js";
+import { loadUiConfig, saveLocalConfig, rememberWorkflow, forgetWorkflow } from "./engine/config.js";
 import { loadWorkflows, findWorkflow } from "./engine/registry.js";
 import { nodeTypesMeta } from "./engine/nodes/index.js";
 import { readNpmScripts } from "./engine/nodes/build.js";
@@ -91,6 +91,23 @@ app.post("/api/workflows/save", (req, res) => {
 app.post("/api/workflows/forget", (req, res) => {
     forgetWorkflow(String(req.body?.path || ""));
     res.json({ ok: true });
+});
+
+// ── 节点测试状态（调色板「未测试」徽章 = 手工维护清单，存 local-config.untestedNodeTypes）────
+// 首次访问时以「未出现在任何已注册工作流中的类型」为种子（排除调用方指定的例外），此后完全由用户手工维护。
+app.get("/api/node-usage", (req, res) => {
+    const used = new Set();
+    for (const w of loadWorkflows()) {
+        for (const n of w.doc?.nodes ?? []) used.add(n.type);
+    }
+    const cfg = loadUiConfig();
+    if (cfg.untestedNodeTypes === undefined) {
+        const exceptions = new Set((req.query.except ?? "").split(",").filter(Boolean));
+        const allTypes = new Set(nodeTypesMeta().map(m => m.type));
+        cfg.untestedNodeTypes = [...allTypes].filter(t => !used.has(t) && !exceptions.has(t));
+        saveLocalConfig(cfg);
+    }
+    res.json({ untested: cfg.untestedNodeTypes ?? [] });
 });
 
 // ── 节点类型注册表（前端动态渲染节点/插槽/检查器表单的唯一事实源）────

@@ -8,4 +8,6 @@ export const ui = $state({
   runTaskNodes: null,
   /** @type {Record<string, string> | null} nodeId → running|ok|failed（最近一次运行的卡片外框状态） */
   nodeRunStatus: null,
+  /** @type {Set<string> | null} 手工维护的「未测试」节点类型清单（local-config.untestedNodeTypes；null = 未加载） */
+  untestedNodeTypes: null,
 });

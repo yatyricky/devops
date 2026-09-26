@@ -1,4 +1,6 @@
-import { sshConnect, sshRun, sshPut } from "../ssh.js";
+import fs from "fs";
+import path from "path";
+import { sshConnect, sshRun, sshPut, sshClose } from "../ssh.js";
 import { resolveAlias } from "../sshconfig.js";
 import { shellQuote as sq } from "../release.js";
 
@@ -53,8 +55,7 @@ export default [
         inputs: [],
         outputs: [{ id: "ssh", type: "ssh" }],
         widgets: [
-            { key: "alias", label: "SSH 别名（~/.ssh/config Host）", kind: "string", default: "", placeholder: "如 vultr-tokyo" },
-            { key: "fingerprint", label: "指纹（选填，SHA256 base64/hex，锁定主机）", kind: "string", default: "" },
+            { key: "fingerprint", label: "指纹（选填，SHA256 base64/hex，锁定主机）", kind: "string", serializable: true, default: "" },
         ],
         async run(ctx, node) {
             const r = resolveAlias(node.data.alias);
@@ -80,6 +81,21 @@ export default [
             ctx.registerSession(ssh);
             ctx.log("[ssh] 已建立");
             return { ssh };
+        },
+    },
+    {
+        type: "ssh.close",
+        title: "关闭 SSH 会话",
+        category: "远端",
+        color: "#ff9e64",
+        desc: "显式关闭上游 SSH 会话连接，提前释放资源；之后该 ssh 出口不可再被下游节点使用（任务收尾仍会兜底关闭已关闭的会话，幂等无副作用）。",
+        inputs: [{ id: "ssh", type: "ssh", required: true }],
+        outputs: [],
+        widgets: [],
+        async run(ctx, node, inputs) {
+            if (ctx.dryRun) { ctx.log("[dry-run] ssh.close：将关闭上游 SSH 会话"); return; }
+            ctx.log("[ssh.close] 关闭会话");
+            sshClose(inputs.ssh);
         },
     },
     {
@@ -113,85 +129,79 @@ export default [
     },
     {
         type: "ssh.upload",
-        desc: "上传本机文件到远端路径；登记 trap——任务结束无论成败都删除远端文件。",
+        desc: "上传本机文件到远端。remotePath 为已有文件夹 → 放入其中（保持本机文件名）；为文件路径 → 上传为该路径（父目录自动 mkdir -p，文件名不同即等效重命名）。无 trap——上传即完成，文件不会被自动清理。输出远端文件完整路径。",
         title: "上传文件",
         category: "远端",
         color: "#ff9e64",
         inputs: [
             { id: "ssh", type: "ssh", required: true },
-            { id: "local", type: "string", required: true },
-            { id: "path", type: "string", required: true },
+            { id: "localPath", type: "string", required: true },
+            { id: "remotePath", type: "string", required: true },
         ],
         outputs: [{ id: "remoteFile", type: "string" }],
         widgets: [],
         async run(ctx, node, inputs) {
+            const local = String(inputs.localPath ?? "").trim();
+            if (!local) throw new Error("ssh.upload 未连接本机文件路径");
+            let st;
+            try { st = await fs.promises.stat(local); } catch { throw new Error(`本机文件不存在: ${local}`); }
+            if (!st.isFile()) throw new Error(`localPath 不是文件: ${local}`);
+            const remotePath = String(inputs.remotePath ?? "").trim();
+            if (!remotePath) throw new Error("ssh.upload 未连接 remotePath");
+            const base = path.basename(local);
+
+            // 远端语义判定：remotePath 是已有目录 → 放入其中；否则视为目标文件路径（父目录 mkdir -p）
+            const isDir = (await sshRun(inputs.ssh, buildCommand(`test -d ${sq(remotePath)}`, node, { sudo: false }), { log: () => {} })).code === 0;
+            const remoteFile = isDir
+                ? `${remotePath.replace(/\/+$/, "")}/${base}`
+                : remotePath;
             if (ctx.dryRun) {
-                ctx.log(`[dry-run] 上传 ${inputs.local} → ${inputs.path}`);
-                return { remoteFile: inputs.path };
+                ctx.log(`[dry-run] 上传 ${local} → ${remoteFile}${isDir ? "（remotePath 为已有目录）" : "（remotePath 为文件路径，父目录 mkdir -p）"}；无 trap，文件保留`);
+                return { remoteFile };
             }
-            await sshPut(inputs.ssh, inputs.local, inputs.path, { log: ctx.log });
-            // 原脚本 trap 语义：上传的归档无论成败都在任务结束时删除
-            ctx.trackRemoteFile(inputs.ssh, inputs.path);
-            return { remoteFile: inputs.path };
+            if (!isDir) {
+                const parent = remotePath.includes("/") ? remotePath.slice(0, remotePath.lastIndexOf("/")) : ".";
+                const r = await sshRun(inputs.ssh, buildCommand(`mkdir -p ${sq(parent)}`, node, { sudo: false }), { log: ctx.log });
+                if (r.code !== 0) throw new Error(`mkdir -p 失败: ${parent}\n${r.err}`);
+            }
+            await sshPut(inputs.ssh, local, remoteFile, { log: ctx.log });
+            ctx.log(`[upload] ${remoteFile}`);
+            return { remoteFile };
         },
     },
     {
         type: "remote.extract",
-        desc: "原子解压发布：解压到隐藏 .tmp → 逐个校验 expect → mv 成正式 release；失败自清 .tmp。",
-        title: "原子解压发布",
+        desc: "把远端 t.gz 解压到目标目录。两种模式：未填 parentName = extract here（压缩包一级内容直接进 destDir）；填了 parentName = 先创建 destDir/parentName，压缩包全部内容解压进去。输出实际解压目录。",
+        title: "解压",
         category: "远端",
         color: "#ff9e64",
         inputs: [
             { id: "ssh", type: "ssh", required: true },
             { id: "archive", type: "string", required: true },
-            { id: "releaseName", type: "string", required: true },
-            { id: "baseDir", type: "string", required: true },
+            { id: "destDir", type: "string", required: true },
+            { id: "parentName", type: "string", required: false },
         ],
-        outputs: [{ id: "releasePath", type: "string" }],
-        widgets: [
-            { key: "expect", label: "必须存在的文件（相对 release）", kind: "list", default: [] },
-            { key: "subdir", label: "release 子目录名", kind: "string", default: "releases" },
-            { key: "useSudo", label: "sudo -n", kind: "boolean", default: true },
-        ],
+        outputs: [{ id: "destDir", type: "string" }],
+        widgets: [],
         async run(ctx, node, inputs) {
-            const { ssh, archive, releaseName, baseDir } = inputs;
-            if (!/^[A-Za-z0-9._-]+$/.test(releaseName)) throw new Error(`非法 release 名: ${releaseName}`);
-            const releaseDir = `${baseDir}/${node.data.subdir || "releases"}`;
-            const tmp = `${releaseDir}/.${releaseName}.tmp`;
-            const rel = `${releaseDir}/${releaseName}`;
-            const D = node.data;
-            const R = async (cmd, { sudo = true } = {}) => sshRun(ssh, buildCommand(cmd, node, { sudo }), { log: ctx.log });
-
-            const plan = [
-                `rm -rf ${tmp}`,
-                `mkdir -p ${tmp} ${releaseDir}`,
-                `tar -xzf ${sq(archive)} -C ${tmp}`,
-                ...((D.expect ?? []).map(f => `test -f ${sq(`${tmp}/${f}`)}`)),
-                `rm -rf ${rel}`,
-                `mv ${tmp} ${rel}`,
-            ];
+            const { ssh, archive } = inputs;
+            const destDir = String(inputs.destDir ?? "").trim();
+            if (!destDir) throw new Error("解压 未配置 destDir");
+            const parent = String(inputs.parentName ?? "").trim();
+            if (parent && !/^[A-Za-z0-9._-]+$/.test(parent)) throw new Error(`非法 parentName: ${parent}（只允许字母数字 . _ -）`);
+            const target = parent ? `${destDir.replace(/\/+$/, "")}/${parent}` : destDir;
+            const R = async (cmd) => {
+                const r = await sshRun(ssh, buildCommand(cmd, node, { sudo: false }), { log: ctx.log });
+                if (r.code !== 0) throw new Error(`remote command failed: ${cmd}\n${r.err}`);
+            };
+            const plan = [`mkdir -p ${sq(target)}`, `tar -xzf ${sq(archive)} -C ${sq(target)}`];
             if (ctx.dryRun) {
-                for (const c of plan) ctx.log(`[dry-run] remote$ ${buildCommand(c, node)}`);
-                return { releasePath: rel };
+                for (const c of plan) ctx.log(`[dry-run] remote$ ${buildCommand(c, node, { sudo: false })}`);
+                return { destDir: target };
             }
-
-            await R(`rm -rf ${tmp}`);
-            await R(`mkdir -p ${tmp} ${releaseDir}`);
-            await R(`tar -xzf ${sq(archive)} -C ${tmp}`);
-            try {
-                for (const f of (D.expect ?? [])) {
-                    const r = await R(`test -f ${sq(`${tmp}/${f}`)}`);
-                    if (r.code !== 0) throw new Error(`校验失败：release 内缺少 ${f}`);
-                }
-            } catch (e) {
-                ctx.log(`[cleanup] 解压校验失败，清理 ${tmp}`);
-                await R(`rm -rf ${tmp}`).catch(() => {});
-                throw e;
-            }
-            await R(`rm -rf ${rel}`);
-            await R(`mv ${tmp} ${rel}`);
-            ctx.log(`[release] ${rel}`);
-            return { releasePath: rel };
+            for (const c of plan) await R(c);
+            ctx.log(`[extract] ${target}`);
+            return { destDir: target };
         },
     },
     {
@@ -336,6 +346,23 @@ export default [
                 ctx.log(`[check] 断言通过 /${node.data.assert}/`);
             }
             return { out: combined.trim() };
+        },
+    },
+    {
+        type: "remote.nginx-reload",
+        title: "Nginx Reload",
+        category: "远端",
+        color: "#ff9e64",
+        desc: "远端 nginx -t 校验配置，通过后 systemctl reload nginx；校验不过即任务失败（不会带病重载）。经 sudo -n 执行，需 NOPASSWD。",
+        inputs: [{ id: "ssh", type: "ssh", required: true }],
+        outputs: [],
+        widgets: [],
+        async run(ctx, node, inputs) {
+            const cmdStr = "nginx -t && systemctl reload nginx";
+            const finalCmd = buildCommand(cmdStr, node);
+            if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${finalCmd}`); return; }
+            const r = await sshRun(inputs.ssh, finalCmd, { log: ctx.log });
+            if (r.code !== 0) throw new Error(`nginx reload 失败 (code=${r.code})\n${r.err}`);
         },
     },
 ];

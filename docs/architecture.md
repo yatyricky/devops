@@ -61,21 +61,16 @@ workflow 执行器（engine/workflow.js）
 - **输入经边解析**：来源是已执行节点；被丢弃的可选入边不提供输入值。
 - **任务结束收尾**（等价原 bash 脚本的 trap）：git 工作树恢复（逆序）→ 远端上传的临时文件删除 → SSH 会话关闭。
 
-## 远端原子性（remote.extract）
+## 远端解压与原子发布语义（remote.extract）
 
-原幂等 bash 脚本的 release 语义拆为节点后收敛在 `remote.extract` 内保持单体原子性：
+通用「解压」节点（remote.extract）是**纯解压**：`mkdir -p <target>` → `tar -xzf <archive> -C <target>`，
+两种模式——未填 parentName = 压缩包一级内容直接进 destDir；填了 parentName = 解压进 `destDir/parentName`（先建目录）。失败即失败。
+上传节点（ssh.upload）同样无副作用：无 trap，上传即保留。
 
-```
-rm -rf <releases>/.<name>.tmp
-mkdir -p <releases>/.<name>.tmp
-tar -xzf <archive> -C .<name>.tmp
-test -f <expect...>          ← 逐个校验，失败即清 .tmp 并抛错
-rm -rf <releases>/<name>     ← 幂等（同名重发布）
-mv .<name>.tmp <releases>/<name>   ← 原子发布
-输出 releasePath 供后续节点（deps/chown/symlink）使用
-```
-
-失败清理（解压校验失败清 .tmp、上传的归档任务结束即删）由节点 + runner 收尾共同承担。
+**为什么曾经的"原子解压发布"要先解压到隐藏 .tmp、校验后 mv**：那曾是 release 发布语义——直接解压到
+`releases/<name>/` 时，中途失败（磁盘满/包损坏）会留下半个 release 目录，一旦 `current` 指向它，服务就从
+残缺目录读文件；`.tmp → expect 校验 → mv`（同文件系统 mv 原子）保证"要么完整可见，要么完全不可见"。
+该语义已从通用节点退役；未来若需要，可作为专用节点重建（.tmp → 校验 → mv 三步不变）。
 
 ## 前端要点
 
