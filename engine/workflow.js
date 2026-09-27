@@ -279,6 +279,7 @@ export async function executeTask(ctx, doc, taskName) {
                 inputValues[inp.id] = coerce(node.data.lit[inp.id], inp.type);
             }
         }
+        ctx.markNodeInputs?.(id, inputValues);
         ctx.log(`──── [${def.title}] ${node.id}`);
         ctx.markNode?.(id, "running");
         try {

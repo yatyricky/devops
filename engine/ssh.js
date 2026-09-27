@@ -21,17 +21,40 @@ import path from "path";
  * @param {{ log?: (msg: string) => void, keyFile?: string, passphrase?: string, port?: number }} [opts]
  * @returns {Promise<NodeSSH>}
  */
+/**
+ * 认证尝试级联（纯函数，可单测）：
+ * - agent 可用：① 仅 agent（不传 privateKeyPath——口令保护的私钥文件会让 ssh2 在认证前解析报错，
+ *   阻断 agent 认证）→ 失败且存在 keyFile 时 ② agent + keyFile 回退（覆盖 agent 未加载该密钥但密钥无口令的情况）；
+ * - 无 agent：仅 keyFile。
+ * @param {string | undefined} agent
+ * @param {{ privateKeyPath?: string, passphrase?: string }} keyOpts
+ * @returns {Record<string, any>[]} 每次尝试的 auth 附加参数
+ */
+export function buildAuthAttempts(agent, keyOpts) {
+    /** @type {Record<string, any>[]} */
+    const attempts = [];
+    if (agent) attempts.push({ agent });
+    if (agent && keyOpts.privateKeyPath) attempts.push({ agent, ...keyOpts });
+    if (!agent) attempts.push({ ...keyOpts });
+    return attempts;
+}
+
+/**
+ * @param {string} host
+ * @param {string} user
+ * @param {string} fingerprint SHA256 指纹（hex 或 base64）。空串 = 未锁定（仅日志提示，不阻断——用于首次取指纹）。
+ * @param {{ log?: (msg: string) => void, keyFile?: string, passphrase?: string, port?: number }} [opts]
+ * @returns {Promise<NodeSSH>}
+ */
 export async function sshConnect(host, user, fingerprint, opts = {}) {
     const log = opts.log ?? (() => {});
     const agent = process.env.SSH_AUTH_SOCK
         || (process.platform === "win32" ? "\\\\.\\pipe\\openssh-ssh-agent" : undefined);
-    const ssh = new NodeSSH();
-    await ssh.connect({
+    const keyOpts = opts.keyFile ? { privateKeyPath: opts.keyFile, passphrase: opts.passphrase } : {};
+    const base = {
         host,
         username: user,
         ...(opts.port ? { port: opts.port } : {}),
-        ...(agent ? { agent } : {}),
-        ...(opts.keyFile ? { privateKeyPath: opts.keyFile, passphrase: opts.passphrase } : {}),
         forceIPv4: true,
         readyTimeout: 30_000,
         algorithms: { serverHostKey: ["ssh-ed25519", "rsa-sha2-512", "rsa-sha2-256", "ecdsa-sha2-nistp256"] },
@@ -56,8 +79,26 @@ export async function sshConnect(host, user, fingerprint, opts = {}) {
             }
             return true;
         },
-    });
-    return ssh;
+    };
+
+    const attempts = buildAuthAttempts(agent, keyOpts);
+    /** @type {any} */
+    let lastErr;
+    for (let i = 0; i < attempts.length; i++) {
+        const ssh = new NodeSSH();
+        try {
+            if (attempts.length > 1) {
+                log(`[ssh] 认证尝试 ${i + 1}/${attempts.length}（${attempts[i].agent ? "agent" : "私钥文件"}${attempts[i].privateKeyPath ? "+keyFile" : ""}）`);
+            }
+            await ssh.connect({ ...base, ...attempts[i] });
+            return ssh;
+        } catch (e) {
+            lastErr = e;
+            try { ssh.dispose?.(); } catch { /* 未建立 */ }
+            if (i < attempts.length - 1) log(`[ssh] 认证尝试失败（${String(e?.message ?? e).slice(0, 120)}），降级重试`);
+        }
+    }
+    throw lastErr;
 }
 
 /**

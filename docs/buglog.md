@@ -49,3 +49,19 @@
 
 - xlgbis 仓库自身的耦合缺陷（deploy_server.js 副作用导入、packages/common 双用途、env-usage 退出遥测、失效 dev 脚本）——另开任务。
 - 已删除的旧层（apps/ JS 清单、线性步骤 workflow.js、脚本模板）如需参考见 git 历史（954c0b0 及之前）。
+
+## BUG-2026-09-27-01 便笺按钮点击无效（noteOpen 状态声明在并行编辑中丢失）
+
+- **现象**：节点卡片右下角「便笺」按钮点击无任何反应——不展开 textarea，无法输入备注。
+- **根因**：多会话并行编辑 `DevNode.svelte` 时，一轮"清理残留"把便笺的 `noteOpen` 状态声明与 textarea 渲染块删除，但 `notebtn` 按钮的 markup 仍在——`onclick={() => (noteOpen = !noteOpen)}` 引用未声明变量，点击静默无效。教训：并行修改同一组件时，模板引用的标识符必须随删除一并清理引用方，或恢复时整体恢复。
+- **修复**：补回 `let noteOpen = $state(false)` 与 `{#if noteOpen}` 的 `.noterow` textarea 渲染块（绑定 `data.note` 实时保存）。
+- **回归**：SSH 会话节点 → 点便笺 → textarea 展开 → 输入实时存 `data.note`（__dbg 断言）→ 再点收起。
+- **状态**：已修复（浏览器实测通过）。
+
+## BUG-2026-09-27-02 wired 输入悬停 tooltip 不显示实时运行值
+
+- **现象**：任务运行后，wired 输入的 disabled 预览框 `title` 仍显示编辑期解析值（运行时产出节点显示「（运行时）」），而非节点实际收到的运行值；用户需框选截断文本才能看全。
+- **根因**：wired-live 分支的 `title` 是静态文案「运行中实时值（连线优先）」，未绑定 `liveVal`。
+- **修复**：live 分支 `title={liveVal}`（悬停即完整实时值）；wired-preview 分支 title 同步为 `值来自连线：<解析值>`。
+- **回归**：运行任务 → 悬停 wired 输入框 → tooltip 显示运行时实际值。
+- **状态**：已修复。

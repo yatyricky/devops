@@ -53,6 +53,24 @@ export function maskLine(line) {
     return String(line).replace(SECRET_KEY_RE, (_, k) => `${k}=***`);
 }
 
+/** 键名敏感正则（markNodeInputs 值脱敏用）。 */
+const SECRET_NAME_RE = /SECRET|TOKEN|PASSWORD|PASSPHRASE/i;
+
+/**
+ * 输入值 → GUI 显示字符串（脱敏：敏感键名打码，含对象嵌套；超长截断）。
+ * @param {string} key
+ * @param {any} v
+ */
+function displayValue(key, v) {
+    const cut = (s) => (s.length > 300 ? s.slice(0, 300) + "…" : s);
+    if (SECRET_NAME_RE.test(key)) return "***";
+    if (typeof v === "string") return cut(v);
+    if (typeof v === "number" || typeof v === "boolean") return String(v);
+    try {
+        return cut(JSON.stringify(v, (k2, val2) => (SECRET_NAME_RE.test(String(k2)) ? "***" : val2)) ?? "[unserializable]");
+    } catch { return "[unserializable]"; }
+}
+
 /**
  * @param {any} wf 已加载校验的 workflow 文档
  * @param {string} wfPath 文件绝对路径
@@ -85,6 +103,8 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
         logLines: [],
         /** @type {Record<string, string>} nodeId → running|ok|failed（GUI 卡片外框状态） */
         nodeStatus: {},
+        /** @type {Record<string, Record<string, string>>} nodeId → {handle: 显示值}（wired 输入实时值；脱敏后） */
+        nodeInputs: {},
     };
     runs.set(id, run);
 
@@ -121,6 +141,15 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
             /** 节点执行状态标记（GUI 卡片外框：running/ok/failed）；随 run 持久化 + SSE 快照推送 */
             markNode(nodeId, status) {
                 run.nodeStatus = { ...run.nodeStatus, [nodeId]: status };
+                persist(run);
+            },
+            /** 节点实际收到的输入值（GUI wired 控件实时值）；脱敏后随 run 持久化 + SSE 快照推送 */
+            markNodeInputs(nodeId, inputValues) {
+                const out = {};
+                for (const [k, v] of Object.entries(inputValues ?? {})) {
+                    out[k] = displayValue(k, v);
+                }
+                run.nodeInputs = { ...run.nodeInputs, [nodeId]: out };
                 persist(run);
             },
         };

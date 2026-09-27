@@ -147,7 +147,7 @@
 
   // ── 节点备注：便笺按钮折叠展开，内容存 data.note 随图保存 ────
   let noteOpen = $state(false);
-  let noteText = $derived(String(data?.note ?? ""));
+  let noteText = $derived(String(data?.note ?? "").trim());
 
   // ── struct 字段行：值控件按类型变化；字段口连线后隐藏手填 ────
   const numOk = v => String(v ?? "").trim() !== "" && Number.isFinite(Number(v));
@@ -175,7 +175,7 @@
   {/snippet}
 
   <div class="head" style="background:{color}">
-    <span class="htitle">{meta?.title ?? data.__type}</span>
+    <span class="htitle">{meta?.title ?? data.__type}{noteText ? ` - ${noteText}` : ""}</span>
     <button class="del nodrag" title="删除节点" onclick={() => ondelete?.(id)}>{@render trash(11)}</button>
   </div>
   {#if meta?.desc}<div class="ndesc">{meta.desc}</div>{/if}
@@ -185,8 +185,11 @@
         <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[inp.type]}" />
         <span class="lbl">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
         {#if !inp.fromField && (inp.type === "string" || inp.type === "number" || inp.type === "boolean")}
-          {#if isWiredAsTarget?.(id, inp.id)}
-            <input class="inlit" disabled title="值来自连线" value={resolvePreview(inp)} />
+          {@const liveVal = ui.runNodeInputs?.[id]?.[inp.id]}
+          {#if isWiredAsTarget?.(id, inp.id) && liveVal !== undefined && liveVal !== null && liveVal !== ""}
+            <input class="inlit live" disabled title={String(liveVal)} value={liveVal} />
+          {:else if isWiredAsTarget?.(id, inp.id)}
+            <input class="inlit" disabled title={`值来自连线：${resolvePreview(inp)}`} value={resolvePreview(inp)} />
           {:else if inp.type === "boolean"}
             <span class="boolpair nodrag">
               <button type="button" class:lit={getLit(inp.id) === true} title="是" onclick={() => setLit(inp.id, true)}>是</button>
@@ -362,15 +365,13 @@
       </label>
     {/if}
   </div>
-  {#if noteOpen}
-    <div class="noterow nodrag nowheel">
-      <span class="wlab">备注<span class="sbadge" title="可序列化：纯文本字面量">s</span></span>
-      <textarea rows="2" value={noteText} placeholder="节点备注…"
-        oninput={e => set("note", e.target.value)}></textarea>
-    </div>
-  {/if}
   <div class="nidrow">
     <span class="nid nodrag" title="节点 id">{id}</span>
     <button class="notebtn nodrag" class:hasnote={!!noteText} title="备注" onclick={() => (noteOpen = !noteOpen)}>便笺</button>
   </div>
+  {#if noteOpen}
+    <div class="noterow nodrag nowheel">
+      <textarea rows="2" bind:value={noteText} placeholder="节点备注…" oninput={e => set("note", e.target.value)}></textarea>
+    </div>
+  {/if}
 </div>

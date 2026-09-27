@@ -74,7 +74,7 @@ export default [
                 });
             } catch (e) {
                 if (/Encrypted private/.test(e.message)) {
-                    throw new Error(`私钥 ${r.identityFile} 有口令保护且引擎无法交互输入。两条路：① ssh-add "${r.identityFile}" 加载进 Windows agent（服务已在跑）；② 换用已加载的密钥或无口令私钥。原始错误：${e.message}`);
+                    throw new Error(`私钥 ${r.identityFile} 有口令保护，且 agent 中未加载可用密钥（agent 已优先尝试）。两条路：① ssh-add "${r.identityFile}" 输一次口令加载进 Windows agent（之后常驻可用，推荐）；② 换用无口令密钥。原始错误：${e.message}`);
                 }
                 throw e;
             }
@@ -129,7 +129,7 @@ export default [
     },
     {
         type: "ssh.upload",
-        desc: "上传本机文件到远端。remotePath 为已有文件夹 → 放入其中（保持本机文件名）；为文件路径 → 上传为该路径（父目录自动 mkdir -p，文件名不同即等效重命名）。无 trap——上传即完成，文件不会被自动清理。输出远端文件完整路径。",
+        desc: "上传本机文件到远端：remotePath 恒为目标文件路径（父目录自动 mkdir -p；文件名不同即等效重命名）。无 trap——上传即完成，文件不会被自动清理。输出远端文件完整路径。",
         title: "上传文件",
         category: "远端",
         color: "#ff9e64",
@@ -146,24 +146,15 @@ export default [
             let st;
             try { st = await fs.promises.stat(local); } catch { throw new Error(`本机文件不存在: ${local}`); }
             if (!st.isFile()) throw new Error(`localPath 不是文件: ${local}`);
-            const remotePath = String(inputs.remotePath ?? "").trim();
-            if (!remotePath) throw new Error("ssh.upload 未连接 remotePath");
-            const base = path.basename(local);
-
-            // 远端语义判定：remotePath 是已有目录 → 放入其中；否则视为目标文件路径（父目录 mkdir -p）
-            const isDir = (await sshRun(inputs.ssh, buildCommand(`test -d ${sq(remotePath)}`, node, { sudo: false }), { log: () => {} })).code === 0;
-            const remoteFile = isDir
-                ? `${remotePath.replace(/\/+$/, "")}/${base}`
-                : remotePath;
+            const remoteFile = String(inputs.remotePath ?? "").trim();
+            if (!remoteFile) throw new Error("ssh.upload 未连接 remotePath");
             if (ctx.dryRun) {
-                ctx.log(`[dry-run] 上传 ${local} → ${remoteFile}${isDir ? "（remotePath 为已有目录）" : "（remotePath 为文件路径，父目录 mkdir -p）"}；无 trap，文件保留`);
+                ctx.log(`[dry-run] 上传 ${local} → ${remoteFile}；无 trap，文件保留`);
                 return { remoteFile };
             }
-            if (!isDir) {
-                const parent = remotePath.includes("/") ? remotePath.slice(0, remotePath.lastIndexOf("/")) : ".";
-                const r = await sshRun(inputs.ssh, buildCommand(`mkdir -p ${sq(parent)}`, node, { sudo: false }), { log: ctx.log });
-                if (r.code !== 0) throw new Error(`mkdir -p 失败: ${parent}\n${r.err}`);
-            }
+            const parent = remoteFile.includes("/") ? remoteFile.slice(0, remoteFile.lastIndexOf("/")) : ".";
+            const r = await sshRun(inputs.ssh, buildCommand(`mkdir -p ${sq(parent)}`, node, { sudo: false }), { log: ctx.log });
+            if (r.code !== 0) throw new Error(`mkdir -p 失败: ${parent}\n${r.err}`);
             await sshPut(inputs.ssh, local, remoteFile, { log: ctx.log });
             ctx.log(`[upload] ${remoteFile}`);
             return { remoteFile };

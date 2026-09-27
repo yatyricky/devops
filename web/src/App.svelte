@@ -109,7 +109,7 @@
     }).map(e => ({ ...e, ...(e.kind === "seq" ? { class: "seq" } : {}) }));
     tasks = doc.tasks ?? {};
     hoverTask = null; definer = null;
-    ui.runTaskNodes = null; ui.nodeRunStatus = null;
+    ui.runTaskNodes = null; ui.nodeRunStatus = null; ui.runNodeInputs = null;
     ignoreDirtyUntil = Date.now() + 1000;
   }
   function toDoc() {
@@ -386,6 +386,7 @@
   function clearRunStatus() {
     ui.nodeRunStatus = null;
     ui.runTaskNodes = null;
+    ui.runNodeInputs = null;
   }
   async function doRun() {
     const m = runModal;
@@ -401,8 +402,11 @@
       // 卡片外框状态：任务选点集（集外半透明灰）+ 节点执行状态清零，随流式事件更新
       ui.runTaskNodes = new Set(tasks[m.task].nodes ?? tasks[m.task].path ?? []);
       ui.nodeRunStatus = {};
-      await logRef?.follow(id, `${displayName}/${m.task}${m.dryRun ? " (dry-run)" : ""}`,
-        ns => { ui.nodeRunStatus = ns ?? {}; });
+      ui.runNodeInputs = {};
+      await logRef?.follow(id, `${displayName}/${m.task}${m.dryRun ? " (dry-run)" : ""}`, {
+        onNode: ns => { ui.nodeRunStatus = ns ?? {}; },
+        onNodeInputs: ni => { ui.runNodeInputs = ni ?? {}; },
+      });
     } catch (e) { showToast(e.message); }
   }
 

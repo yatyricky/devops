@@ -43,8 +43,10 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 .svelte-flow__edge.seq .svelte-flow__edge-path { stroke: var(--warn); stroke-width: 1.2; stroke-dasharray: 3 4; opacity: .55; }
 
 /* 端口字面量行内控件（string/number/boolean 输入插槽后） */
+/* 端口字面量行内控件（string/number/boolean 输入插槽后）；wired=灰（编辑解析值），运行中=绿（实时值） */
 .devnode .body .kv.in .inlit { width: 96px; margin-left: auto; flex: none; font-size: 11px; padding: 1px 5px; }
-.devnode .body .kv.in .inlit:disabled { color: var(--ok); opacity: .9; }
+.devnode .body .kv.in .inlit:disabled { color: var(--dim); }
+.devnode .body .kv.in .inlit.live:disabled { color: var(--ok); }
 .devnode .body .boolpair { display: flex; gap: 3px; margin-left: auto; flex: none; }
 .devnode .body .boolpair button { font-size: 10px; padding: 0 7px; line-height: 1.5; opacity: .55; }
 .devnode .body .boolpair button.lit { border-color: var(--ok); color: var(--ok); opacity: 1; }

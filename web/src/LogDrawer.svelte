@@ -21,14 +21,15 @@
    * 跟踪一个任务到终态。
    * @param {string} id
    * @param {string} t
-   * @param {(nodeStatus: Record<string,string> | null) => void} [onNode] 节点执行状态回调（卡片外框）
+   * @param {{ onNode?: (nodeStatus: Record<string,string> | null) => void, onNodeInputs?: (nodeInputs: Record<string, Record<string,string>> | null) => void }} [hooks] 节点状态/实时输入回调
    */
-  export async function follow(id, t, onNode) {
+  export async function follow(id, t, hooks = {}) {
     title = t; lines.length = 0; status = "运行中"; open = true;
     await streamJob(id, {
       log: append,
       status: (st, err) => { status = (st === "ok" ? "成功" : st === "failed" ? "失败" : st); if (err) append(`[Failed] ${err}`); },
-      node: ns => onNode?.(ns),
+      node: ns => hooks.onNode?.(ns),
+      nodeInputs: ni => hooks.onNodeInputs?.(ni),
       end: () => {},
     });
     if (status !== "失败") append("[Done] 任务结束");

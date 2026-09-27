@@ -512,7 +512,17 @@ await test("path.resolve: count 驱动动态端口 p1..pN；执行拼接 resolve
     const lines = [];
     await executeTask({ log: m => lines.push(String(m)), dryRun: false, inputs: {}, mask: s => s }, doc, "t");
     const joined = lines.join("\n");
-    assert.ok(joined.includes(path.resolve(home, "sub", "dee")), "~ 首段展开 + 相对段拼接", joined);
+    // POSIX 语义：~ 展开 + 反斜杠归一为 /，段间单斜杠拼接（style 缺省 auto，无盘符段 → posix 输出）
+    const homePosix = home.replace(/\\/g, "/");
+    const expected = `${homePosix}/sub/dee`;
+    assert.ok(joined.includes(expected), "~ 首段展开 + 相对段拼接（POSIX）", joined);
+    // 风格开关：windows → 反斜杠
+    const winDoc = structuredClone(doc);
+    winDoc.nodes.find(n => n.id === "r").data.style = "windows";
+    const lines2 = [];
+    const ctx2 = { log: m => lines2.push(String(m)), dryRun: false, inputs: {}, mask: s => s, registerGitRestore: () => {}, registerSession: () => {}, trackRemoteFile: () => {}, markNode: () => {}, markNodeInputs: () => {} };
+    await executeTask(ctx2, winDoc, "t");
+    assert.ok(lines2.join("\n").includes("sub\\dee"), "windows 风格输出反斜杠");
 });
 
 // ── tar.pack 三模式 + 运行状态标记 ────
@@ -643,6 +653,42 @@ await test("执行: 字面量注入（number 矫正）且连线覆盖字面量",
     const lines = [];
     await executeTask({ log: m => lines.push(String(m)), dryRun: false, inputs: {}, mask: s => s }, doc, "t");
     assert.ok(lines.join("\n").includes('"wired5"'), "连线 a + 字面量 b(number→5) 同节点共存", lines.join("\n"));
+});
+
+await test("认证级联: agent 优先，keyFile 降级回退；无 agent 单次", async () => {
+    const { buildAuthAttempts } = await import("../engine/ssh.js");
+    const ko = { privateKeyPath: "C:/k", passphrase: "p" };
+    const both = buildAuthAttempts("pipe", ko);
+    assert.deepStrictEqual(both, [{ agent: "pipe" }, { agent: "pipe", privateKeyPath: "C:/k", passphrase: "p" }], "① 仅 agent（无 keyPath，防口令密钥解析阻断）② agent+keyFile");
+    assert.deepStrictEqual(buildAuthAttempts(undefined, ko), [{ privateKeyPath: "C:/k", passphrase: "p" }], "无 agent → 仅 keyFile");
+    assert.deepStrictEqual(buildAuthAttempts("pipe", {}), [{ agent: "pipe" }], "无 keyFile → 仅 agent 单次");
+});
+
+await test("运行输入捕获: markNodeInputs 脱敏 + executeTask 时序", async () => {
+    const { executeTask } = await import("../engine/workflow.js");
+    const doc = {
+        name: "cap", nodes: [
+            { id: "mk", type: "struct.make", position: [0, 0], data: { fields: [
+                { key: "JWT_SECRET", type: "string", value: "topsecret" },
+                { key: "PORT", type: "number", value: 3000 },
+            ] } },
+            { id: "sp", type: "struct.split", position: [0, 0], data: {} },
+            { id: "p", type: "log.print", position: [0, 0], data: {} },
+        ],
+        edges: [
+            { id: "e1", source: "mk", sourceHandle: "struct", target: "sp", targetHandle: "struct" },
+            { id: "e2", source: "sp", sourceHandle: "PORT", target: "p", targetHandle: "value" },
+        ],
+        tasks: { t: { label: "t", mutates: false, nodes: ["mk", "sp", "p"] } },
+    };
+    /** @type {Record<string, Record<string, string>>} */
+    const captured = {};
+    const ctx = { log: () => {}, dryRun: false, inputs: {}, mask: s => s, registerGitRestore: () => {}, registerSession: () => {}, trackRemoteFile: () => {}, markNode: () => {}, markNodeInputs: (id, vals) => { captured[id] = vals; } };
+    await executeTask(ctx, doc, "t");
+    // markNodeInputs 捕获：mk 收到空输入（字段无连线、字段行控件值由节点自身消费），sp 收到解析后的 struct，p 收到字段值 3000
+    assert.deepStrictEqual(captured["mk"], {}, "make 无连线输入 → 空对象（不虚构）");
+    assert.deepStrictEqual(captured["sp"], { struct: { JWT_SECRET: "topsecret", PORT: 3000 } }, "split 收到完整 struct 对象");
+    assert.strictEqual(captured["p"]["value"], 3000, "log.print 收到矫正后的端口值");
 });
 
 await test("注册表: 工作流加载器正常（旧 wf 已存档 _attic，等待重写）", () => {

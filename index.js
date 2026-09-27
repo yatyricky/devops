@@ -211,6 +211,7 @@ app.post("/api/jobs/:id/stream", (req, res) => {
     let sentLines = 0;
     let lastStatus = "";
     let lastNodeStatus = "";
+    let lastNodeInputs = "";
     /** @type {NodeJS.Timeout | null} */
     let timer = null;
     /** @type {NodeJS.Timeout | null} */
@@ -228,6 +229,12 @@ app.post("/api/jobs/:id/stream", (req, res) => {
         if (ns !== lastNodeStatus) {
             lastNodeStatus = ns;
             send({ type: "node", nodeStatus: run.nodeStatus ?? null });
+        }
+        // 节点实际输入值快照（wired 控件实时值）变化即推
+        const ni = JSON.stringify(run.nodeInputs ?? null);
+        if (ni !== lastNodeInputs) {
+            lastNodeInputs = ni;
+            send({ type: "nodeinputs", nodeInputs: run.nodeInputs ?? null });
         }
         if (run.status !== lastStatus) {
             lastStatus = run.status;
