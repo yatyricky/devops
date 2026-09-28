@@ -8,7 +8,7 @@ import { expandHome } from "../exec.js";
 export default [
     {
         type: "path.resolve",
-        title: "Path Resolve",
+        title: "Resolve Path",
         outputInfer: true,
         category: "工具",
         color: "#56b6c2",
@@ -64,7 +64,7 @@ export default [
     },
     {
         type: "path.basename",
-        title: "取文件名",
+        title: "Get File Name",
         category: "工具",
         color: "#56b6c2",
         desc: "取路径的最后一段（文件名）及其去扩展名形式：path/to/file.mp4 → basename=file.mp4，basenameWithoutExtension=file。兼容 / 与 \\ 分隔符；输出 string。",
@@ -86,9 +86,36 @@ export default [
         },
     },
     {
+        type: "string.join",
+        title: "Join Strings",
+        category: "工具",
+        color: "#56b6c2",
+        countInputs: { key: "count", prefix: "p", type: "string", min: 1, max: 16 },
+        desc: "把 N 段字符串用分隔符连成一段：段数由 count 控件决定（p1..pN 动态端口），delimiter 指定段间连接符（缺省空串 = 直接相连）。与 string.format 的分工：join 是分隔符驱动的纯连接。",
+        inputs: [],
+        outputs: [{ id: "value", type: "string" }],
+        widgets: [
+            { key: "count", label: "字符串段数（1-16）", kind: "number", serializable: true, default: 2 },
+            { key: "delimiter", label: "分隔符（段间连接，可空）", kind: "string", serializable: true, default: "" },
+        ],
+        async run(ctx, node, inputs) {
+            const count = node.data.count ?? 2;
+            const delimiter = String(node.data.delimiter ?? "");
+            const segs = [];
+            for (let i = 1; i <= count; i++) {
+                const v = String(inputs[`p${i}`] ?? "").trim();
+                if (!v) throw new Error(`string.join：路径段 p${i} 为空`);
+                segs.push(v);
+            }
+            const value = segs.join(delimiter);
+            ctx.log(`[string.join] ${segs.join(" + ")} → ${value}`);
+            return { value };
+        },
+    },
+    {
         type: "string.format",
         desc: "拼接字符串：模板里写 {{name}} 自动生成输入插槽，输出拼接结果。",
-        title: "拼接字符串",
+        title: "格式化字符串",
         category: "工具",
         color: "#c8d3f0",
         inputs: [],
@@ -113,7 +140,7 @@ export default [
     {
         type: "log.print",
         desc: "把输入值打印到任务日志（预览），不产生副作用。",
-        title: "打印预览",
+        title: "Print Log",
         category: "工具",
         color: "#56b6c2",
         inputs: [{ id: "value", type: "any", required: true }],

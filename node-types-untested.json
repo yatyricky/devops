@@ -3,7 +3,6 @@
     "git.ref",
     "cmd.exec",
     "stage.copy",
-    "template.render",
     "ssh.exec",
     "remote.deps",
     "remote.chown",

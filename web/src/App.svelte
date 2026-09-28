@@ -48,6 +48,7 @@
       const src = nodes.find(n => n.id === e.source);
       if (!src) return undefined;
       if (src.type === "path.resolve") return inferPathResolve(src, depth + 1);
+      if (src.type === "string.join") return inferStringJoin(src, depth + 1);
       const key = typeMap[src.type]?.outputValueKey ?? handleId;
       return src.data?.[key];
     }
@@ -82,6 +83,22 @@
     return out;
   }
 
+  /**
+   * string.join 编辑期输出推断（与引擎 run 同语义）：
+   * 全部 pN 来源为 string 常量接入或手填（lit）→ 返回拼接结果；任一非常量来源 → undefined（运行时才知道）。
+   */
+  function inferStringJoin(src, depth = 0) {
+    const count = Math.min(16, Math.max(1, Number(src.data.count ?? 2) || 2));
+    const delimiter = String(src.data.delimiter ?? "");
+    const segs = [];
+    for (let i = 1; i <= count; i++) {
+      const v = String(resolvePortValue(src.id, `p${i}`, depth) ?? "").trim();
+      if (!v) return undefined; // 任一段不可静态确定 → 整体不可推断
+      segs.push(v);
+    }
+    return segs.join(delimiter);
+  }
+
   setContext("devnode-actions", {
     ondata: onData,
     ondelete: deleteNode,
@@ -105,11 +122,12 @@
         path: p, configDir: currentPath ? dirOf(currentPath) : "", repoDir: docRepoDir,
       }) });
     },
-    /** 编辑期输出推断：path.resolve → 拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
+    /** 编辑期输出推断：path.resolve → 拼接推断值；string.join → 分隔符拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
     inferOutput(nodeId) {
       const n = nodes.find(x => x.id === nodeId);
       if (!n) return undefined;
       if (n.type === "path.resolve") return inferPathResolve(n);
+      if (n.type === "string.join") return inferStringJoin(n);
       if (n.type === "template.render") return n.data?.inferredOut;
       return undefined;
     },

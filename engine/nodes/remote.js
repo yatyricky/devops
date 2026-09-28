@@ -48,7 +48,7 @@ export default [
     {
         type: "ssh.session",
         desc: "按 ~/.ssh/config 的别名建立 SSH 会话（同 ssh <alias>：HostName/User/Port/IdentityFile），可选 SHA256 指纹锁定，输出 ssh 供全部远端节点使用。",
-        title: "SSH 会话",
+        title: "New SSH Session",
         category: "远端",
         color: "#ff9e64",
         sshAliasesPicker: true,
@@ -85,7 +85,7 @@ export default [
     },
     {
         type: "ssh.close",
-        title: "关闭 SSH 会话",
+        title: "Close SSH Session",
         category: "远端",
         color: "#ff9e64",
         desc: "显式关闭上游 SSH 会话连接，提前释放资源；之后该 ssh 出口不可再被下游节点使用（任务收尾仍会兜底关闭已关闭的会话，幂等无副作用）。",
@@ -130,7 +130,7 @@ export default [
     {
         type: "ssh.upload",
         desc: "上传本机文件到远端：remotePath 恒为目标文件路径（父目录自动 mkdir -p；文件名不同即等效重命名）。无 trap——上传即完成，文件不会被自动清理。输出远端文件完整路径。",
-        title: "上传文件",
+        title: "Upload File",
         category: "远端",
         color: "#ff9e64",
         inputs: [
@@ -163,7 +163,7 @@ export default [
     {
         type: "remote.extract",
         desc: "把远端 t.gz 解压到目标目录（压缩包一级内容直接进 destDir）。输出实际解压目录。",
-        title: "解压",
+        title: "Extract Archive",
         category: "远端",
         color: "#ff9e64",
         inputs: [
@@ -241,7 +241,7 @@ export default [
     {
         type: "remote.symlink",
         desc: "远端 ln -sfn 切换符号链接（发布/回滚的核心动作）。",
-        title: "符号链接切换",
+        title: "Symlink",
         category: "远端",
         color: "#ff9e64",
         inputs: [

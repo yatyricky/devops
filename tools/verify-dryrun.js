@@ -211,7 +211,7 @@ await test("执行: fan-out 批次并发（1 先行，2/3 同批）", async () =
     await executeTask({ log: m => lines.push(String(m)), dryRun: true, inputs: {}, mask: s => s }, doc, "t");
     const text = lines.join("\n");
     assert.ok(text.includes("批次并发 2"), "2、3 应同批并发", text);
-    const i1 = text.indexOf("[输入.字符串] 1");
+    const i1 = text.indexOf("[Input String] 1");
     assert.ok(i1 !== -1 && i1 < text.indexOf("预览：b2") && i1 < text.indexOf("预览：b3"), "1 应先于 2/3", text);
 });
 await test("执行: 分支失败任务失败（同批好分支已落地）", async () => {
@@ -296,7 +296,7 @@ await test("注册表: 输入.字符串在输入分类，输出 string，widget 
     const d = NODE_TYPES["string.const"];
     assert.ok(d, "string.const 已注册");
     assert.strictEqual(d.category, "输入");
-    assert.strictEqual(d.title, "输入.字符串");
+    assert.strictEqual(d.title, "Input String");
     assert.deepStrictEqual(d.inputs, []);
     assert.deepStrictEqual(d.outputs, [{ id: "value", type: "string" }]);
     assert.strictEqual(d.widgets[0].serializable, true, "值控件可序列化");
@@ -691,6 +691,27 @@ await test("运行输入捕获: markNodeInputs 脱敏 + executeTask 时序", asy
     assert.deepStrictEqual(captured["mk"], {}, "make 无连线输入 → 空对象（不虚构）");
     assert.deepStrictEqual(captured["sp"], { struct: { JWT_SECRET: "topsecret", PORT: 3000 } }, "split 收到完整 struct 对象");
     assert.strictEqual(captured["p"]["value"], 3000, "log.print 收到矫正后的端口值");
+});
+
+await test("string.join: count 驱动动态端口 p1..pN；分隔符拼接（空=直接相连）", async () => {
+    const { executeTask } = await import("../engine/workflow.js");
+    const doc = {
+        name: "sj", nodes: [
+            { id: "s1", type: "string.const", position: [0, 0], data: { value: "a" } },
+            { id: "s2", type: "string.const", position: [0, 0], data: { value: "b" } },
+            { id: "j", type: "string.join", position: [0, 0], data: { count: 2, delimiter: "-" } },
+            { id: "p", type: "log.print", position: [0, 0], data: {} },
+        ],
+        edges: [
+            { id: "e1", source: "s1", sourceHandle: "value", target: "j", targetHandle: "p1" },
+            { id: "e2", source: "s2", sourceHandle: "value", target: "j", targetHandle: "p2" },
+            { id: "e3", source: "j", sourceHandle: "value", target: "p", targetHandle: "value" },
+        ],
+        tasks: { t: { label: "t", mutates: false, nodes: ["s1", "s2", "j", "p"] } },
+    };
+    const lines = [];
+    await executeTask({ log: m => lines.push(String(m)), dryRun: false, inputs: {}, mask: s => s, registerGitRestore: () => {}, registerSession: () => {}, trackRemoteFile: () => {}, markNode: () => {}, markNodeInputs: () => {} }, doc, "t");
+    assert.ok(lines.join(String.fromCharCode(10)).includes("a-b"), "分隔符拼接", lines.join(String.fromCharCode(10)));
 });
 
 await test("注册表: 工作流加载器正常（旧 wf 已存档 _attic，等待重写）", () => {

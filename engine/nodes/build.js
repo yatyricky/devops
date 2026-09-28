@@ -48,7 +48,7 @@ export default [
     {
         type: "git.checkout",
         desc: "切换仓库到指定分支或 tag：输入 repoDir 与 ref，输出切换前的 HEAD（original），可用它链式切回。",
-        title: "切换分支",
+        title: "Git Checkout",
         category: "版本",
         color: "#f07178",
         inputs: [
@@ -81,7 +81,7 @@ export default [
     {
         type: "git.getRefs",
         desc: "输出一个选定的 ref 名：卡片上点「刷新」拉取分支/tag 下拉来挑选，默认 HEAD。",
-        title: "Git Refs",
+        title: "Git Get Refs",
         category: "版本",
         color: "#f07178",
         refsPicker: true,
@@ -153,7 +153,7 @@ export default [
     {
         type: "tar.pack",
         desc: "把目录打成 t.gz，输出压缩包完整路径。三种模式：不配置条目 = 打包全部；仅打包条目 = 白名单；仅不打包条目 = 黑名单（按路径段排除）。两者都配属配置错误。",
-        title: "打包 tgz",
+        title: "Pack Tgz",
         category: "构建",
         color: "#4cc38a",
         inputs: [
@@ -211,7 +211,7 @@ export default [
     {
         type: "template.render",
         desc: "渲染 {{KEY}} 模板文件。path 输入 = 模板路径（\"./\" 相对工作流目录，绝对路径直用，其余相对应用仓库）；编辑期按模板内容自动生成各 {{VAR}} 输入口（手填或连线，可为 Path Resolve 推断值）。输出渲染产物路径（.tmp 下，按节点防重复）。",
-        title: "渲染模板",
+        title: "Render Template",
         category: "构建",
         color: "#4cc38a",
         tplVars: true,

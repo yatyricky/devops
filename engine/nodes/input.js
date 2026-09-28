@@ -8,7 +8,7 @@
 export default [
     {
         type: "string.const",
-        title: "输入.字符串",
+        title: "Input String",
         category: "输入",
         color: "#c8d3f0",
         desc: "输出一个字符串常量：只需要一个 string 时的最干净输入方式（比 Struct 轻量）。",
@@ -22,7 +22,7 @@ export default [
     },
     {
         type: "struct.make",
-        title: "Struct 构造器",
+        title: "Make Struct",
         category: "输入",
         color: "#c8d3f0",
         fieldInputs: true,
@@ -54,7 +54,7 @@ export default [
     },
     {
         type: "struct.split",
-        title: "Struct 析构器",
+        title: "Split Struct",
         category: "输入",
         color: "#c8d3f0",
         dynamicOutputs: "structSplit",
