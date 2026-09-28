@@ -118,15 +118,24 @@
     if (meta?.sshAliasesPicker) refreshSshAliases();
   });
 
-  // ── 渲染模板：编辑期现场解析模板文件 → {{VAR}} 动态端口 + 推断输出路径 ────
+  // ── 渲染模板：编辑期现场解析模板文件 → {{VAR}} 动态端口 / 不可推导时 struct 口 + 推断输出路径 ────
   let tplErr = $state("");
   $effect(() => {
     if (!meta?.tplVars) return;
     // 依赖：path 端口的当前值（连线推断值 / 上游字面量 / 手填 lit）
-    const p = String(resolveInput?.(id, "path") ?? getLit("path") ?? "").trim();
+    const pv = resolveInput?.(id, "path");
+    const p = String(pv ?? getLit("path") ?? "").trim();
     if (!p) {
       tplErr = "";
       if ((get("varsList") ?? []).length) set("varsList", []);
+      if (get("varsUnresolved")) { set("varsUnresolved", false); set("inferredOut", ""); }
+      return;
+    }
+    if (pv === undefined) {
+      // 路径不可推导（来源是运行时节点）：变量口降级为 struct 口，推断输出清空
+      if ((get("varsList") ?? []).length) set("varsList", []);
+      if (!get("varsUnresolved")) set("varsUnresolved", true);
+      if (get("inferredOut")) set("inferredOut", "");
       return;
     }
     const t = setTimeout(() => {
@@ -136,8 +145,9 @@
         const vars = r?.vars ?? [];
         const same = vars.length === cur.length && vars.every((/** @type {string} */ v, /** @type {number} */ i) => v === cur[i]);
         if (!same) set("varsList", vars);
-          const inferred = r?.basename ? `.tmp/rendered-${id}-${r.basename}` : "";
-        if (inferred && get("inferredOut") !== inferred) set("inferredOut", inferred);
+        if (get("varsUnresolved")) set("varsUnresolved", false);
+        const inferred = r?.basename ? `.tmp/rendered-${id}-${r.basename}` : "";
+        if (get("inferredOut") !== inferred) set("inferredOut", inferred);
       });
     }, 400);
     return () => clearTimeout(t);

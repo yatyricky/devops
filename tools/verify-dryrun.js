@@ -697,4 +697,44 @@ await test("注册表: 工作流加载器正常（旧 wf 已存档 _attic，等�
     assert.ok(Array.isArray(loadWorkflows()));
 });
 
+await test("template.render: varsUnresolved → struct 口；vars 合并（struct 展开 + 散口 lit）", async () => {
+    const doc = {
+        name: "tpl", nodes: [
+            { id: "mk", type: "struct.make", position: [0, 0], data: { fields: [
+                { key: "WHO", type: "string", value: "struct-obj" },
+                { key: "EXTRA_ONLY", type: "string", value: "" },
+            ] } },
+            { id: "tpl", type: "template.render", position: [0, 0], data: { varsUnresolved: true } },
+        ],
+        edges: [
+            { id: "e1", source: "mk", sourceHandle: "struct", target: "tpl", targetHandle: "vars" },
+        ],
+        tasks: { t: { label: "t", mutates: false, nodes: ["mk", "tpl"] } },
+    };
+    const { getInputs } = await import("../engine/nodes/index.js");
+    const ids = getInputs(doc.nodes.find(n => n.id === "tpl")).map(i => i.id);
+    assert.ok(ids.includes("path") && ids.includes("vars"), "varsUnresolved → path + vars(struct) 口");
+
+    // 可读模板 + lit 提供 path 与散口变量 → struct 对象展开渲染
+    const os = await import("os");
+    const pathMod = await import("path");
+    const fsMod = await import("fs");
+    const tplFile = pathMod.join(os.tmpdir(), `verify-tpl-${Date.now()}.txt`);
+    fsMod.writeFileSync(tplFile, "WHO={{WHO}} EXTRA={{EXTRA_ONLY}}");
+    const tmpDoc = JSON.parse(JSON.stringify(doc));
+    tmpDoc.nodes.find(n => n.id === "tpl").data.lit = { path: tplFile, EXTRA_ONLY: "hand-filled" };
+    const { executeTask } = await import("../engine/workflow.js");
+    const outs = {};
+    const ctx = { log: () => {}, dryRun: false, inputs: {}, mask: x => x,
+        registerSession: () => {}, registerGitRestore: () => {}, trackRemoteFile: () => {},
+        markNode: () => {}, markNodeInputs: (id, vals) => { outs[id] = vals; } };
+    await executeTask(ctx, tmpDoc, "t");
+    assert.ok(outs["tpl"], "tpl 节点完成渲染");
+});
+
+await test("task.input 已删除", async () => {
+    const { NODE_TYPES } = await import("../engine/nodes/index.js");
+    assert.ok(!("task.input" in NODE_TYPES), "task.input 已删除");
+});
+
 console.log(`\nOK: ${passed} 项断言全部通过`);

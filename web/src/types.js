@@ -32,11 +32,15 @@ export function effectiveInputs(meta, data) {
     all = [...all, ...ports];
   }
   if (meta?.tplVars) {
-    // 渲染模板：编辑期从模板文件解析出的 {{VAR}} 集合（DevNode 写入 data.varsList）
-    const tplPorts = (data?.varsList ?? [])
-      .filter(v => v && !all.some(d => d.id === v))
-      .map(v => ({ id: v, type: "string", required: true, dynamic: true }));
-    all = [...all, ...tplPorts];
+    // 路径可推导 → 按模板 {{VAR}} 生成 string 口；不可推导 → 降级为一个 struct 口
+    if ((data?.varsList ?? []).length) {
+      const tplPorts = data.varsList
+        .filter(v => v && !all.some(d => d.id === v))
+        .map(v => ({ id: v, type: "string", required: true, dynamic: true }));
+      all = [...all, ...tplPorts];
+    } else if (data?.varsUnresolved) {
+      all = [...all, { id: "vars", type: "struct", required: false, dynamic: true }];
+    }
   }
   if (meta?.fieldInputs) {
     const fieldPorts = (data?.fields ?? [])

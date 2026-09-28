@@ -1,21 +1,18 @@
-# untestedNodeTypes 独立文件入库 + workflows 支持 `~` 路径
+# 渲染模板：路径不可推导时降级为 struct 输入口
 
-## 需求 1：untestedNodeTypes 抽独立文件并入版本管理
+## 规则
 
-- 新文件 **`node-types-untested.json`**（仓库根，格式 `{ "untested": [...] }`），不入 gitignore，进版本管理——你可在 git 里手工维护这份清单。
-- `engine/config.js` 新增 `loadUntested()/saveUntested()`；`/api/node-usage` 改读写新文件。
-- **一次性迁移**：local-config.json 里现有的 28 项清单迁入新文件，并从 local-config 删除该字段（避免两处不一致）。迁移逻辑做成幂等函数（旧位置有数据且新文件不存在才搬），提交时新文件带当前清单入库。
-- 你已手工修好的清单状态不受影响（迁移原样搬现值）。
+- path 可推导（常量接入/手填/可推断上游）→ 现状不变：按模板文件 {{VAR}} 自动生成同名 string 输入口。
+- path **不可推导**（空值来源、或上游是运行时节点）→ 该节点的模板变量输入降级为**一个 struct 输入口**（required: false）：接 Struct 构造器/析构器，运行时整个 struct 对象即变量集。
 
-## 需求 2：workflows 支持 `~/OneDrive/linux/...` 格式（auto）
+实现三处（规则两端同源）：
 
-复用 `engine/exec.js` 的 `expandHome`：
+1. **engine/nodes/index.js getInputs**：`varsList` 非空 → string 端口组；`varsList` 空且 `data.varsUnresolved` → 追加 `{ id: "vars", type: "struct" }` 端口。
+2. **web/src/types.js effectiveInputs**：同步同规则。
+3. **engine/nodes/build.js run()**：变量合并改为 `vars = { ...inputs.vars（struct 展开）, ...其余散口 }`（互不冲突，两种来源共存）。
 
-- `engine/config.js`：`rememberWorkflow`/`forgetWorkflow` 的去重与比较统一经 expandHome 展开；**保存时主目录下的文件自动写成 `~/...` 相对形式**（跨机器可移植），主目录外的仍是绝对路径。
-- `engine/registry.js`：`loadWorkflows` 读取 local-config 的 workflows 路径与 `findWorkflow` 匹配前都经 expandHome 展开——你在 local-config.json 里手写 `~/OneDrive/linux/kids-ledger-prod.json` 即可正常加载。
+DevNode 解析 effect 增加状态写回：path 可推导 → 照旧写 varsList + 清 varsUnresolved；不可推导 → 清 varsList + 写 `varsUnresolved: true` + 清推断输出；path 空 → 全清。全部经 ondata（自动触发失效边清理与自动写盘）。
 
 ## 验证
 
-1. local-config.json 改写为 `~/OneDrive/linux/kids-ledger-prod.json` 格式 → 刷新页面工作流正常加载、`node cli.js list` 亦正常。
-2. `/api/node-usage` 返回迁移后的清单；local-config.json 中不再有 untestedNodeTypes 键；新文件已入库。
-3. 全量 `node tools/verify-dryrun.js` 不回归；git 提交（新文件入库）。
+构建 + 浏览器：① 接可推断路径 → string 变量端口出现（现状不变）；② 断开路径（或接运行时节点）→ 出现 vars struct 口；③ verify 全绿。提交。

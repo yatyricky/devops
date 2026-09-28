@@ -225,8 +225,11 @@ export default [
             const fpTpl = t.startsWith("./")
                 ? path.join(ctx.configDir ?? ROOT, t.slice(2))
                 : path.isAbsolute(t) ? t : path.join(ctx.repoDir ?? ROOT, t);
-            // path 之外的输入即模板变量
-            const vars = Object.fromEntries(Object.entries(inputs).filter(([k]) => k !== "path"));
+            // 变量来源：vars struct 口（整体对象）展开 + 各 {{VAR}} 散口（path 除外）
+            const vars = {
+                ...(typeof inputs.vars === "object" && inputs.vars ? inputs.vars : {}),
+                ...Object.fromEntries(Object.entries(inputs).filter(([k]) => k !== "path" && k !== "vars")),
+            };
             const missing = [];
             const content = fs.readFileSync(fpTpl, "utf8");
             for (const m of content.matchAll(/\{\{(\w+)\}\}/g)) {

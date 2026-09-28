@@ -39,11 +39,16 @@ export function getInputs(node) {
         all = [...all, ...ports];
     }
     if (def.tplVars) {
-        // 渲染模板：编辑期从模板文件解析出的 {{VAR}} 集合（DevNode 写入 data.varsList）
-        const tplPorts = (node.data?.varsList ?? [])
-            .filter(v => v && !all.some(d => d.id === v))
-            .map(v => ({ id: v, type: "string", required: true, dynamic: true }));
-        all = [...all, ...tplPorts];
+        // 渲染模板：模板路径可推导时按文件 {{VAR}} 生成 string 口（DevNode 写 data.varsList）；
+        // 路径不可推导（varsUnresolved）时降级为一个 struct 口（运行时整个 struct 对象即变量集）
+        if ((node.data?.varsList ?? []).length) {
+            const tplPorts = node.data.varsList
+                .filter(v => v && !all.some(d => d.id === v))
+                .map(v => ({ id: v, type: "string", required: true, dynamic: true }));
+            all = [...all, ...tplPorts];
+        } else if (node.data?.varsUnresolved) {
+            all = [...all, { id: "vars", type: "struct", required: false, dynamic: true }];
+        }
     }
     if (def.fieldInputs) {
         const fieldPorts = (node.data?.fields ?? [])
