@@ -3,6 +3,12 @@ import path from "path";
 import { ROOT } from "./runner.js";
 import { loadWorkflow } from "./workflow.js";
 import { loadLocalConfig, forgetWorkflow } from "./config.js";
+import { expandHome } from "./exec.js";
+
+/** `~/x` 与绝对路径统一为可比对/可加载的绝对路径。 */
+function normalizePath(p) {
+    return path.resolve(expandHome(String(p)));
+}
 
 /**
  * 工作流注册中心：
@@ -25,7 +31,7 @@ export function loadWorkflows() {
             .filter(f => f.endsWith(".json") && !f.startsWith("_") && !f.endsWith(".example.json"))
             .map(f => path.resolve(dir, f))
         : [];
-    const opened = (loadLocalConfig().workflows ?? []).map(p => path.resolve(p));
+    const opened = (loadLocalConfig().workflows ?? []).map(p => normalizePath(p));
     /** @type {(fp: string) => { path: string, doc?: any, error?: string }} */
     const load = fp => {
         try { return { path: fp, doc: loadWorkflow(fp) }; }
@@ -47,7 +53,7 @@ export function loadWorkflows() {
  */
 export function findWorkflow(nameOrPath) {
     const candidates = loadWorkflows().filter(w => w.doc);
-    const byPath = candidates.find(w => path.resolve(w.path) === path.resolve(nameOrPath));
+    const byPath = candidates.find(w => normalizePath(w.path) === normalizePath(nameOrPath));
     if (byPath) return byPath;
     const byName = candidates.filter(w => w.doc.name === nameOrPath);
     if (byName.length === 1) return byName[0];

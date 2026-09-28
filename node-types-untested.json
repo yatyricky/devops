@@ -1,0 +1,32 @@
+{
+  "untested": [
+    "task.input",
+    "string.const",
+    "struct.make",
+    "struct.split",
+    "git.ref",
+    "git.checkout",
+    "git.getRefs",
+    "cmd.exec",
+    "stage.copy",
+    "tar.pack",
+    "template.render",
+    "npm.run",
+    "ssh.session",
+    "ssh.close",
+    "ssh.exec",
+    "ssh.upload",
+    "remote.extract",
+    "remote.deps",
+    "remote.chown",
+    "remote.symlink",
+    "remote.service",
+    "remote.check",
+    "remote.nginx-reload",
+    "path.resolve",
+    "field.get",
+    "path.basename",
+    "string.format",
+    "log.print"
+  ]
+}
