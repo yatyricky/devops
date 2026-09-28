@@ -31,6 +31,13 @@ export function effectiveInputs(meta, data) {
     }
     all = [...all, ...ports];
   }
+  if (meta?.tplVars) {
+    // 渲染模板：编辑期从模板文件解析出的 {{VAR}} 集合（DevNode 写入 data.varsList）
+    const tplPorts = (data?.varsList ?? [])
+      .filter(v => v && !all.some(d => d.id === v))
+      .map(v => ({ id: v, type: "string", required: true, dynamic: true }));
+    all = [...all, ...tplPorts];
+  }
   if (meta?.fieldInputs) {
     const fieldPorts = (data?.fields ?? [])
       .filter(f => f.key && !all.some(d => d.id === f.key))

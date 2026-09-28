@@ -210,27 +210,31 @@ export default [
     },
     {
         type: "template.render",
-        desc: "渲染 {{KEY}} 模板文件为渲染产物：\"./\" 相对工作流目录，绝对路径直用，其余相对应用仓库。",
+        desc: "渲染 {{KEY}} 模板文件。path 输入 = 模板路径（\"./\" 相对工作流目录，绝对路径直用，其余相对应用仓库）；编辑期按模板内容自动生成各 {{VAR}} 输入口（手填或连线，可为 Path Resolve 推断值）。输出渲染产物路径（.tmp 下，按节点防重复）。",
         title: "渲染模板",
         category: "构建",
         color: "#4cc38a",
-        inputs: [{ id: "vars", type: "any", required: false }],
+        tplVars: true,
+        inputs: [{ id: "path", type: "string", required: true }],
         outputs: [{ id: "file", type: "string" }],
-        widgets: [
-            { key: "template", label: "模板路径（相对 templates/ 或绝对）", kind: "string", default: "" },
-            { key: "extra", label: "附加变量", kind: "kv", default: {} },
-            { key: "outputName", label: "渲染产物名（默认同模板名）", kind: "string", default: "" },
-        ],
+        widgets: [],
         async run(ctx, node, inputs) {
-            if (!node.data.template) throw new Error("template.render 未配置模板路径");
-            const t = String(node.data.template);
+            const t = String(inputs.path ?? "").trim();
+            if (!t) throw new Error("template.render 未提供模板路径（手填或连线）");
             /** "./x" = 工作流文件所在目录；绝对路径直用；其余相对应用仓库（模板随应用仓库版本管理） */
             const fpTpl = t.startsWith("./")
                 ? path.join(ctx.configDir ?? ROOT, t.slice(2))
                 : path.isAbsolute(t) ? t : path.join(ctx.repoDir ?? ROOT, t);
-            const vars = { ...(inputs.vars ?? {}), ...(node.data.extra ?? {}) };
+            // path 之外的输入即模板变量
+            const vars = Object.fromEntries(Object.entries(inputs).filter(([k]) => k !== "path"));
+            const missing = [];
+            const content = fs.readFileSync(fpTpl, "utf8");
+            for (const m of content.matchAll(/\{\{(\w+)\}\}/g)) {
+                if (vars[m[1]] === undefined) missing.push(m[1]);
+            }
+            if (missing.length) throw new Error(`模板变量未连线/未手填：${[...new Set(missing)].join(", ")}`);
             const rendered = renderTemplateFile(fpTpl, vars);
-            const outName = node.data.outputName || path.basename(fpTpl);
+            const outName = path.basename(fpTpl);
             const fpOut = path.join(TMP_DIR, `rendered-${node.id}-${outName}`);
             writeLF(fpOut, rendered);
             ctx.log(`[render] ${path.basename(fpTpl)} → ${path.basename(fpOut)}（${Object.keys(vars).length} 变量）`);

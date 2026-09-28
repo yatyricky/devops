@@ -8,8 +8,7 @@
  *   node cli.js run <wf> <task> [options]             # 运行任务（子图拓扑并发）
  *     <wf>   工作流名或 JSON 文件路径
  *     --dry-run            全节点打印计划，不产生副作用
- *     --input k=v          任务输入（对应 task.input 节点，可多次）
- *     --confirm-prod X     prod 门禁的显式确认（= 工作流名；非交互场景）
+ * *     --confirm-prod X     prod 门禁的显式确认（= 工作流名；非交互场景）
  */
 import readline from "readline";
 import { findWorkflow, loadWorkflows } from "./engine/registry.js";

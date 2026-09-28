@@ -5,6 +5,7 @@
  */
 import express from "express";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import url from "url";
 import { loadUiConfig, rememberWorkflow, forgetWorkflow, loadUntested, saveUntested, migrateUntestedFromLocalConfig } from "./engine/config.js";
@@ -121,6 +122,29 @@ app.post("/api/refs", async (req, res) => {
         res.json(await getRefs(wf.doc.repoDir, { log: () => {} }));
     } catch (e) {
         res.status(400).json({ error: e.message });
+    }
+});
+
+// ── 用户主目录（前端编辑期 ~/ 展开推断用）────
+app.get("/api/home", (req, res) => {
+    res.json({ home: os.homedir() });
+});
+
+// ── 模板变量解析（template.render 卡片：读模板文件提取 {{VAR}} 集合 + basename）────
+app.post("/api/template/vars", (req, res) => {
+    const t = String(req.body?.path || "").trim();
+    const configDir = expandHome(String(req.body?.configDir || "").trim());
+    const repoDir = expandHome(String(req.body?.repoDir || "").trim());
+    if (!t) return res.status(400).json({ error: "path required" });
+    try {
+        const fp = t.startsWith("./")
+            ? path.join(configDir, t.slice(2))
+            : path.isAbsolute(t) ? t : path.join(repoDir, t);
+        const content = fs.readFileSync(fp, "utf8");
+        const vars = [...new Set([...content.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))];
+        res.json({ vars, basename: path.basename(fp), exists: true });
+    } catch (e) {
+        res.json({ vars: [], exists: false, error: e.code === "ENOENT" ? "模板文件不存在" : e.message });
     }
 });
 

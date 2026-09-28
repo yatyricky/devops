@@ -38,6 +38,13 @@ export function getInputs(node) {
         }
         all = [...all, ...ports];
     }
+    if (def.tplVars) {
+        // 渲染模板：编辑期从模板文件解析出的 {{VAR}} 集合（DevNode 写入 data.varsList）
+        const tplPorts = (node.data?.varsList ?? [])
+            .filter(v => v && !all.some(d => d.id === v))
+            .map(v => ({ id: v, type: "string", required: true, dynamic: true }));
+        all = [...all, ...tplPorts];
+    }
     if (def.fieldInputs) {
         const fieldPorts = (node.data?.fields ?? [])
             .filter(f => f.key && !all.some(d => d.id === f.key))
@@ -100,6 +107,8 @@ export function nodeTypesMeta() {
         ...(d.refsPicker ? { refsPicker: true } : {}),
         ...(d.scriptsPicker ? { scriptsPicker: true } : {}),
         ...(d.sshAliasesPicker ? { sshAliasesPicker: true } : {}),
+        ...(d.tplVars ? { tplVars: true } : {}),
+        ...(d.outputInfer ? { outputInfer: true } : {}),
         ...(d.countInputs ? { countInputs: d.countInputs } : {}),
         ...(d.outputValueKey ? { outputValueKey: d.outputValueKey } : {}),
         ...(d.dynamicInputs ? { dynamicInputs: d.dynamicInputs } : {}),

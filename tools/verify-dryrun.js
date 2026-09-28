@@ -301,6 +301,8 @@ await test("注册表: 输入.字符串在输入分类，输出 string，widget 
     assert.deepStrictEqual(d.outputs, [{ id: "value", type: "string" }]);
     assert.strictEqual(d.widgets[0].serializable, true, "值控件可序列化");
     assert.ok(!("fs.path" in NODE_TYPES), "fs.path 已删除");
+  assert.ok(!("task.input" in NODE_TYPES), "task.input 已删除");
+  assert.ok(!("write.env" in NODE_TYPES), "write.env 已删除");;
 });
 
 await test("expandHome: ~ 解析为用户主目录，非 ~ 路径原样", async () => {

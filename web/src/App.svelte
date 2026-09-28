@@ -36,6 +36,52 @@
   let selectedNodeIds = $derived(new Set(nodes.filter(n => n.selected).map(n => n.id)));
 
   // 节点卡片经 context 拿编辑/删除回调与连线查询（xyflow 自建组件树，props 传不进节点组件）
+
+  /**
+   * 编辑期解析某节点某输入口的当前值：连线（上游为 path.resolve 时递归推断）→
+   * 上游按 outputValueKey 取 data 字段 → 未连线回读手填 lit。不可解 → undefined。
+   */
+  function resolvePortValue(nodeId, handleId, depth = 0) {
+    if (depth > 8) return undefined;
+    const e = edges.find(x => x.kind !== "seq" && x.target === nodeId && x.targetHandle === handleId);
+    if (e) {
+      const src = nodes.find(n => n.id === e.source);
+      if (!src) return undefined;
+      if (src.type === "path.resolve") return inferPathResolve(src, depth + 1);
+      const key = typeMap[src.type]?.outputValueKey ?? handleId;
+      return src.data?.[key];
+    }
+    const self = nodes.find(n => n.id === nodeId);
+    return self?.data?.lit?.[handleId];
+  }
+
+  /**
+   * path.resolve 编辑期输出推断（与引擎 run 同语义）：
+   * 全部 pN 来源为 string 常量接入或手填（lit）→ 返回拼接结果；任一非常量来源 → undefined（运行时才知道）。
+   */
+  function inferPathResolve(src, depth = 0) {
+    const count = Math.min(16, Math.max(1, Number(src.data.count ?? 2) || 2));
+    const style = ["posix", "windows", "auto"].includes(src.data.style) ? src.data.style : "posix";
+    const home = localStorage.getItem("devops-home") ?? ""; // 不可用时 ~ 原样保留
+    const expandHome = v => (v === "~" ? (home || "~") : v.startsWith("~/") ? (home ? home + v.slice(1) : v) : v);
+    const norm = v => expandHome(String(v)).replace(/\\/g, "/");
+    const segs = [];
+    for (let i = 1; i <= count; i++) {
+      const v = String(resolvePortValue(src.id, `p${i}`, depth) ?? "").trim();
+      if (!v) return undefined; // 任一段不可静态确定 → 整体不可推断
+      segs.push(norm(v));
+    }
+    const isAbsBase = seg => seg.startsWith("/") || /^[A-Za-z]:\//.test(seg);
+    let full = "";
+    for (const seg of segs) {
+      full = (!full || isAbsBase(seg)) ? seg : `${full.replace(/\/+$/, "")}/${seg}`;
+    }
+    let out = full || "/";
+    if (style === "windows") out = out.replace(/\//g, "\\");
+    else if (style === "auto" && /^[A-Za-z]:\//.test(out)) out = out.replace(/\//g, "\\");
+    return out;
+  }
+
   setContext("devnode-actions", {
     ondata: onData,
     ondelete: deleteNode,
@@ -48,14 +94,23 @@
       const e = edges.find(e => e.kind !== "seq" && e.target === nodeId && e.targetHandle === handleId);
       return nodes.find(n => n.id === e?.source);
     },
-    /** 编辑期解析某输入连线的当前值：源节点按 outputValueKey（缺省 sourceHandle 名）取 data 字段 */
+    /** 编辑期解析某输入口的当前值（refsPicker/scriptsPicker/ssh 别名/卡片推断显示共用） */
     resolveInput(nodeId, handleId) {
-      const e = edges.find(e => e.target === nodeId && e.targetHandle === handleId);
-      if (!e) return undefined;
-      const src = nodes.find(n => n.id === e.source);
-      if (!src) return undefined;
-      const key = typeMap[src.type]?.outputValueKey ?? e.sourceHandle;
-      return src.data?.[key];
+      return resolvePortValue(nodeId, handleId);
+    },
+    /** 渲染模板：解析模板文件 → { vars, basename } 或 { error }（configDir 取当前工作流目录） */
+    async resolveTplVars(p) {
+      return api("/api/template/vars", { method: "POST", body: JSON.stringify({
+        path: p, configDir: currentPath ? path.dirname(currentPath).replace(/\\/g, "/") : "", repoDir: docRepoDir,
+      }) });
+    },
+    /** 编辑期输出推断：path.resolve → 拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
+    inferOutput(nodeId) {
+      const n = nodes.find(x => x.id === nodeId);
+      if (!n) return undefined;
+      if (n.type === "path.resolve") return inferPathResolve(n);
+      if (n.type === "template.render") return n.data?.inferredOut;
+      return undefined;
     },
   });
 
@@ -66,6 +121,7 @@
     metas = await api("/api/node-types");
     ui.nodeTypesMap = Object.fromEntries(metas.map(m => [m.type, m]));
     wfList = await api("/api/workflows");
+    api("/api/home").then(r => localStorage.setItem("devops-home", r.home ?? "")).catch(() => {});
     await refreshUsage();
     const first = wfList.find(w => w.name);
     if (first) await selectWorkflow(first.path);
@@ -360,12 +416,9 @@
   // ── 任务运行 ────
   function openRun(taskName) {
     const t = tasks[taskName];
-    const sel = new Set(t.nodes ?? t.path ?? []);
-    // 收集运行时输入：任务选中的 task.input 节点
-    const inputNodes = nodes.filter(n => n.type === "task.input" && sel.has(n.id));
     runModal = {
       task: taskName, label: t.label ?? taskName, mutates: !!t.mutates,
-      inputs: inputNodes.map(n => ({ name: n.data.name, label: n.data.label || n.data.name, fallback: n.data.fallback ?? "", value: "" })),
+      inputs: [],
       dryRun: false,
       needProd: !!t.mutates && currentEntry?.serverType === "prod",
       prodVal: "",

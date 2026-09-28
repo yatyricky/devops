@@ -7,7 +7,7 @@
 
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
-  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput } = getContext("devnode-actions");
+  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveTplVars, inferOutput } = getContext("devnode-actions");
   const updateNodeInternals = useUpdateNodeInternals();
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
@@ -107,6 +107,47 @@
     if (meta?.refsPicker) refreshRefs();
     if (meta?.scriptsPicker) refreshScripts();
     if (meta?.sshAliasesPicker) refreshSshAliases();
+  });
+
+  // ── 顶栏「刷新列表」一键触发：refreshTick +1 时各卡片刷自己的下拉 ────
+  $effect(() => {
+    const tick = ui.refreshTick;
+    if (!tick || !id) return;
+    if (meta?.refsPicker) refreshRefs();
+    if (meta?.scriptsPicker) refreshScripts();
+    if (meta?.sshAliasesPicker) refreshSshAliases();
+  });
+
+  // ── 渲染模板：编辑期现场解析模板文件 → {{VAR}} 动态端口 + 推断输出路径 ────
+  let tplErr = $state("");
+  $effect(() => {
+    if (!meta?.tplVars) return;
+    // 依赖：path 端口的当前值（连线推断值 / 上游字面量 / 手填 lit）
+    const p = String(resolveInput?.(id, "path") ?? getLit("path") ?? "").trim();
+    if (!p) {
+      tplErr = "";
+      if ((get("varsList") ?? []).length) set("varsList", []);
+      return;
+    }
+    const t = setTimeout(() => {
+      resolveTplVars?.(p).then(r => {
+        tplErr = r?.error ?? "";
+        const cur = get("varsList") ?? [];
+        const vars = r?.vars ?? [];
+        const same = vars.length === cur.length && vars.every((/** @type {string} */ v, /** @type {number} */ i) => v === cur[i]);
+        if (!same) set("varsList", vars);
+          const inferred = r?.basename ? `.tmp/rendered-${id}-${r.basename}` : "";
+        if (inferred && get("inferredOut") !== inferred) set("inferredOut", inferred);
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  });
+
+  // ── path.resolve：编辑期输出推断显示 ────
+  let inferredOut = $state(undefined);
+  $effect(() => {
+    if (!meta?.outputInfer || !id) return;
+    inferredOut = inferOutput?.(id);
   });
 
   // ── ssh.session：别名下拉手动刷新（读 ~/./.ssh/config，无需连线输入）────
@@ -359,6 +400,20 @@
       {/each}
     {/if}
 
+
+    {#if meta?.tplVars}
+      <label class="wrow nodrag">
+        <span class="wlab">模板路径（手填或连线，变量端口自动生成）</span>
+        {#if tplErr}<span class="errline">⚠ {tplErr}</span>{/if}
+      </label>
+    {/if}
+
+    {#if meta?.outputInfer && inferredOut}
+      <label class="wrow nodrag">
+        <span class="wlab">输出（编辑期推断）</span>
+        <span class="kvline">{inferredOut}</span>
+      </label>
+    {/if}
 
     {#if meta?.refsPicker}
       <label class="wrow nodrag">

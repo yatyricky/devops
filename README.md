@@ -40,7 +40,7 @@ node cli.js run kids-ledger rollback --input release=<name>
 - **左栏**：节点调色板（输入 / 版本 / 构建 / 远端 / 工具），点击添加节点
 - **中间**：节点图画布（拖拽布线、类型色插槽、小地图、任务路径悬停高亮带序号）
 - **右栏**：节点检查器（按注册表元数据动态生成表单）
-- **任务栏**：按 workflow.json 的 tasks 渲染按钮；悬停高亮路径；点击运行（收集 task.input 输入 + prod 确认）；「定义任务」= 按执行顺序点击节点，把一条路径保存为任务
+- **任务栏**：按 workflow.json 的 tasks 渲染按钮；悬停高亮路径；点击运行（prod 确认门禁）；「定义任务」= 按执行顺序点击节点，把一条路径保存为任务
 - **底部**：日志抽屉（SSE 流式 + 断流轮询兜底，机密值打码）
 - **顶部**：工作流列表（local-config 最近打开 + 仓库自带 workflows/）、打开/新建（弹窗确认存放路径）/保存
 
@@ -66,7 +66,6 @@ node cli.js run kids-ledger rollback --input release=<name>
 
 | 分类 | 节点 |
 |---|---|
-| 输入 | `env.file`（→env）、`params`（→any）、`task.input`（→string，运行时弹窗/CLI `--input` 收集） |
 | 版本 | `git.ref`（fetch+干净校验+checkout，任务结束自动恢复原分支） |
 | 构建 | `cmd.exec`、`stage.copy`（多源暂存+排除）、`tar.pack`、`template.render`（`./`=工作流目录） |
 | 远端 | `ssh.session`（按 ~/.ssh/config 别名直连，同 `ssh <alias>`；可选指纹锁定）、`ssh.exec`（动态插槽）、`ssh.upload`（任务结束自动清理远端临时文件）、`remote.extract`（**原子**：.tmp 解压→expect 校验→mv 成正式 release）、`remote.deps`、`remote.chown`、`remote.symlink`、`remote.service`、`remote.check`（断言正则） |

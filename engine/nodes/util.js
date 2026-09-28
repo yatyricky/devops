@@ -9,6 +9,7 @@ export default [
     {
         type: "path.resolve",
         title: "Path Resolve",
+        outputInfer: true,
         category: "工具",
         color: "#56b6c2",
         countInputs: { key: "count", prefix: "p", type: "string", min: 1, max: 16 },
@@ -114,7 +115,7 @@ export default [
         desc: "把输入值打印到任务日志（预览），不产生副作用。",
         title: "打印预览",
         category: "工具",
-        color: "#8a97a8",
+        color: "#56b6c2",
         inputs: [{ id: "value", type: "any", required: true }],
         outputs: [],
         widgets: [{ key: "title", label: "标题", kind: "string", default: "" }],

@@ -1,6 +1,5 @@
 {
   "untested": [
-    "task.input",
     "git.ref",
     "cmd.exec",
     "stage.copy",
