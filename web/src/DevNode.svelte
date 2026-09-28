@@ -249,7 +249,7 @@
     {#each inputs as inp (inp.id)}
       <div class="kv in" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}（可连线或直接填值）` : undefined}>
         <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[inp.type]}" />
-        <span class="lbl">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
+        <span class="lbl" title="{inp.id} ({inp.type}{inp.dynamic ? "⭑" : ""}){inp.required ? " · 必填：连线或直接填值" : ""}">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
         {#if !inp.fromField && (inp.type === "string" || inp.type === "number" || inp.type === "boolean")}
           {@const liveVal = ui.runNodeInputs?.[id]?.[inp.id]}
           {#if isWiredAsTarget?.(id, inp.id) && liveVal !== undefined && liveVal !== null && liveVal !== ""}

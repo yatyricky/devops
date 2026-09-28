@@ -758,4 +758,125 @@ await test("task.input 已删除", async () => {
     assert.ok(!("task.input" in NODE_TYPES), "task.input 已删除");
 });
 
+// ── ssh.upload 权限回退（mock 会话，不连任何服务器）────
+/** 构造 mock SSH 会话：putFile 可按目标路径编程失败；execCommand 记录命令并按正则编程失败 */
+function mockUploadSession({ failPutPaths = [], failCmds = [] } = {}) {
+    const cmds = [];
+    return {
+        cmds,
+        async execCommand(command) {
+            cmds.push(command);
+            if (failCmds.some(re => re.test(command))) return { code: 1, stdout: "", stderr: "mock-failure" };
+            return { code: 0, stdout: "", stderr: "" };
+        },
+        async putFile(_local, remote) {
+            if (failPutPaths.some(re => re.test(remote))) throw new Error("Permission denied");
+        },
+    };
+}
+
+await test("upload: 直写成功不触发 sudo 回退", async () => {
+    const upDef = NODE_TYPES["ssh.upload"];
+    assert.ok(upDef, "ssh.upload 已注册");
+    const os = await import("os");
+    const local = path.join(os.tmpdir(), `verify-up-${Date.now()}.txt`);
+    fs.writeFileSync(local, "hello");
+    try {
+        const sess = mockUploadSession();
+        const out = await upDef.run({ log: () => {}, mask: x => x, dryRun: false }, { data: {} },
+            { ssh: sess, localPath: local, remotePath: "/opt/app/x.conf" });
+        assert.deepStrictEqual(out, { remoteFile: "/opt/app/x.conf" });
+        assert.ok(sess.cmds.some(c => c.includes("mkdir -p") && c.includes("/opt/app")), "父目录 mkdir");
+        assert.ok(!sess.cmds.some(c => c.includes("sudo")), "直写成功不应出现 sudo 命令");
+    } finally { fs.rmSync(local, { force: true }); }
+});
+
+await test("upload: 直写权限不足回退 /tmp 暂存 + sudo install，暂存目录被清理", async () => {
+    const upDef = NODE_TYPES["ssh.upload"];
+    const os = await import("os");
+    const local = path.join(os.tmpdir(), `verify-up-${Date.now()}.txt`);
+    fs.writeFileSync(local, "nginx conf");
+    try {
+        const sess = mockUploadSession({ failPutPaths: [/^\/etc\//] });
+        const logs = [];
+        const out = await upDef.run({ log: m => logs.push(String(m)), mask: x => x, dryRun: false }, { data: {} },
+            { ssh: sess, localPath: local, remotePath: "/etc/nginx/sites-available/kl" });
+        assert.deepStrictEqual(out, { remoteFile: "/etc/nginx/sites-available/kl" });
+        const installed = sess.cmds.find(c => c.includes("install -m 644"));
+        assert.ok(installed, "应有 install 命令");
+        // sq 的引号在 bash -lc 外层里转义为 '\'' —— 归一化后断言命令形状
+        const flat = installed.replaceAll("'\\''", "'");
+        assert.ok(/sudo -n install -m 644 '\/tmp\/devops-upload-[a-z0-9]+\/kl' '\/etc\/nginx\/sites-available\/kl'/.test(flat),
+            `install 命令形状不符: ${installed}`);
+        assert.ok(sess.cmds.some(c => c.includes("rm -rf") && c.includes("/tmp/devops-upload-")), "暂存目录应被清理");
+        assert.ok(logs.some(l => l.includes("[upload] 直写失败")), "应记录回退日志");
+    } finally { fs.rmSync(local, { force: true }); }
+});
+
+await test("upload: 非权限错误原样抛出、无回退", async () => {
+    const upDef = NODE_TYPES["ssh.upload"];
+    const os = await import("os");
+    const local = path.join(os.tmpdir(), `verify-up-${Date.now()}.txt`);
+    fs.writeFileSync(local, "x");
+    try {
+        const sess = mockUploadSession();
+        sess.putFile = async () => { throw new Error("socket hang up"); };
+        let threw = null;
+        try {
+            await upDef.run({ log: () => {}, mask: x => x, dryRun: false }, { data: {} },
+                { ssh: sess, localPath: local, remotePath: "/opt/app/x.conf" });
+        } catch (e) { threw = e; }
+        assert.ok(threw, "应抛错");
+        assert.match(threw.message, /socket hang up/, "原样抛出");
+        assert.ok(!sess.cmds.some(c => c.includes("install")), "不应回退 install");
+    } finally { fs.rmSync(local, { force: true }); }
+});
+
+await test("upload: mkdir 权限不足回退 sudo -n mkdir", async () => {
+    const upDef = NODE_TYPES["ssh.upload"];
+    const os = await import("os");
+    const local = path.join(os.tmpdir(), `verify-up-${Date.now()}.txt`);
+    fs.writeFileSync(local, "x");
+    try {
+        // 仅首跳（非 sudo）mkdir 失败；sudo 重试与后续 putFile 成功
+        const sess = mockUploadSession({ failCmds: [/bash -lc 'mkdir -p/] });
+        const out = await upDef.run({ log: () => {}, mask: x => x, dryRun: false }, { data: {} },
+            { ssh: sess, localPath: local, remotePath: "/root/newdir/x.conf" });
+        assert.deepStrictEqual(out, { remoteFile: "/root/newdir/x.conf" });
+        const mkdirSudo = sess.cmds.find(c => c.includes("sudo -n mkdir -p"));
+        assert.ok(mkdirSudo && mkdirSudo.replaceAll("'\\''", "'").includes("sudo -n mkdir -p '/root/newdir'"),
+            `应回退 sudo mkdir: ${mkdirSudo}`);
+    } finally { fs.rmSync(local, { force: true }); }
+});
+
+await test("nginx-reload/ssh.exec: 复合命令整段提权（sudo -n bash -c）", async () => {
+    const logs = [];
+    const ctx = { log: m => logs.push(String(m)), mask: x => x, dryRun: true };
+    // nginx-reload：nginx -t 与 systemctl reload 必须在同一 sudo 作用域内
+    await NODE_TYPES["remote.nginx-reload"].run(ctx, { data: {} }, { ssh: {} });
+    const reloadCmd = logs.find(l => l.includes("nginx -t"));
+    assert.ok(reloadCmd, "nginx-reload 应有 dry-run 日志");
+    assert.ok(/sudo -n bash -c 'nginx -t && systemctl reload nginx'/.test(reloadCmd.replaceAll("'\\''", "'")),
+        `reload 应整段提权: ${reloadCmd}`);
+    // ssh.exec：含 && 的行整行提权
+    logs.length = 0;
+    await NODE_TYPES["ssh.exec"].run(ctx,
+        { data: { command: "nginx -t && systemctl reload nginx", useSudo: true, loginShell: true } }, { ssh: {} });
+    const execCmd = logs.find(l => l.includes("systemctl reload nginx"));
+    assert.ok(execCmd && /sudo -n bash -c 'nginx -t && systemctl reload nginx'/.test(execCmd.replaceAll("'\\''", "'")),
+        `ssh.exec 复合命令应整段提权: ${execCmd}`);
+});
+
+await test("symlink: ln 实参顺序锁定（target 口=第一参数 真实路径；link 口=第二参数 符号链接）", async () => {
+    // 对照 kids-ledger-prod 接线：target ← upload 的真文件路径，link ← enabled 链字面量
+    const logs = [];
+    await NODE_TYPES["remote.symlink"].run({ log: m => logs.push(String(m)), mask: x => x, dryRun: true },
+        { data: {} }, { ssh: {}, target: "/etc/nginx/sites-available/kl", link: "/etc/nginx/sites-enabled/kl" });
+    const line = logs.find(l => l.includes("ln -sfn"));
+    assert.ok(line && /ln -sfn '\/etc\/nginx\/sites-available\/kl' '\/etc\/nginx\/sites-enabled\/kl'/.test(line.replaceAll("'\\''", "'")),
+        `ln 形状不符（target=真实路径必须是第一参数）: ${line}`);
+    const d = NODE_TYPES["remote.symlink"];
+    assert.deepStrictEqual(d.inputs.map(i => i.id), ["ssh", "target", "link"], "端口顺序应与 ln 命令行一致");
+});
+
 console.log(`\nOK: ${passed} 项断言全部通过`);

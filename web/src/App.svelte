@@ -5,6 +5,7 @@
   import { canConnect, effectiveInputs, effectiveOutputs, genId, validateTaskSelection } from "./types.js";
   import { ui } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
+  import GroupBox from "./GroupBox.svelte";
   import Palette from "./Palette.svelte";
   import CanvasDrop from "./CanvasDrop.svelte";
   import LogDrawer from "./LogDrawer.svelte";
@@ -31,7 +32,7 @@
   let logRef = $state(null);
 
   const typeMap = $derived(ui.nodeTypesMap);
-  const components = $derived(Object.fromEntries(Object.keys(typeMap).map(t => [t, DevNode])));
+  const components = $derived({ ...Object.fromEntries(Object.keys(typeMap).map(t => [t, DevNode])), groupbox: GroupBox });
   let currentEntry = $derived(wfList.find(w => w.path === currentPath));
   let selectedNodeIds = $derived(new Set(nodes.filter(n => n.selected).map(n => n.id)));
 
@@ -102,6 +103,10 @@
   setContext("devnode-actions", {
     ondata: onData,
     ondelete: deleteNode,
+    /** 分组背景板编辑（组名/颜色）：按 __gid 定位 groupbox 节点打补丁 */
+    ongroup: onGroupData,
+    /** 分组色板开关：置顶/回落背景板，保证下拉浮在成员卡片之上 */
+    onpalette: onPalette,
     /** 某输入口是否已连线（struct 字段口连线时隐藏手填控件） */
     isWiredAsTarget(nodeId, handleId) {
       return edges.some(e => e.kind !== "seq" && e.target === nodeId && e.targetHandle === handleId);
@@ -183,18 +188,28 @@
       return true;
     }).map(e => ({ ...e, ...(e.kind === "seq" ? { class: "seq" } : {}) }));
     tasks = doc.tasks ?? {};
+    // 分组背景板：由 doc.groups 重建（首帧 AABB 用近似尺寸，挂载后联动 effect 校正）
+    const groupBoxes = (doc.groups ?? [])
+      .map(g => makeGroupNode(g.id, g.name ?? "新分组", g.color ?? "#4da3ff", (g.nodes ?? []).filter(id => nodes.some(n => n.id === id))));
+    if (groupBoxes.length) nodes = [...nodes, ...groupBoxes];
     hoverTask = null; definer = null;
     ui.runTaskNodes = null; ui.nodeRunStatus = null; ui.runNodeInputs = null;
     ignoreDirtyUntil = Date.now() + 1000;
   }
   function toDoc() {
+    const realNodes = nodes.filter(n => n.type !== "groupbox");
     return {
       ...(title ? { title } : {}),
       version: 1,
       ...(docRepoDir ? { repoDir: docRepoDir } : {}),
-      nodes: nodes.map(n => ({ id: n.id, type: n.type, position: [Math.round(n.position.x), Math.round(n.position.y)], data: stripDecor(n.data) })),
+      nodes: realNodes.map(n => ({ id: n.id, type: n.type, position: [Math.round(n.position.x), Math.round(n.position.y)], data: stripDecor(n.data) })),
       edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, ...(e.kind ? { kind: e.kind } : {}) })),
       tasks: JSON.parse(JSON.stringify(tasks)),
+      // 分组：从 groupbox 节点还原（空组丢弃——全部成员删掉的组不再保留）
+      groups: nodes.filter(n => n.type === "groupbox").map(g => ({
+        id: g.data.__gid, name: g.data.name, color: g.data.color,
+        nodes: (g.data.memberIds ?? []).filter(id => realNodes.some(m => m.id === id)),
+      })).filter(g => g.nodes.length),
     };
   }
   function stripDecor(data) {
@@ -294,11 +309,76 @@
     nodes = nodes.filter(n => n.id !== id);
     edges = edges.filter(e => e.source !== id && e.target !== id);
     stripFromTasks([id]);
+    stripFromGroups([id]);
     markCritical();
+  }
+
+  // ── 分组：groupbox 背景板 = 专用 xyflow 节点（zIndex 垫底、不可 DEL），位置尺寸由成员实时 AABB 计算；
+  //    成员-组关系存在 data.memberIds，落盘时从 groupbox 节点还原成 doc.groups。 ────
+  const GROUP_PAD = 14, GROUP_PAD_TOP = 42;
+  const GROUP_COLORS = ["#4da3ff", "#4cc38a", "#f5a623", "#ff6b6b", "#b18cff", "#56b6c2"];
+  /** 成员 AABB + padding；成员为空返回 null */
+  function groupAABB(memberIds) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, found = 0;
+    for (const id of memberIds) {
+      const m = nodes.find(n => n.id === id);
+      if (!m || m.type === "groupbox") continue;
+      found++;
+      const w = m.measured?.width ?? 240, h = m.measured?.height ?? 60;
+      minX = Math.min(minX, m.position.x); minY = Math.min(minY, m.position.y);
+      maxX = Math.max(maxX, m.position.x + w); maxY = Math.max(maxY, m.position.y + h);
+    }
+    if (!found) return null;
+    return { x: minX - GROUP_PAD, y: minY - GROUP_PAD_TOP,
+      width: (maxX - minX) + GROUP_PAD * 2, height: (maxY - minY) + GROUP_PAD_TOP + GROUP_PAD };
+  }
+  function makeGroupNode(gid, name, color, memberIds) {
+    const aabb = groupAABB(memberIds) ?? { x: 80, y: 80, width: 320, height: 200 };
+    return {
+      id: `grp-${gid}`, type: "groupbox", position: { x: aabb.x, y: aabb.y },
+      width: aabb.width, height: aabb.height, zIndex: -1,
+      draggable: true, selectable: true, deletable: false,
+      data: { __gid: gid, name, color, memberIds: [...memberIds] }, selected: true,
+    };
+  }
+  let groupableIds = $derived(nodes.filter(n => n.type !== "groupbox" && n.selected).map(n => n.id));
+  let selectedGroupBox = $derived(nodes.find(n => n.type === "groupbox" && n.selected) ?? null);
+  /** 【组合】：shift+框选 >1 节点 → 建组（节点只属一个组，先从既有组移除） */
+  function groupSelected() {
+    const ids = groupableIds;
+    if (ids.length < 2) return;
+    const idSet = new Set(ids);
+    nodes = nodes.map(n => (n.type === "groupbox" && (n.data.memberIds ?? []).some(x => idSet.has(x)))
+      ? { ...n, data: { ...n.data, memberIds: n.data.memberIds.filter(x => !idSet.has(x)) }, selected: false } : n);
+    nodes = [...nodes, makeGroupNode(genId("grp"), "新分组", GROUP_COLORS[0], ids)];
+    markCritical();
+  }
+  /** 【拆分】：删背景板，成员世界坐标不动 */
+  function ungroupSelected() {
+    if (!selectedGroupBox) return;
+    nodes = nodes.filter(n => n.id !== selectedGroupBox.id);
+    markCritical();
+  }
+  /** 组名/颜色编辑（GroupBox 组件经 context 回调） */
+  function onGroupData(gid, patch) {
+    nodes = nodes.map(n => (n.type === "groupbox" && n.data.__gid === gid)
+      ? { ...n, data: { ...n.data, ...patch } } : n);
+    markCritical();
+  }
+  /** 色板开关：打开时背景板临时置顶——板 wrapper 在 zIndex -1 层，色板作为其子元素永远压不过成员卡片 */
+  function onPalette(gid, open) {
+    nodes = nodes.map(n => (n.type === "groupbox" && n.data.__gid === gid)
+      ? { ...n, zIndex: open ? 1000 : -1 } : n);
+  }
+  /** 节点删除时从所属组中摘除（背景板随之收缩） */
+  function stripFromGroups(ids) {
+    const set = new Set(ids);
+    nodes = nodes.map(n => (n.type === "groupbox" && (n.data.memberIds ?? []).some(x => set.has(x)))
+      ? { ...n, data: { ...n.data, memberIds: n.data.memberIds.filter(x => !set.has(x)) } } : n);
   }
   /** @param {{ event: any, node: any }} m 定义任务模式下点选节点（切换选入/移出，顺序无关）；其余选中交给 xyflow */
   function onNodeClick({ node }) {
-    if (!node || !definer) return;
+    if (!node || !definer || node.type === "groupbox") return;
     definer.nodes = definer.nodes.includes(node.id)
       ? definer.nodes.filter(x => x !== node.id)
       : [...definer.nodes, node.id];
@@ -382,10 +462,52 @@
     return confirmTaskRemoval(delNodes.map(n => n.id));
   }
   function onDelete({ nodes: delNodes, edges: delEdges }) {
-    if (delNodes.length) { stripFromTasks(delNodes.map(n => n.id)); markCritical(); }
+    if (delNodes.length) { stripFromTasks(delNodes.map(n => n.id)); stripFromGroups(delNodes.map(n => n.id)); markCritical(); }
     else if (delEdges.length) markCritical();
   }
   function onMoveEnd() { if (Date.now() > ignoreDirtyUntil) layoutDirty = true; }
+
+  // ── 分组联动 ────
+  // AABB 跟随：成员位置/测量尺寸变化 → 背景板重算（组拖拽中跳过，避免与原生拖拽互相拉扯）
+  let draggingGid = $state(null);
+  let groupDrag = null; // { pos, members: [{id,x,y}] }（非响应式，只做拖拽期快照）
+  $effect(() => {
+    if (draggingGid) return;
+    const list = nodes;
+    if (!list.some(n => n.type === "groupbox")) return;
+    const next = list.map(n => {
+      if (n.type !== "groupbox") return n;
+      const aabb = groupAABB(n.data.memberIds ?? []);
+      if (!aabb) return n;
+      if (n.position.x === aabb.x && n.position.y === aabb.y && n.width === aabb.width && n.height === aabb.height) return n;
+      return { ...n, position: { x: aabb.x, y: aabb.y }, width: aabb.width, height: aabb.height };
+    });
+    if (next.some((n, i) => n !== list[i])) nodes = next;
+  });
+  /** 背景板拖动 = delta 广播给成员；成员被一并选中时 xyflow 原生整体拖，不重复广播。
+   *  注意 payload 键是 { event, targetNode, nodes }（无 node 键）。 */
+  function onNodeDragStart({ targetNode, nodes: dragNodes }) {
+    if (targetNode?.type !== "groupbox" || dragNodes.length !== 1) return;
+    draggingGid = targetNode.data.__gid;
+    groupDrag = {
+      pos: { ...targetNode.position },
+      members: (targetNode.data.memberIds ?? [])
+        .map(id => { const m = nodes.find(x => x.id === id); return m ? { id, x: m.position.x, y: m.position.y } : null; })
+        .filter(Boolean),
+    };
+  }
+  function onNodeDrag({ targetNode }) {
+    if (targetNode?.type !== "groupbox" || !groupDrag) return;
+    const dx = targetNode.position.x - groupDrag.pos.x, dy = targetNode.position.y - groupDrag.pos.y;
+    const map = new Map(groupDrag.members.map(m => [m.id, m]));
+    nodes = nodes.map(n => (map.has(n.id)
+      ? { ...n, position: { x: map.get(n.id).x + dx, y: map.get(n.id).y + dy } }
+      : n));
+  }
+  function onNodeDragStop({ targetNode }) {
+    if (targetNode?.type === "groupbox" && groupDrag) { groupDrag = null; draggingGid = null; }
+    if (Date.now() > ignoreDirtyUntil) layoutDirty = true; // 节点拖动不触发 onmoveend，位置变更在这里落"手动保存"账
+  }
 
   // ── 任务子图高亮（悬停任务 / 定义任务）：集合语义，id → true ────
   let activeSet = $derived.by(() => {
@@ -497,6 +619,10 @@
   let tokenVal = $state(localStorage.getItem("devops-token") ?? "");
   function tokenChange() { localStorage.setItem("devops-token", tokenVal.trim()); }
 
+  // 网格吸附：开启后移动节点按 16px 网格落点（xyflow 以节点左上角为 pivot，拖动即吸附）
+  let snapOn = $state(localStorage.getItem("devops-snap") === "1");
+  function snapChange() { localStorage.setItem("devops-snap", snapOn ? "1" : "0"); }
+
   // 调试钩子（生产亦无害，只读）
   $effect(() => { window.__dbg = { get nodes() { return nodes; }, get edges() { return edges; }, get tasks() { return tasks; } }; });
 </script>
@@ -534,6 +660,12 @@
     <button class="define" class:active={!!definer} onclick={() => (definer = definer ? null : { nodes: [], name: "", label: "", mutates: true, problems: [] })}>
       {definer ? "取消定义" : "定义任务"}
     </button>
+    <span class="sep"></span>
+    <button title="把当前选中的多个节点编为一组" disabled={groupableIds.length < 2} onclick={groupSelected}>组合</button>
+    <button title="拆散选中的分组（成员位置不动）" disabled={!selectedGroupBox} onclick={ungroupSelected}>拆分</button>
+    <label class="mut" title="开启后移动节点按 16px 网格吸附（以节点左上角为基准）">
+      <input type="checkbox" bind:checked={snapOn} onchange={snapChange} /> 吸附
+    </label>
   </div>
 
   <div class="main">
@@ -552,6 +684,11 @@
         onbeforedelete={onBeforeDelete}
         deleteKey={["Backspace", "Delete"]}
         onmoveend={onMoveEnd}
+        onnodedragstart={onNodeDragStart}
+        onnodedrag={onNodeDrag}
+        onnodedragstop={onNodeDragStop}
+        elevateNodesOnSelect={false}
+        snapGrid={snapOn ? [16, 16] : undefined}
         fitView
         minZoom={0.15} maxZoom={2}
         connectionRadius={22}
