@@ -65,3 +65,32 @@
 - **修复**：live 分支 `title={liveVal}`（悬停即完整实时值）；wired-preview 分支 title 同步为 `值来自连线：<解析值>`。
 - **回归**：运行任务 → 悬停 wired 输入框 → tooltip 显示运行时实际值。
 - **状态**：已修复。
+
+## BUG-2026-09-28-01 ssh.upload 上传 root 目录报 Permission denied
+
+- **现象**：kids-ledger-prod 的「打包」任务在 Upload File（nginx 配置 → `/etc/nginx/sites-available/kids-ledger`）失败：`mkdir -p` 正常，SFTP 上传直接 `Permission denied`。
+- **根因**：`ssh.upload` 用 node-ssh `putFile`（SFTP）以 SSH 登录用户直写目标路径；SFTP 通道无法 sudo，root 属主目录必然被拒。
+- **修复（engine/nodes/remote.js）**：直写优先、失败自动回退（无新控件，循 Symlink 恒 `sudo -n` 先例）：
+  - `mkdir -p` 权限不足自动重试 `sudo -n mkdir -p`，再失败抛两段错误；
+  - 直写 `putFile` 抛 permission/denied/EACCES/EPERM 类错误 → 暂存 `/tmp/devops-upload-<rand>/` → `bash -lc 'sudo -n install -m 644 <staged> <目标>'` → `rm -rf` 暂存目录（try/finally 保证清理）；install 失败抛组合错误（含原始直写错误）；
+  - 回退落盘 root:root 0644（对 nginx sites-available 正确）；直写成功路径行为不变（/opt 等用户目录无属主副作用）；非权限错误原样抛出不掩盖。
+  - 顺带修正文件头注释残留的"上传 always-clean 自动清理"描述（与已裁定"无 trap"矛盾）。
+- **回归**：`node tools/verify-dryrun.js` 新增 4 条 mock 会话断言（直写成功无 sudo；权限不足回退 install+清理；非权限错误原样抛出；mkdir 回退 sudo）。44/44 通过。真实链路验证由用户重跑「打包」任务。
+- **状态**：已实施（待用户真实链路确认）。
+
+## BUG-2026-09-28-02 复合命令的 sudo 只覆盖第一段（Nginx Reload 失败）
+
+- **现象**：Nginx Reload 节点报 `Failed to reload nginx.service: Interactive authentication required`（code=1）；日志命令为 `bash -lc 'sudo -n nginx -t && systemctl reload nginx'`——`nginx -t` 提权通过，`systemctl reload` 裸跑被 polkit 拒绝。用户已手动验证 `sudo -n systemctl reload nginx` 正常。
+- **根因**：`buildCommand` 的 `sudo -n` 只前缀整个命令串的开头，复合命令（`&&`/`;`）的后续段落以登录用户执行。
+- **修复（engine/nodes/remote.js）**：`buildCommand` 新增 `sudoWrap` 选项——`sudo -n bash -c '<整段>'`；`remote.nginx-reload` 与 `ssh.exec`（逐行执行，行内复合命令同样受益）改用之。`remote.service` 各 step 本就是单一命令、`remote.check` 显式不提权，均不受影响。desc 同步更新。
+- **回归**：verify 新增断言（nginx-reload 与 ssh.exec 的 dry-run 命令形状 = `sudo -n bash -c 'nginx -t && systemctl reload nginx'`）。45/45 通过。真实链路由用户重跑「打包」任务确认 reload 成功。
+- **状态**：已实施（待用户真实链路确认）。
+
+## BUG-2026-09-28-03 Symlink 端口调换未同步既有连线，两个 Symlink 节点全部反向执行
+
+- **现象**：服务器出现循环符号链接 `sites-available/kids-ledger -> sites-enabled/kids-ledger`（黑底红字，把刚上传的真配置顶掉了）；发布切换链同样反向。
+- **根因**：应"link/target 控件位置调换"要求改端口顺序时，`ln -sfn` 实参顺序也一并翻转了——接线按 handleId 记录不会跟着动，旧连线的语义效果整体反转。正确做法本应是只动其一：要么只换端口位置、要么只换实参顺序。
+- **修复（按用户决策还原）**：`remote.symlink` 还原为调换前形态——端口顺序 `[ssh, target, link]`，run 实参 `ln -sfn <link> <target>`（link 口=第一参数=链指向的目标；target 口=第二参数=要创建的符号链接）。既有接线无需改动即恢复正确：nginx 链 `ln -sfn sites-available/kids-ledger sites-enabled/kids-ledger`；发布切换 `ln -sfn releases/<ts> client-live`。desc 已明确端口语义。
+- **回归**：verify 新增 ln 实参顺序锁定断言（含端口顺序），46/46 通过。服务器侧一次性清理（删循环坏链）由用户执行后重跑「打包」确认。
+- **状态**：已实施（待用户真实链路确认）。
+- **更正（同日）**：BUG-2026-09-28-03 的还原保留了旧反向命名（link 口装真实路径），用户按标准语义（target=真实路径，link=symlink）自行调换接线后再次反向。终态以标准语义为准：端口 `[ssh, target, link]`，run `ln -sfn <target> <link>`——target 口=真实路径（第一参数）、link 口=符号链接（第二参数），名字=含义=命令行顺序；verify 锁定断言已同步翻转。

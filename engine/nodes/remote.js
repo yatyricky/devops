@@ -11,13 +11,17 @@ import { shellQuote as sq } from "../release.js";
  * - loginShell 默认开启：命令经 `bash -lc` 执行，nvm 装的 node/pnpm 可用（原脚本 `bash -l` 等价）。
  * - useSudo 默认开启：`sudo -n`（NOPASSWD 缺失快速失败）。
  * - remote.extract 内部保持原子性：解压到 .tmp → 校验 expect → mv 成正式 release；失败自清 .tmp。
- * - ssh.upload 登记为 always-clean 副作用：任务结束（无论成败）由 runner 删除远端归档（原 trap 语义）。
+ * - ssh.upload 无 trap：上传即完成，文件不被自动清理；目标直写权限不足（SFTP 无法提权）时自动回退
+ *   /tmp 暂存 + `sudo -n install -m 644` 落到目标（回退落盘 root:root 0644，需 NOPASSWD）。
  */
 
 /** @param {string} cmd @param {{loginShell?: boolean, useSudo?: boolean}} node */
 function buildCommand(cmd, node, opts = {}) {
     let c = cmd;
-    if (opts.sudo !== false && (node.data.useSudo ?? true)) c = `sudo -n ${c}`;
+    if (opts.sudo !== false && (node.data.useSudo ?? true)) {
+        // sudoWrap：`sudo -n bash -c '<整段>'` —— 复合命令（&&/;）整段提权；前缀式 sudo 只覆盖第一段
+        c = opts.sudoWrap ? `sudo -n bash -c ${sq(c)}` : `sudo -n ${c}`;
+    }
     if (node.data.loginShell ?? true) c = `bash -lc ${sq(c)}`;
     return c;
 }
@@ -100,7 +104,7 @@ export default [
     },
     {
         type: "ssh.exec",
-        desc: "远端逐行执行命令：{{name}} 占位符自动生成输入口，值自动安全加引号；sudo 与登录 shell 可开关。",
+        desc: "远端逐行执行命令：{{name}} 占位符自动生成输入口，值自动安全加引号；sudo 与登录 shell 可开关。sudo 开启时整行经 sudo -n bash -c 提权（复合命令 && 也整段生效）。",
         title: "SSH 命令",
         category: "远端",
         color: "#ff9e64",
@@ -119,7 +123,7 @@ export default [
             let last = { code: 0, out: "", err: "" };
             for (const line of lines) {
                 const resolved = substitute(line, inputs);
-                const finalCmd = buildCommand(resolved, node);
+                const finalCmd = buildCommand(resolved, node, { sudoWrap: true });
                 if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${finalCmd}`); continue; }
                 last = await sshRun(inputs.ssh, finalCmd, { log: ctx.log });
                 if (last.code !== 0) throw new Error(`remote command failed (code=${last.code}): ${resolved}\n${last.err}`);
@@ -129,7 +133,7 @@ export default [
     },
     {
         type: "ssh.upload",
-        desc: "上传本机文件到远端：remotePath 恒为目标文件路径（父目录自动 mkdir -p；文件名不同即等效重命名）。无 trap——上传即完成，文件不会被自动清理。输出远端文件完整路径。",
+        desc: "上传本机文件到远端：remotePath 恒为目标文件路径（父目录自动 mkdir -p，权限不足时 sudo -n mkdir）。目标直写 Permission denied 时自动回退：暂存 /tmp 后 sudo -n install -m 644 落到目标（root:root 0644，需 NOPASSWD）。无 trap——上传即完成，文件不会被自动清理。输出远端文件完整路径。",
         title: "Upload File",
         category: "远端",
         color: "#ff9e64",
@@ -153,10 +157,33 @@ export default [
                 return { remoteFile };
             }
             const parent = remoteFile.includes("/") ? remoteFile.slice(0, remoteFile.lastIndexOf("/")) : ".";
-            const r = await sshRun(inputs.ssh, buildCommand(`mkdir -p ${sq(parent)}`, node, { sudo: false }), { log: ctx.log });
-            if (r.code !== 0) throw new Error(`mkdir -p 失败: ${parent}\n${r.err}`);
-            await sshPut(inputs.ssh, local, remoteFile, { log: ctx.log });
-            ctx.log(`[upload] ${remoteFile}`);
+            let r = await sshRun(inputs.ssh, buildCommand(`mkdir -p ${sq(parent)}`, node, { sudo: false }), { log: ctx.log });
+            if (r.code !== 0) {
+                const rs = await sshRun(inputs.ssh, buildCommand(`mkdir -p ${sq(parent)}`, node), { log: ctx.log });
+                if (rs.code !== 0) throw new Error(`mkdir -p 失败: ${parent}\n${rs.err}\n（直接 mkdir 错误: ${r.err}）`);
+            }
+            try {
+                await sshPut(inputs.ssh, local, remoteFile, { log: ctx.log });
+                ctx.log(`[upload] ${remoteFile}`);
+            } catch (e) {
+                const origMsg = String(e?.message ?? e);
+                if (!/permission|denied|eacces|eperm/i.test(origMsg)) throw e;
+                ctx.log(`[upload] 直写失败（${origMsg}），回退：/tmp 暂存 + sudo install`);
+                const stageDir = `/tmp/devops-upload-${Math.random().toString(36).slice(2, 8)}`;
+                const staged = `${stageDir}/${path.posix.basename(remoteFile)}`;
+                const mk = await sshRun(inputs.ssh, buildCommand(`mkdir -p ${sq(stageDir)}`, node, { sudo: false }), { log: ctx.log });
+                if (mk.code !== 0) throw new Error(`暂存目录创建失败: ${stageDir}\n${mk.err}`);
+                let installErr = null;
+                try {
+                    await sshPut(inputs.ssh, local, staged, { log: ctx.log });
+                    const ins = await sshRun(inputs.ssh, buildCommand(`install -m 644 ${sq(staged)} ${sq(remoteFile)}`, node), { log: ctx.log });
+                    if (ins.code !== 0) installErr = new Error(`sudo install 失败 (code=${ins.code})\n${ins.err}`);
+                } finally {
+                    await sshRun(inputs.ssh, buildCommand(`rm -rf ${sq(stageDir)}`, node, { sudo: false }), { log: ctx.log });
+                }
+                if (installErr) throw new Error(`ssh.upload 回退失败（/tmp 暂存 + sudo install）：${installErr.message}\n原始直写错误: ${origMsg}`);
+                ctx.log(`[upload] ${remoteFile}（经 sudo install，root:root 0644）`);
+            }
             return { remoteFile };
         },
     },
@@ -240,7 +267,7 @@ export default [
     },
     {
         type: "remote.symlink",
-        desc: "远端 ln -sfn 切换符号链接（发布/回滚的核心动作）。",
+        desc: "远端 ln -sfn 切换符号链接（发布/回滚的核心动作）。target 口＝真实路径（链指向的目标，ln 第一参数）；link 口＝要创建/替换的符号链接（第二参数）。",
         title: "Symlink",
         category: "远端",
         color: "#ff9e64",
@@ -250,7 +277,7 @@ export default [
             { id: "link", type: "string", required: true },
         ],
         outputs: [],
-        widgets: [{ key: "useSudo", label: "sudo -n", kind: "boolean", default: true }],
+        widgets: [],
         async run(ctx, node, inputs) {
             const cmdStr = `ln -sfn ${sq(inputs.target)} ${sq(inputs.link)}`;
             if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${buildCommand(cmdStr, node)}`); return; }
@@ -341,13 +368,13 @@ export default [
         title: "Nginx Reload",
         category: "远端",
         color: "#ff9e64",
-        desc: "远端 nginx -t 校验配置，通过后 systemctl reload nginx；校验不过即任务失败（不会带病重载）。经 sudo -n 执行，需 NOPASSWD。",
+        desc: "远端 nginx -t 校验配置，通过后 systemctl reload nginx；校验不过即任务失败（不会带病重载）。整段经 sudo -n bash -c 提权（含 reload），需 NOPASSWD。",
         inputs: [{ id: "ssh", type: "ssh", required: true }],
         outputs: [],
         widgets: [],
         async run(ctx, node, inputs) {
             const cmdStr = "nginx -t && systemctl reload nginx";
-            const finalCmd = buildCommand(cmdStr, node);
+            const finalCmd = buildCommand(cmdStr, node, { sudoWrap: true });
             if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${finalCmd}`); return; }
             const r = await sshRun(inputs.ssh, finalCmd, { log: ctx.log });
             if (r.code !== 0) throw new Error(`nginx reload 失败 (code=${r.code})\n${r.err}`);
