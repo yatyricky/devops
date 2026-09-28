@@ -49,6 +49,12 @@
     if (v === undefined || v === "") delete next[h]; else next[h] = v;
     set("lit", next);
   }
+  let litTimers = {};
+  /** 行内手填防抖：oninput 即时响应，停止输入 300ms 后落 lit */
+  function setLitDebounced(h, v) {
+    clearTimeout(litTimers[h]);
+    litTimers[h] = setTimeout(() => setLit(h, v), 300);
+  }
   /** wired 时的来源值预览：一跳静态可解则显示，运行时产出显示占位 */
   function resolvePreview(inp) {
     const v = resolveInput?.(id, inp.id);
@@ -247,19 +253,20 @@
         {#if !inp.fromField && (inp.type === "string" || inp.type === "number" || inp.type === "boolean")}
           {@const liveVal = ui.runNodeInputs?.[id]?.[inp.id]}
           {#if isWiredAsTarget?.(id, inp.id) && liveVal !== undefined && liveVal !== null && liveVal !== ""}
-            <input class="inlit live" disabled title={String(liveVal)} value={liveVal} />
+            <input class="inlit live nodrag" disabled title={String(liveVal)} value={liveVal} />
           {:else if isWiredAsTarget?.(id, inp.id)}
-            <input class="inlit" disabled title={`值来自连线：${resolvePreview(inp)}`} value={resolvePreview(inp)} />
+            <input class="inlit nodrag" disabled title={`值来自连线：${resolvePreview(inp)}`} value={resolvePreview(inp)} />
           {:else if inp.type === "boolean"}
             <span class="boolpair nodrag">
               <button type="button" class:lit={getLit(inp.id) === true} title="是" onclick={() => setLit(inp.id, true)}>是</button>
               <button type="button" class:lit={getLit(inp.id) === false} title="否" onclick={() => setLit(inp.id, false)}>否</button>
             </span>
           {:else}
-            <input class="inlit" type={inp.type === "number" ? "number" : "text"}
+            <input class="inlit nodrag" type={inp.type === "number" ? "number" : "text"}
               class:winvalid={inp.type === "number" && getLit(inp.id) !== undefined && !numOk(getLit(inp.id))}
               title={inp.type === "number" ? "数值" : "字符串"}
               value={getLit(inp.id) ?? ""}
+              oninput={e => setLitDebounced(inp.id, inp.type === "number" ? (e.target.value === "" ? undefined : e.target.value) : e.target.value)}
               onchange={e => setLit(inp.id, inp.type === "number" ? (e.target.value === "" ? undefined : e.target.value) : e.target.value)} />
           {/if}
         {/if}

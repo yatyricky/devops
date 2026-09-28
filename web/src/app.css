@@ -70,6 +70,7 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 .devnode .body .badge .rm { cursor: pointer; margin-left: 3px; }
 .devnode .body input.winvalid { border-color: var(--err); }
 .devnode .body .errline { display: block; color: var(--err); font-size: 11px; margin-top: 3px; }
+.devnode .body input, .devnode .body textarea { user-select: text; -webkit-user-select: text; }
 .devnode .body .kvline { display: block; color: var(--dim); font-size: 11px; margin-top: 3px;
   font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

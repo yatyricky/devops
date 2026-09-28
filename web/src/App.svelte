@@ -100,8 +100,9 @@
     },
     /** 渲染模板：解析模板文件 → { vars, basename } 或 { error }（configDir 取当前工作流目录） */
     async resolveTplVars(p) {
+      const dirOf = x => { const i = Math.max(x.lastIndexOf("/"), x.lastIndexOf("\\")); return i > 0 ? x.slice(0, i) : x; };
       return api("/api/template/vars", { method: "POST", body: JSON.stringify({
-        path: p, configDir: currentPath ? path.dirname(currentPath).replace(/\\/g, "/") : "", repoDir: docRepoDir,
+        path: p, configDir: currentPath ? dirOf(currentPath) : "", repoDir: docRepoDir,
       }) });
     },
     /** 编辑期输出推断：path.resolve → 拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
