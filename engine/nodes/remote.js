@@ -162,7 +162,7 @@ export default [
     },
     {
         type: "remote.extract",
-        desc: "把远端 t.gz 解压到目标目录。两种模式：未填 parentName = extract here（压缩包一级内容直接进 destDir）；填了 parentName = 先创建 destDir/parentName，压缩包全部内容解压进去。输出实际解压目录。",
+        desc: "把远端 t.gz 解压到目标目录（压缩包一级内容直接进 destDir）。输出实际解压目录。",
         title: "解压",
         category: "远端",
         color: "#ff9e64",
@@ -170,7 +170,6 @@ export default [
             { id: "ssh", type: "ssh", required: true },
             { id: "archive", type: "string", required: true },
             { id: "destDir", type: "string", required: true },
-            { id: "parentName", type: "string", required: false },
         ],
         outputs: [{ id: "destDir", type: "string" }],
         widgets: [],
@@ -178,9 +177,7 @@ export default [
             const { ssh, archive } = inputs;
             const destDir = String(inputs.destDir ?? "").trim();
             if (!destDir) throw new Error("解压 未配置 destDir");
-            const parent = String(inputs.parentName ?? "").trim();
-            if (parent && !/^[A-Za-z0-9._-]+$/.test(parent)) throw new Error(`非法 parentName: ${parent}（只允许字母数字 . _ -）`);
-            const target = parent ? `${destDir.replace(/\/+$/, "")}/${parent}` : destDir;
+            const target = destDir;
             const R = async (cmd) => {
                 const r = await sshRun(ssh, buildCommand(cmd, node, { sudo: false }), { log: ctx.log });
                 if (r.code !== 0) throw new Error(`remote command failed: ${cmd}\n${r.err}`);

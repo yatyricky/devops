@@ -12,4 +12,6 @@ export const ui = $state({
   runNodeInputs: null,
   /** @type {Set<string> | null} 手工维护的「未测试」节点类型清单（local-config.untestedNodeTypes；null = 未加载） */
   untestedNodeTypes: null,
+  /** 一键刷新信号：顶栏按钮 +1，各卡片 effect 监听后各自触发自己的下拉刷新 */
+  refreshTick: 0,
 });

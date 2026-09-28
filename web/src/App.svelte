@@ -439,6 +439,7 @@
     </select>
     <button onclick={() => (openModal = { mode: "open", path: "", title: "" })}>打开…</button>
     <button onclick={() => (openModal = { mode: "new", path: "", title: "" })}>新建…</button>
+    <button title="刷新画布上所有下拉列表（git refs / npm scripts / ssh 别名）" onclick={() => ui.refreshTick++}>刷新列表</button>
     <button class="primary" disabled={!dirty} onclick={() => save()}>{dirty ? "保存 *" : "保存"}</button>
     <span class="badge">{busyText}</span>
     <input class="token" type="password" placeholder="token" bind:value={tokenVal} onchange={tokenChange} />

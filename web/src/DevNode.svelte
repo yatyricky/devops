@@ -100,6 +100,15 @@
     }
   }
 
+  // ── 顶栏「刷新列表」一键触发：refreshTick +1 时各卡片刷自己的下拉 ────
+  $effect(() => {
+    const tick = ui.refreshTick;
+    if (!tick || !id) return;
+    if (meta?.refsPicker) refreshRefs();
+    if (meta?.scriptsPicker) refreshScripts();
+    if (meta?.sshAliasesPicker) refreshSshAliases();
+  });
+
   // ── ssh.session：别名下拉手动刷新（读 ~/./.ssh/config，无需连线输入）────
   let sshAliases = $state([]);
   let sshResolved = $state(null);

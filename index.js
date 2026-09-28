@@ -7,7 +7,6 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import url from "url";
-import child_process from "child_process";
 import { loadUiConfig, saveLocalConfig, rememberWorkflow, forgetWorkflow } from "./engine/config.js";
 import { loadWorkflows, findWorkflow } from "./engine/registry.js";
 import { nodeTypesMeta } from "./engine/nodes/index.js";
@@ -265,7 +264,4 @@ app.listen(PORT, HOST, () => {
     const urlStr = `http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`;
     console.log(`[devops-console] ${urlStr}`);
     console.log(`[devops-console] token auth: ${TOKEN ? "on" : "off"}；工作流 = local-config.workflows + 仓库 workflows/`);
-    if (!process.env.DEVOPS_PORT && !process.env.DEVOPS_NO_OPEN && process.platform === "win32") {
-        child_process.exec(`start "" "${urlStr}"`, () => { /* 打开失败无妨 */ });
-    }
 });
