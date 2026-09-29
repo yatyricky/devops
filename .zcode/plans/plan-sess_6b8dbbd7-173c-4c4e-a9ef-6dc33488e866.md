@@ -1,30 +1,27 @@
-# Group 四项打磨：出口锚点错位 / 接口压边同尺寸 / 背景板层级 / 收起条带标签分栏
+# 里程碑1 收尾：全盘评审报告落盘 + 文档翻新（不改代码）
 
-## 1. 出口段边接到入口 —— CSS left/right 冲突（根因已定位）
+三路评审已完成（引擎/前端/文档仓库），结论：引擎核心健康，债务集中在 HTTP 边界安全（路径穿越/注入/空 token）、队列写盘脆弱性、双端镜像漂移、一个前端 effect 死循环 bug。代码修复留待下一阶段（按评审报告的 P0→P1→P2 执行），本轮只产出评审文档 + 翻新文档。
 
-xyflow 的 `Position.Left` Handle 类自带 `left:-4px`，与孪生接口的内联 `right:-4.5px` 同时声明时 **left 获胜**，出口孪生锚点被钉在组框左缘。修法（GroupBox.svelte，展开/收起两态同改）：
-- 出口孪生：内联补 `left:auto; right:-4.5px`（显式覆盖类上的 left）。
-- 入口孪生：内联补 `right:auto; left:-4.5px`（把侥幸正确变成显式正确）。
+## 交付物（7 项）
 
-## 2. 接口压在 border 上 + 与普通插槽同尺寸（圆形保留）
+1. **docs/review-milestone-1.md（新建）**——评审报告本体：
+   - 总体评价 + 里程碑1 已交付能力清单（44 提交主线）
+   - **P0 六项**（进下一阶段前必须修）：effect 乒乓死循环（App.svelte:701）、/api/jobs/:id 路径穿越可读 token、队列可被磁盘写失败打死+带崩进程、DevNode 复制粘贴 effect 双倍请求、shell 注入点×3（git.checkout ref / chown user / finalize rm）、掩码不识 JSON 形态机密
+   - **P1 十二项**（streamJob 重放/LogDrawer 流交织/sshconfig 首块语义反了/双端镜像分叉/初始化无错误处理/任意路径读写无护栏/runs 内存无界+O(n²) IO/GET 副作用/noteText 回弹/a11y/测试缺口/runModal.inputs 死功能）
+   - **P2 打磨包**（DRY 清单、死代码清单、App.svelte 拆分方案、镜像根治=共享纯函数模块、webview 补丁加固、小项合集）
+   - 测试缺口清单 + 文档卫生记录
+2. **README.md 重写**——修 13 处过时（删 workflows//envs//file-folder 类型/env.js/原子解压/upload 自动清理/12 项断言），节点表补全 28 类型（5 分类），补缺失功能（Group/克隆/typed ports/自动保存/内存态执行/token/DEVOPS_* 环境变量/未测试徽章/便笺/vite dev 模式）。
+3. **docs/architecture.md 更新**——分层图去 env.js；「前端要点」补 Group 语义（展开直连/收起隧道段边/tnl- 过滤/层级/双脏标记自动保存/克隆）与 webview rAF 补丁；决策5 标注镜像已漂移+根治方向；「新增节点」补 nodeTypesMeta 白名单注意点。
+4. **docs/operations.md 重写**——删 envs//tpl//apply-config/回放等失效内容；重写为：初始化（local-config 含 workflows[]、指纹锁定）、日常部署（GUI/CLI 现行为：自动保存 vs 手动保存、dry-run、prod 门禁）、审计（.runs/audit.jsonl）、安全清单（含评审发现的风险现状与建议：务必设 token）、排障表。
+5. **local-config.example.json**——补 `workflows: []` 键。
+6. **过时注释小修**——Palette.svelte:8 与 store.svelte.js:13 的「local-config.untestedNodeTypes」改为 node-types-untested.json（纯注释，零行为）。
+7. **.tmp/ 清理**——删 21 个 verify 残留（rendered-*/stage-*，gitignored）。
 
-普通节点口是 9px（app.css `.devnode ... .svelte-flow__handle`），隧道口现在是 xyflow 默认 6px。全部隧道口（可见+孪生、展开+收起）统一 `width/height:9px`、`left/right:±4.5px`——9px 圆点正跨在边框线上（压边），圆形样式保留与节点方口区分。
+## 明确不做（本轮）
 
-## 3. 背景板层级：组外节点 < 背景板 < 自己的成员
+- 不修任何 P0/P1 代码 bug（写入评审报告作为下一阶段输入，由你决定修复顺序）
+- 不做 App.svelte 拆分等结构重构
 
-- makeGroupNode `zIndex: -1 → 1`；组合时成员 `zIndex: 2`；拆分时成员回 `0`；loadDoc 重建时组内成员同样抬到 2。组外节点保持默认 0 → 形成 板(1) > 组外节点(0)、成员(2) > 板(1)。
-- onPalette 色板置顶回落值 `-1 → 1`（打开仍 1000）。
-- 配套点击穿透：`.svelte-flow__node.svelte-flow__node-groupbox { pointer-events:none }`（app.css，双类名压过 xyflow 基类），板内 `.ghead`/`.tlabel` 显式 `pointer-events:auto`——板压在组外节点上后，卡片被板盖住的部分仍可点选，组的拖拽/交互集中在标题行。
-- 效果说明：隧道段边/普通边会走到板下方（9% 透明底仍可见，视觉上「穿过组领地下方」）。
+## 验证与收尾
 
-## 4. 收起条：入口/出口分栏 + 节点端口 label
-
-- **label 内容**（与 DevNode 卡片同格式）：`<类型 title>< - 备注>: <口id> (<type><⭑>)<必填*>`，如 `Resolve Path - 正式服路径: p1 (string⭑)*`。App context 新增 `tunnelLabel(edge, side)`：入侧取 target 节点+targetHandle（effectiveInputs），出侧取 source 节点+sourceHandle（effectiveOutputs）；节点标题后缀取 `data.note`（与 htitle 同源）。
-- **分栏布局**（types.js 新增共享常量，App 与 GroupBox 同源）：`GROUP_BAR = { header:36, row:20, div:9, pad:8 }` + `groupBarHeight(nIn,nOut)` + `groupBarRowTop(side,i,nIn)`。
-  - 收起态：入口行在标题下左对齐 → 1px 分隔线（出入口都有才画）→ 出口行右对齐；每行一个 label（ellipsis 截断 + title 属性悬停看全文，pointer-events:auto 保证 hover 生效）；隧道口按行高对齐。
-  - **收起高度公式改为** `36 + nIn×20 + (双向都有?9:0) + nOut×20 + 8`（替换现在的 40+20×max）；GroupBox 收起态 Handle 的 top 用同一函数推——最后出口行距卡片圆角留出 8px 页脚，不再贴圆角。
-  - `.collapsed .ghead` 高度锁 36px（box-sizing + 居中）。
-
-## 验证（沿用已建立的隔离流程）
-
-`.tmp/` 重建临时 wf（入 1 出 2 + 组内边）→ 新标签页 GUI 实测：出口段边接右缘/入口接左缘（根因①回归）、9px 圆口压边框中线、组外节点被板覆盖区域仍可点选、收起条 label 文案与截断/悬停、收起高度=公式值、刷新还原 → 截图；构建 + verify-dryrun；buglog 在 BUG-2026-09-29-03 后追加本轮条目；测完删临时文件并 git 提交。
+前端构建 + `node tools/verify-dryrun.js` 47 项全绿（确认注释小修无副作用）→ git 提交（含此前遗留的 .zcode/plans 修改一并入库）→ 汇报评审要点摘要供你决策 P0 修复排期。

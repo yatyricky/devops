@@ -23,7 +23,7 @@ workflow 执行器（engine/workflow.js）
 节点注册表（engine/nodes/：input / build / remote / util，含 struct 构造/析构）
         每个节点 = 元数据（输入/输出插槽与类型、widget 表单定义、动态插槽/出口规则、desc 描述）+ run(ctx, node, inputs)
         │
-引擎原语（engine/ssh|env|render|tarball|gitops|exec）
+引擎原语（engine/ssh|sshconfig|render|tarball|gitops|exec|config）
 ```
 
 关键决策：
@@ -32,7 +32,10 @@ workflow 执行器（engine/workflow.js）
 2. **任务串行**：全局一个队列，杜绝并发部署写同一目标机。
 3. **prod 门禁在 runner 兜底**：任务 `mutates` + 任务子图内 Struct 构造器的 `SERVER_TYPE=prod` 字段 → 必须携带 `confirmProd === 工作流名`；GUI 弹窗与 CLI 交互只是采集确认的两种方式；dry-run 免门禁。
 4. **工作流文件即机密文件（2026-09-24 定，取代原 envs/ 文件方案）**：env 字段以 Struct 构造器的字段直接定义在图 JSON 中——可视化的收益是哪个字段被哪个流程消费，连线即知。因此 **wf 文件必须存放在安全处（勿提交公共仓库）**；日志掩码 `SECRET/TOKEN/PASSWORD/PASSPHRASE=***` 与审计只记 `confirmProd: "(typed)"` 不变。
-5. **类型即契约**：连线两端类型必须匹配（any 输入兜底）；校验发生在 GUI 连线时、保存写盘前、CLI 加载时三处，规则同源（engine/types.js 是唯一事实源，前端 types.js 是其镜像）。
+5. **类型即契约**：连线两端类型必须匹配（any 输入兜底）；校验发生在 GUI 连线时、保存写盘前、CLI 加载时三处。
+   ⚠ **镜像漂移（2026-09-29 评审发现）**：规则在 engine/types.js 与 web/src/types.js 双份手写，已发生分叉
+   （web `canConnect` 缺 SOCKET_TYPES 校验、`effectiveInputs` 块序不同、structSplit 缺源类型检查）——
+   根治方向见 review-milestone-1.md P2（抽共享纯函数模块，两侧 import 同一文件）。
 6. **无控制流（if-else / for / try-catch 不进节点图，2026-09-24 定）**：条件、软失败、循环一律写在 `ssh.exec`
    等执行类节点的 bash 里——现网工作流即如此（健康检查 `for i in $(seq 1 10); do … done`、回滚守卫
    `test -d … || { echo; exit 1; }`、`systemctl stop … || true`）；对多台主机/多个环境 = 同一任务跑多次
@@ -74,9 +77,11 @@ workflow 执行器（engine/workflow.js）
 
 ## 前端要点
 
-- Svelte Flow 1.x：`onnodeclick` 回调参数是 `{ event, node }` 对象；`nodes/edges` 需 bind；**所有更新用替换式**（`nodes = [...nodes, x]`），原地 push 与直接改节点 data 会与库的内部回写打架。
+- Svelte Flow 1.x：`onnodeclick` 回调参数是 `{ event, node }` 对象；`nodes/edges` 需 bind；**所有更新用替换式**（`nodes = [...nodes, x]`），原地 push 与直接改节点 data 会与库的内部回写打架。四个"读状态→条件写回"的联动 effect（AABB 跟随 / 隧道段边 / 连线动画 / 死边清理）都靠引用比较或幂等 diff 收敛——新增同类 effect 必须保持"无变化时零写入"。
 - 任务子图高亮存独立 store（`ui.pathHighlight`，id → true），不写入节点对象——避免与 SvelteFlow 的测量回写形成写读循环。
-- **ResizeObserver 兜底**：部分内嵌 webview 不投递 RO 回调（实测纯 RO 对照也 0 次），index.html 里有 polyfill：800ms 内零回调则切换 250ms 轮询对比尺寸并手动触发回调（含首次观察即回调的 RO 语义）；正常浏览器零开销。
+- **Group 分组（2026-09-29）**：groupbox 是专用 xyflow 节点（zIndex 1，成员 2、组外节点 0；wrapper pointer-events:none，交互集中在标题条）。组关系持久化在 `doc.groups`（groupbox 节点本身不序列化）。**展开态**：跨组边直连、无变换（连线增删与无组时一致）；**收起态**：跨组边置 hidden，代之以 `tnl-<边id>-a/b` 双段转发边（外部↔条缘隧道 Handle，selectable:false 不可删，toDoc 过滤不入库）。任何新的边消费者都必须过滤 `tnl-` 前缀（教训：动态出口清理 effect 漏滤曾致乒乓死循环，见 review P0-1）。
+- **双脏标记保存**：`autoDirty`（可序列化变更，600ms 防抖自动写盘）+ `layoutDirty`（节点位置/视口，手动保存清除）；`dirty = autoDirty || layoutDirty` 驱动「保存 *」。
+- **ResizeObserver / rAF 兜底**：部分内嵌 webview 不投递 RO 回调（实测纯 RO 对照也 0 次），index.html 有 polyfill：800ms 内零回调则切换 250ms 轮询对比尺寸并手动触发回调；rAF 同样有竞争式 setTimeout 兜底。正常浏览器零开销。已知加固点见 review P2。
 - `/api/node-types` 是节点元数据唯一来源：画布节点组件、插槽颜色、检查器表单全部据此动态渲染；`ssh.exec` 等的动态插槽由 widget 文本里的 `{{name}}` / `{{obj.key}}` 占位符生成。
 
 ## 新增一个节点类型
@@ -84,6 +89,11 @@ workflow 执行器（engine/workflow.js）
 1. `engine/nodes/<分类>.js` 追加定义：`type/title/category/color/inputs/outputs/widgets/dynamicInputs?/run(ctx, node, inputs)`；
 2. `run` 里区分 `ctx.dryRun`（打印计划，无副作用）；需要收尾的副作用用 `ctx.registerGitRestore / trackRemoteFile / registerSession` 登记；
 3. 重启服务器（注册表启动时加载）；GUI 调色板与检查器自动出现新节点。
+
+注意：动态插槽机制（dynamicInputs 占位符 / countInputs / pairInputs / fieldInputs / tplVars /
+dynamicOutputs）目前需要三处同步：引擎 `getInputs/getOutputs`、前端镜像 `web/src/types.js` 的
+`effectiveInputs/effectiveOutputs`、`nodeTypesMeta`（engine/nodes/index.js）的元数据白名单——
+新增一种动态性时三处都要动（这是已知镜像债务，根治方案见 review-milestone-1.md P2）。
 
 ## 新增一个应用工作流
 

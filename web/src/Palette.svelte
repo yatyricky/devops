@@ -5,7 +5,7 @@
   let open = $state(true);
   let collapsed = $state({});
   let groups = $derived([...new Set(metas.map(m => m.category))]);
-  /** 「未测试」徽章 = 手工维护清单（local-config.untestedNodeTypes） */
+  /** 「未测试」徽章 = 手工维护清单（node-types-untested.json，入库） */
   let untested = $derived(ui.untestedNodeTypes ? metas.filter(m => ui.untestedNodeTypes.has(m.type)).map(m => m.type) : []);
   function toggleGroup(g) { collapsed = { ...collapsed, [g]: !collapsed[g] }; }
 </script>
