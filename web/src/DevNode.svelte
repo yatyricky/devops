@@ -55,6 +55,40 @@
     clearTimeout(litTimers[h]);
     litTimers[h] = setTimeout(() => setLit(h, v), 300);
   }
+  /** pair 端口识别：id 形如 pN.to → 返回同行的 pN.from 元信息；否则 null */
+  function pairTo(inp) {
+    if (!meta?.pairInputs || !inp.id.startsWith(meta.pairInputs.prefix)) return null;
+    const last = meta.pairInputs.sub[meta.pairInputs.sub.length - 1].suffix;
+    const m = inp.id.match(/^(.*)(\.(.+))$/);
+    if (!m || m[3] !== last) return null;
+    const fromId = m[1] + "." + meta.pairInputs.sub[0].suffix;
+    const peer = inputs.find(x => x.id === fromId);
+    return peer ? { id: inp.id, fromId } : null;
+  }
+  /** from 端口 → 同行 to 端口元信息 */
+  function pairToOf(inp) {
+    if (!meta?.pairInputs || !inp.id.startsWith(meta.pairInputs.prefix)) return null;
+    const base = inp.id.slice(0, inp.id.lastIndexOf("."));
+    const suffix = inp.id.slice(inp.id.lastIndexOf(".") + 1);
+    if (suffix !== meta.pairInputs.sub[0].suffix) return null;
+    const toId = base + "." + meta.pairInputs.sub[1].suffix;
+    return inputs.find(x => x.id === toId) ? { id: toId } : null;
+  }
+  /** stage.copy：to 缺省值推断（root/from 可静态解 → 保持相对结构；root 外 → basename） */
+  function inferStageTo(nodeId, fromInp, toInp) {
+    const rootV = resolveInput?.(nodeId, "root");
+    const fromV = resolveInput?.(nodeId, fromInp.id);
+    if (rootV === undefined || fromV === undefined) return "";
+    const home = localStorage.getItem("devops-home") ?? "";
+    const exp = v => (v === "~" ? (home || "~") : v.startsWith("~/") ? (home ? home + v.slice(1) : v) : v);
+    const rootR = exp(String(rootV)).replace(/\\/g, "/");
+    const fromR = exp(String(fromV)).replace(/\\/g, "/");
+    const base = fromR.slice(fromR.lastIndexOf("/") + 1);
+    if (fromR === rootR || fromR.startsWith(rootR + "/")) {
+      return fromR.slice(rootR.length + 1);
+    }
+    return base;
+  }
   /** wired 时的来源值预览：一跳静态可解则显示，运行时产出显示占位 */
   function resolvePreview(inp) {
     const v = resolveInput?.(id, inp.id);
@@ -247,8 +281,12 @@
   {#if meta?.desc}<div class="ndesc">{meta.desc}</div>{/if}
   <div class="body nowheel">
     {#each inputs as inp (inp.id)}
-      <div class="kv in" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}（可连线或直接填值）` : undefined}>
-        <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[inp.type]}" />
+      {#if pairTo(inp)}
+        <!-- to 端口已合并进 from 行渲染 -->
+      {:else}
+      {@const toPeer = pairToOf(inp)}
+      <div class="kv in {toPeer ? "pairrow" : ""}" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}（可连线或直接填值）` : undefined}>
+        <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[inp.type]}; {toPeer ? "top:30%" : ""}" />
         <span class="lbl" title="{inp.id} ({inp.type}{inp.dynamic ? "⭑" : ""}){inp.required ? " · 必填：连线或直接填值" : ""}">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
         {#if !inp.fromField && (inp.type === "string" || inp.type === "number" || inp.type === "boolean")}
           {@const liveVal = ui.runNodeInputs?.[id]?.[inp.id]}
@@ -270,7 +308,23 @@
               onchange={e => setLit(inp.id, inp.type === "number" ? (e.target.value === "" ? undefined : e.target.value) : e.target.value)} />
           {/if}
         {/if}
+        {#if toPeer}
+          {@const toInp = inputs.find(x => x.id === toPeer.id)}
+          {@const toLive = ui.runNodeInputs?.[id]?.[toPeer.id]}
+          <Handle id={toPeer.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[toInp.type]}; top:70%" />
+          {#if isWiredAsTarget?.(id, toPeer.id) && toLive !== undefined && toLive !== null && toLive !== ""}
+            <input class="inlit live nodrag" disabled title={String(toLive)} value={toLive} />
+          {:else if isWiredAsTarget?.(id, toPeer.id)}
+            <input class="inlit nodrag" disabled title={`值来自连线：${resolvePreview(toInp)}`} value={resolvePreview(toInp)} />
+          {:else}
+            <input class="inlit nodrag" type="text" placeholder={inferStageTo(id, inp, toPeer)}
+              value={getLit(toPeer.id) ?? ""}
+              oninput={e => setLitDebounced(toPeer.id, e.target.value === "" ? undefined : e.target.value)}
+              onchange={e => setLit(toPeer.id, e.target.value === "" ? undefined : e.target.value)} />
+          {/if}
+        {/if}
       </div>
+      {/if}
     {/each}
     {#if outputs.length}
       <div class="sep"></div>
@@ -372,6 +426,14 @@
               <button class="mini" disabled={scriptsRefreshing} onclick={refreshScripts}>{scriptsRefreshing ? "…" : "刷新"}</button>
             </span>
             {#if scriptsErr}<span class="errline">⚠ {scriptsErr}</span>{/if}
+          {:else if w.kind === "stepper"}
+            <span class="trow stepper nodrag">
+              <button type="button" onclick={() => set(w.key, Math.max(w.min ?? 1, Math.trunc(Number(get(w.key)) || (w.min ?? 1)) - 1))}>-</button>
+              <input type="text" inputmode="numeric" class:winvalid={!numOk(get(w.key)) || Number(get(w.key)) < (w.min ?? 1) || Number(get(w.key)) > (w.max ?? Infinity)}
+                value={get(w.key) ?? ""}
+                onchange={e => set(w.key, numOk(e.target.value) ? Math.max(w.min ?? 1, Math.min(w.max ?? Infinity, Math.trunc(Number(e.target.value)))) : (w.default ?? 1))} />
+              <button type="button" onclick={() => set(w.key, Math.min(w.max ?? Infinity, Math.trunc(Number(get(w.key)) || (w.min ?? 1)) + 1))}>+</button>
+            </span>
           {:else if w.kind === "number"}
             <input class:winvalid={String(get(w.key) ?? "").trim() !== "" && !numOk(get(w.key))}
               value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}

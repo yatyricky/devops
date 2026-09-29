@@ -42,6 +42,19 @@ export function effectiveInputs(meta, data) {
       all = [...all, { id: "vars", type: "struct", required: false, dynamic: true }];
     }
   }
+  if (meta?.pairInputs) {
+    // 每行双端口：pN.from / pN.to
+    const { key, prefix, min, max, sub } = meta.pairInputs;
+    const n = Math.max(min, Math.min(max, Math.trunc(Number(data?.[key]) || min)));
+    const ports = [];
+    for (let i = 1; i <= n; i++) {
+      for (const subDef of sub) {
+        const id = `${prefix}${i}.${subDef.suffix}`;
+        if (!all.some(d => d.id === id)) ports.push({ id, type: "string", required: subDef.suffix === sub[0].suffix, dynamic: true });
+      }
+    }
+    all = [...all, ...ports];
+  }
   if (meta?.fieldInputs) {
     const fieldPorts = (data?.fields ?? [])
       .filter(f => f.key && !all.some(d => d.id === f.key))

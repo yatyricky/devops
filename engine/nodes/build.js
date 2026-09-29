@@ -120,31 +120,56 @@ export default [
     },
     {
         type: "stage.copy",
-        desc: "把若干条目复制到一次性暂存目录（按路径段排除），输出暂存目录供打包。",
+        desc: "把 N 条 from 复制/改名到一次性暂存目录，输出暂存目录供打包。from：绝对路径（/ 盘符 ~ 开头）或相对 root（支持 ./ ../）；to：相对暂存目录，不许绝对路径或 ..（防污染外部）；to 未填 = from 去掉 root 前缀的相对路径，from 在 root 外时用 basename（警告）。目录递归复制（排除 node_modules/.git），目标父目录自动创建。",
         title: "暂存复制",
         category: "构建",
         color: "#4cc38a",
-        inputs: [{ id: "root", type: "string", required: false }],
+        pairInputs: { key: "count", prefix: "p", min: 1, max: 16, sub: [{ suffix: "from" }, { suffix: "to" }] },
+        inputs: [{ id: "root", type: "string", required: true }],
         outputs: [{ id: "dir", type: "string" }],
         widgets: [
-            { key: "entries", label: "条目（from → to）", kind: "entries", default: [] },
-            { key: "excludes", label: "排除（路径段）", kind: "list", default: ["node_modules"] },
+            { key: "count", label: "条目个数（1-16）", kind: "stepper", min: 1, max: 16, serializable: true, default: 1 },
         ],
         async run(ctx, node, inputs) {
-            const entries = node.data.entries ?? [];
-            if (!entries.length) throw new Error("stage.copy 未配置条目");
-            const root = inputs.root || ROOT;
+            const rootR = path.resolve(expandHome(String(inputs.root ?? "").trim()));
+            if (!rootR || !fs.existsSync(rootR)) throw new Error(`stage.copy：root 不存在: ${rootR}`);
             const stage = makeStageDir(TMP_DIR, `stage-${node.id}`);
-            const excludes = node.data.excludes ?? [];
-            const filter = rel => !excludes.some(x => rel.split("/").includes(x) || rel.endsWith(String(x)));
-            if (ctx.dryRun) {
-                ctx.log(`[dry-run] 暂存到 ${stage}：${entries.map(e => `${e.from}→${e.to}`).join(", ")}（排除 ${excludes.join(",")}）`);
-                return { dir: stage };
-            }
-            for (const e of entries) {
-                const src = path.resolve(root, e.from);
-                if (!fs.existsSync(src)) throw new Error(`暂存源不存在: ${src}`);
-                copyTree(src, path.join(stage, e.to), filter);
+            const count = Math.min(16, Math.max(1, Number(node.data.count ?? 1) || 1));
+            if (ctx.dryRun) ctx.log(`[dry-run] 暂存到 ${stage}（${count} 条）`);
+            for (let i = 1; i <= count; i++) {
+                const fromRaw = String(inputs[`p${i}.from`] ?? "").trim();
+                if (!fromRaw) throw new Error(`stage.copy：条目 p${i} 的 from 为空`);
+                const fromR = path.resolve(expandHome(fromRaw));
+                if (!fs.existsSync(fromR)) throw new Error(`暂存源不存在: ${fromR}`);
+
+                // to 缺省：from 在 root 之下 → 保持相对结构；在 root 之外 → basename（警告）
+                let to = String(inputs[`p${i}.to`] ?? "").trim();
+                if (!to) {
+                    if (fromR === rootR || fromR.startsWith(rootR + path.sep)) {
+                        to = path.relative(rootR, fromR).split(path.sep).join("/");
+                    } else {
+                        to = path.basename(fromR).replace(/\\/g, "/");
+                        ctx.log(`[WARN] p${i}: to 未填且 from 在 root 外，使用 basename: ${to}`);
+                    }
+                }
+                // to 校验：相对暂存目录，防污染外部
+                const toNorm = to.replace(/\\/g, "/");
+                if (path.isAbsolute(toNorm) || /^[A-Za-z]:\//.test(toNorm) || toNorm.split("/").includes("..")) {
+                    throw new Error(`stage.copy：非法 to "${to}"（须为暂存目录内的相对路径，不允许绝对路径或 ..）`);
+                }
+
+                const dest = path.join(stage, ...toNorm.split("/"));
+                if (ctx.dryRun) {
+                    ctx.log(`[dry-run] 复制 ${fromR} → ${dest}${fs.statSync(fromR).isDirectory() ? "（递归）" : ""}`);
+                    continue;
+                }
+                fs.mkdirSync(path.dirname(dest), { recursive: true });
+                if (fs.statSync(fromR).isDirectory()) {
+                    copyTree(fromR, dest, rel => !rel.split("/").includes("node_modules") && !rel.split("/").includes(".git"));
+                } else {
+                    fs.copyFileSync(fromR, dest);
+                }
+                ctx.log(`[stage] ${fromR} → ${toNorm}`);
             }
             ctx.log(`[stage] ${stage}`);
             return { dir: stage };

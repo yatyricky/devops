@@ -38,6 +38,19 @@ export function getInputs(node) {
         }
         all = [...all, ...ports];
     }
+    if (def.pairInputs) {
+        // 每行双端口：pN.from / pN.to（如 stage.copy 的复制条目）
+        const { key, prefix, min, max, sub } = def.pairInputs;
+        const n = Math.max(min, Math.min(max, Math.trunc(Number(node.data?.[key]) || min)));
+        const ports = [];
+        for (let i = 1; i <= n; i++) {
+            for (const subDef of sub) {
+                const id = `${prefix}${i}.${subDef.suffix}`;
+                if (!all.some(d => d.id === id)) ports.push({ id, type: "string", required: subDef.suffix === sub[0].suffix, dynamic: true });
+            }
+        }
+        all = [...all, ...ports];
+    }
     if (def.tplVars) {
         // 渲染模板：模板路径可推导时按文件 {{VAR}} 生成 string 口（DevNode 写 data.varsList）；
         // 路径不可推导（varsUnresolved）时降级为一个 struct 口（运行时整个 struct 对象即变量集）
@@ -112,6 +125,7 @@ export function nodeTypesMeta() {
         ...(d.refsPicker ? { refsPicker: true } : {}),
         ...(d.scriptsPicker ? { scriptsPicker: true } : {}),
         ...(d.sshAliasesPicker ? { sshAliasesPicker: true } : {}),
+        ...(d.pairInputs ? { pairInputs: d.pairInputs } : {}),
         ...(d.tplVars ? { tplVars: true } : {}),
         ...(d.outputInfer ? { outputInfer: true } : {}),
         ...(d.countInputs ? { countInputs: d.countInputs } : {}),
