@@ -44,7 +44,7 @@
    */
   function resolvePortValue(nodeId, handleId, depth = 0) {
     if (depth > 8) return undefined;
-    const e = edges.find(x => x.kind !== "seq" && x.target === nodeId && x.targetHandle === handleId);
+    const e = edges.find(x => x.kind !== "seq" && !String(x.id).startsWith("tnl-") && x.target === nodeId && x.targetHandle === handleId);
     if (e) {
       const src = nodes.find(n => n.id === e.source);
       if (!src) return undefined;
@@ -109,42 +109,30 @@
     onpalette: onPalette,
     /** 某输入口是否已连线（struct 字段口连线时隐藏手填控件） */
     isWiredAsTarget(nodeId, handleId) {
-      return edges.some(e => e.kind !== "seq" && e.target === nodeId && e.targetHandle === handleId);
+      return edges.some(e => e.kind !== "seq" && !String(e.id).startsWith("tnl-") && e.target === nodeId && e.targetHandle === handleId);
     },
     /** 某输入口的连线源节点（struct.split 回溯上游字段定义用） */
     getSourceNode(nodeId, handleId) {
-      const e = edges.find(e => e.kind !== "seq" && e.target === nodeId && e.targetHandle === handleId);
+      const e = edges.find(e => e.kind !== "seq" && !String(e.id).startsWith("tnl-") && e.target === nodeId && e.targetHandle === handleId);
       return nodes.find(n => n.id === e?.source);
     },
     resolveInput(nodeId, handleId) {
       return resolvePortValue(nodeId, handleId);
     },
-    /** Group 隧道：某组的跨组边（入 = 组外→组内；出 = 组内→组外），按边 id 排序稳定 */
+    /** Group 隧道：某组的跨组边（入 = 组外→组内；出 = 组内→组外），与编号 effect 同序 */
     groupEdges(gid) {
-      const g = nodes.find(n => n.id === gid);
-      const members = new Set(g?.data.memberIds ?? []);
-      const inE = [], outE = [];
-      for (const e of edges) {
-        if (String(e.id).startsWith("tnl-")) continue;
-        const sIn = members.has(e.source), tIn = members.has(e.target);
-        if (sIn && !tIn) outE.push(e);
-        else if (!sIn && tIn) inE.push(e);
-      }
-      return { in: inE, out: outE };
+      return crossEdges(groupBoxOf(gid));
     },
     /** 收起/展开黑箱条：成员 hidden 联动 + 组尺寸条形化/恢复 AABB */
     oncollapse(gid, collapsed) {
-      const g = nodes.find(n => n.id === gid);
+      const g = groupBoxOf(gid);
       if (!g) return;
       const members = g.data.memberIds ?? [];
-      const crossCnt = (() => {
-        const r = groupEdges(gid);
-        return Math.max(r.in.length, r.out.length);
-      })();
+      const barH = collapsedHeight(g);
       nodes = nodes.map(n => {
-        if (n.id === gid) {
+        if (n.type === "groupbox" && n.data.__gid === gid) {
           if (collapsed) {
-            return { ...n, data: { ...n.data, collapsed: true }, height: 40 + 20 * crossCnt };
+            return { ...n, data: { ...n.data, collapsed: true }, width: GROUP_COLLAPSED_W, height: barH };
           }
           const aabb = groupAABB(members) ?? { width: 320, height: 200 };
           return { ...n, data: { ...n.data, collapsed: false }, width: aabb.width, height: aabb.height };
@@ -208,10 +196,13 @@
     currentPath = fp;
     title = doc.title ?? doc.name ?? fp.split(/[\\/]/).pop().replace(/\.json$/i, "");
     docRepoDir = doc.repoDir ?? "";
+    // 收起组的成员加载即 hidden（与 oncollapse 的联动态一致）
+    const collapsedMembers = new Set((doc.groups ?? []).filter(g => g.collapsed).flatMap(g => g.nodes ?? []));
     nodes = (doc.nodes ?? []).map(n => ({
       id: n.id, type: n.type,
       position: { x: n.position[0], y: n.position[1] },
       data: { ...n.data, __type: n.type },
+      ...(collapsedMembers.has(n.id) ? { hidden: true } : {}),
     }));
     // 存量数据修复：历史版本会在连线时产生同四元组重复边（库自动加边 + 旧代码手动加边），这里去重
     const seen = new Set();
@@ -366,13 +357,38 @@
     return { x: minX - GROUP_PAD, y: minY - GROUP_PAD_TOP,
       width: (maxX - minX) + GROUP_PAD * 2, height: (maxY - minY) + GROUP_PAD_TOP + GROUP_PAD };
   }
+  /** 按 __gid 定位 groupbox 节点——xyflow 节点 id 是 `grp-${gid}`，别按裸 id 找 */
+  function groupBoxOf(gid) {
+    return nodes.find(n => n.type === "groupbox" && n.data.__gid === gid) ?? null;
+  }
+  /** 某组的跨组边（入 = 组外→组内；出 = 组内→组外）；过滤 tnl- 派生段边 */
+  function crossEdges(gbox) {
+    const members = new Set(gbox?.data.memberIds ?? []);
+    const inE = [], outE = [];
+    for (const e of edges) {
+      if (String(e.id).startsWith("tnl-")) continue;
+      const sIn = members.has(e.source), tIn = members.has(e.target);
+      if (sIn && !tIn) outE.push(e);
+      else if (!sIn && tIn) inE.push(e);
+    }
+    return { in: inE, out: outE };
+  }
+  /** 收起黑箱条规格：宽=默认节点宽；高=标题行 + max(入,出)×接口距 */
+  const GROUP_COLLAPSED_W = 230;
+  function collapsedHeight(gbox) {
+    const r = crossEdges(gbox);
+    return 40 + 20 * Math.max(r.in.length, r.out.length);
+  }
   function makeGroupNode(gid, name, color, memberIds, collapsed = false) {
     const aabb = groupAABB(memberIds) ?? { x: 80, y: 80, width: 320, height: 200 };
+    const data = { __gid: gid, name, color, memberIds: [...memberIds], collapsed };
     return {
       id: `grp-${gid}`, type: "groupbox", position: { x: aabb.x, y: aabb.y },
-      width: aabb.width, height: collapsed ? 40 + 20 : aabb.height, zIndex: -1,
+      width: collapsed ? GROUP_COLLAPSED_W : aabb.width,
+      height: collapsed ? collapsedHeight({ data }) : aabb.height,
+      zIndex: -1,
       draggable: true, selectable: true, deletable: false,
-      data: { __gid: gid, name, color, memberIds: [...memberIds], collapsed }, selected: true,
+      data, selected: true,
     };
   }
   let groupableIds = $derived(nodes.filter(n => n.type !== "groupbox" && n.selected).map(n => n.id));
@@ -511,10 +527,10 @@
     if (!list.some(n => n.type === "groupbox")) return;
     const next = list.map(n => {
       if (n.type !== "groupbox") return n;
-      // 收起黑箱条：保持横条尺寸（宽沿用、高 = 标题 36 + 接口数×20），不做 AABB 重算
+      // 收起黑箱条：保持条形尺寸（宽 230、高 = 标题 + max(入,出)×接口距），不做 AABB 重算
       if (n.data.collapsed) {
-        const barH = 36 + 20 * tunnelCountOf(n);
-        return n.height === barH ? n : { ...n, height: barH };
+        const barH = collapsedHeight(n);
+        return (n.width === GROUP_COLLAPSED_W && n.height === barH) ? n : { ...n, width: GROUP_COLLAPSED_W, height: barH };
       }
       const aabb = groupAABB(n.data.memberIds ?? []);
       if (!aabb) return n;
@@ -523,10 +539,6 @@
     });
     if (next.some((n, i) => n !== list[i])) nodes = next;
   });
-  /** 收起条的接口数（入+出，来自隧道派生边） */
-  function tunnelCountOf(g) {
-    return edges.filter(e => (String(e.id).startsWith("tnl-")) && (e.source === g.id || e.target === g.id) && !e.hidden).length;
-  }
   /** 背景板拖动 = delta 广播给成员；成员被一并选中时 xyflow 原生整体拖，不重复广播。
    *  注意 payload 键是 { event, targetNode, nodes }（无 node 键）。 */
   function onNodeDragStart({ targetNode, nodes: dragNodes }) {
@@ -590,8 +602,9 @@
       counters.set(gid, cnt);
       const th = `tunnel-${side}-${k}`;
       hide.add(e.id);
-      want.push({ id: `tnl-${e.id}-a`, source: e.source, sourceHandle: e.sourceHandle ?? null, target: gid, targetHandle: th });
-      want.push({ id: `tnl-${e.id}-b`, source: gid, sourceHandle: th, target: e.target, targetHandle: e.targetHandle ?? null });
+      // 段边端点必须是 groupbox 的 xyflow 节点 id（g.id = grp-${gid}），裸 gid 指向不存在的节点
+      want.push({ id: `tnl-${e.id}-a`, source: e.source, sourceHandle: e.sourceHandle ?? null, target: g.id, targetHandle: th });
+      want.push({ id: `tnl-${e.id}-b`, source: g.id, sourceHandle: th, target: e.target, targetHandle: e.targetHandle ?? null });
     }
     // 幂等 diff：原跨组边补 hidden；段边补缺/去多/清 stale
     const needHide = [...hide].filter(id => { const e = edges.find(x => x.id === id); return e && !e.hidden; });
@@ -610,7 +623,7 @@
   // 连线动画跟随选中：仅与选中节点相连（或被选中）的数据边播放虚线动画；顺序边恒为静态。
   // EdgeWrapper 只响应 edge 对象引用变化，因此必须整组替换对象，不能就地改属性。
   $effect(() => {
-    const anim = e => e.kind !== "seq" && (selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target) || !!e.selected);
+    const anim = e => e.kind !== "seq" && !String(e.id).startsWith("tnl-") && (selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target) || !!e.selected);
     if (edges.some(e => !!e.animated !== anim(e))) {
       edges = edges.map(e => ({ ...e, animated: anim(e) }));
     }

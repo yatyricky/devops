@@ -112,3 +112,12 @@
 - **教训**：删除功能时必须 grep 全部符号引用清零后再构建，且构建后必须浏览器回归一轮再提交。
 - **回归**：拖动任意节点正常、无控制台报错；Group 卡片 ✕ = 拆组（成员保留）。
 - **状态**：已修复（5c269d0）。
+
+## BUG-2026-09-29-03 Group 隧道/收缩三连失效：组合丢线 + 边框插槽不渲染 + 收起按钮无反应（同一根因）
+
+- **现象**：① 点「组合」后跨组连线消失；② group 边框上看不到 tunnel 插槽，外部线没接到插槽、插槽没连到组内节点（出口方向同样）；③ 收起/展开按钮点击无反应。
+- **根因（一个 id 错配）**：groupbox 节点的 xyflow id 是 `grp-${gid}`（makeGroupNode），`data.__gid` 才是裸 gid；但 `groupEdges`/`oncollapse` 按 `n.id === gid` 查找永不命中（插槽恒空、按钮空转），隧道段边 effect 又把段边端点写成裸 gid——段边指向不存在的节点不被渲染，而原跨组边同 effect 已被置 `hidden: true`，于是"隐藏成功、替身失败"＝组合瞬间丢线。组名/颜色编辑（onGroupData/onPalette）本就按 `__gid` 查找，所以只有这三处坏。
+- **连带隐患（同轮修）**：`tunnelCountOf` 按 tnl 段边计数（端点修好后 -a/-b 双倍计数）→ 改按非 tnl 跨组边取 max(入,出)；收起条高度三处常量打架（36/40/60）且未落实「宽=230」→ 统一 collapsedSize 规则（宽 230、高 40+20×max(入,出)）；loadDoc 重建组已带 collapsed 但需同步 hidden 成员（加载即隐藏）；GroupBox 收起态 CSS 写 `.tcoll` 标记是 `.tcol`（永不生效），且 xyflow Handle 基类 `position:absolute`、flex 列排不动它 → 收起态改内联 top 定位；`resolvePortValue`/`isWiredAsTarget`/`getSourceNode`/连线动画 effect 的边查找补 `tnl-` 过滤（此前靠数组顺序碰巧先命中原边）。
+- **验证期追加根因②（段边只渲染一半）**：xyflow 边按 handle 类型（source/target）分区查锚点——`tunnel-in-*` 只渲染成 target 型时，段边 `-b`（以它为 sourceHandle）查不到锚点整条不渲染，out 侧对称。修复：每个隧道位渲染同 id 的 source+target 双类型 Handle（可见的一个 + 透明同位孪生），孪生的 position 顺带调顺段边出线方向（in 的 source 朝右、out 的 target 朝左）。
+- **回归**：临时 wf 上建组 → 跨组连线 → 左右缘出现插槽点且双段转发线可见（外部源→组缘入口、组缘出口→组内目标）→ 点收起：成员隐藏、组收缩为宽 230 黑箱条、外部线仍接条缘、标题显示入/出计数 → 点展开：成员恢复、板体 AABB 包裹成员 → 保存/刷新后收起态还原。
+- **状态**：已修复（本次提交）。

@@ -85,30 +85,35 @@
 
   {#if !collapsed}
     <div class="gbody"></div>
-    <!-- 展开态隧道接口：半透明小点（转发段边的锚点，随接口数下移） -->
+    <!-- 展开态隧道接口：每个隧道位渲染同 id 的 target+source 双类型（xyflow 段边按类型查锚点，
+         只渲染单类型会让另一半段边无锚点不渲染）。透明孪生只做段边锚点，path 方向朝组内。 -->
     {#each tunnels.in as e, i (e.id)}
       <Handle id={`tunnel-in-${i}`} type="target" position={Position.Left} connectable={false}
         style="background:#4da3ff; opacity:.55; left:-4px; top:{34 + i * 20}px" />
+      <Handle id={`tunnel-in-${i}`} type="source" position={Position.Right} connectable={false}
+        style="background:transparent; border-color:transparent; width:6px; height:6px; left:-4px; top:{34 + i * 20}px" />
     {/each}
     {#each tunnels.out as e, i (e.id)}
       <Handle id={`tunnel-out-${i}`} type="source" position={Position.Right} connectable={false}
         style="background:#ff9e64; opacity:.55; right:-4px; top:{34 + i * 20}px" />
+      <Handle id={`tunnel-out-${i}`} type="target" position={Position.Left} connectable={false}
+        style="background:transparent; border-color:transparent; width:6px; height:6px; right:-4px; top:{34 + i * 20}px" />
     {/each}
   {:else}
-    <div class="tcollwrap">
-      <div class="tcol left">
-        {#each tunnels.in as e, i (e.id)}
-          <Handle id={`tunnel-in-${i}`} type="target" position={Position.Left} connectable={false}
-            style="background:#4da3ff; pointer-events:none" />
-        {/each}
-      </div>
-      <div class="tcol right">
-        {#each tunnels.out as e, i (e.id)}
-          <Handle id={`tunnel-out-${i}`} type="source" position={Position.Right} connectable={false}
-            style="background:#ff9e64; pointer-events:none" />
-        {/each}
-      </div>
-    </div>
+    <!-- 收起态：xyflow Handle 基类 position:absolute，flex 列排布无效——沿用内联定位
+         （条高 = 40 + 20×max(入,出)，接口行距 20，标题行占顶部 40px）；同 id 双类型同上 -->
+    {#each tunnels.in as e, i (e.id)}
+      <Handle id={`tunnel-in-${i}`} type="target" position={Position.Left} connectable={false}
+        style="background:#4da3ff; pointer-events:none; left:-4px; top:{50 + i * 20}px" />
+      <Handle id={`tunnel-in-${i}`} type="source" position={Position.Right} connectable={false}
+        style="background:transparent; border-color:transparent; width:6px; height:6px; pointer-events:none; left:-4px; top:{50 + i * 20}px" />
+    {/each}
+    {#each tunnels.out as e, i (e.id)}
+      <Handle id={`tunnel-out-${i}`} type="source" position={Position.Right} connectable={false}
+        style="background:#ff9e64; pointer-events:none; right:-4px; top:{50 + i * 20}px" />
+      <Handle id={`tunnel-out-${i}`} type="target" position={Position.Left} connectable={false}
+        style="background:transparent; border-color:transparent; width:6px; height:6px; pointer-events:none; right:-4px; top:{50 + i * 20}px" />
+    {/each}
   {/if}
 </div>
 
@@ -141,7 +146,4 @@
   .gcollapse { background: none; border: 1px solid var(--line); border-radius: 5px;
     color: var(--dim); cursor: pointer; padding: 1px 7px; font-size: 12px; flex: none; }
   .gcollapse:hover { color: var(--accent); border-color: var(--accent); }
-  .collapsed .tcollwrap { flex: 1; display: flex; justify-content: space-between; align-items: stretch; padding: 0 2px; }
-  .collapsed .tcoll { display: flex; flex-direction: column; justify-content: space-around; }
-  .collapsed .tcoll.right { align-items: flex-end; }
 </style>
