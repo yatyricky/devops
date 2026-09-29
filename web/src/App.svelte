@@ -132,7 +132,7 @@
       nodes = nodes.map(n => {
         if (n.type === "groupbox" && n.data.__gid === gid) {
           if (collapsed) {
-            return { ...n, data: { ...n.data, collapsed: true }, width: GROUP_COLLAPSED_W, height: barH };
+            return { ...n, data: { ...n.data, collapsed: true }, width: collapsedWidth(g), height: barH };
           }
           const aabb = groupAABB(members) ?? { width: 320, height: 200 };
           return { ...n, data: { ...n.data, collapsed: false }, width: aabb.width, height: aabb.height };
@@ -393,8 +393,17 @@
     }
     return { in: inE, out: outE };
   }
-  /** 收起黑箱条规格：宽=默认节点宽；高=标题行 + 入口分栏 + 分隔线 + 出口分栏 + 页脚（types.js 同源公式） */
+  /** 收起黑箱条规格：宽=与成员卡片一致（成员实测宽最大值，卡片内容自适应无统一常量；未测量回退 230）；
+   *  高=标题行 + 入口分栏 + 分隔线 + 出口分栏 + 页脚（types.js 同源公式） */
   const GROUP_COLLAPSED_W = 230;
+  function collapsedWidth(gbox) {
+    let w = 0;
+    for (const id of gbox?.data.memberIds ?? []) {
+      const m = nodes.find(n => n.id === id);
+      w = Math.max(w, m?.measured?.width ?? 0);
+    }
+    return Math.round(w) || GROUP_COLLAPSED_W;
+  }
   function collapsedHeight(gbox) {
     const r = crossEdges(gbox);
     return groupBarHeight(r.in.length, r.out.length);
@@ -404,7 +413,7 @@
     const data = { __gid: gid, name, color, memberIds: [...memberIds], collapsed };
     return {
       id: `grp-${gid}`, type: "groupbox", position: { x: aabb.x, y: aabb.y },
-      width: collapsed ? GROUP_COLLAPSED_W : aabb.width,
+      width: collapsed ? collapsedWidth({ data }) : aabb.width,
       height: collapsed ? collapsedHeight({ data }) : aabb.height,
       // 层级：组外节点(0) < 背景板(1) < 组内成员(2)
       zIndex: 1,
@@ -552,10 +561,11 @@
     if (!list.some(n => n.type === "groupbox")) return;
     const next = list.map(n => {
       if (n.type !== "groupbox") return n;
-      // 收起黑箱条：保持条形尺寸（宽 230、高 = 标题 + max(入,出)×接口距），不做 AABB 重算
+      // 收起黑箱条：保持条形尺寸（宽=成员卡宽、高=groupBarHeight 公式），不做 AABB 重算
       if (n.data.collapsed) {
         const barH = collapsedHeight(n);
-        return (n.width === GROUP_COLLAPSED_W && n.height === barH) ? n : { ...n, width: GROUP_COLLAPSED_W, height: barH };
+        const barW = collapsedWidth(n);
+        return (n.width === barW && n.height === barH) ? n : { ...n, width: barW, height: barH };
       }
       const aabb = groupAABB(n.data.memberIds ?? []);
       if (!aabb) return n;
