@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { canConnect, coerce } from "./types.js";
+import { validateTaskSelection } from "./rules.js";
 import { NODE_TYPES, getInputs, getOutputs } from "./nodes/index.js";
 
 /**
@@ -163,54 +164,8 @@ export function validateWorkflow(doc) {
         if (t.label === undefined) problems.push(`任务 ${name} 缺少 label`);
         if (dups.length || t.nodes.some(id => !ids.has(id))) continue;
 
-        const selected = new Set(t.nodes);
-
-        // 逐插槽统计任务内携带边；required 闭包/覆盖在此一并判定
-        // 必填语义：required = 必须有「值」——连线或端口字面量（data.lit）任一满足即可
-        for (const id of t.nodes) {
-            const node = nodeById.get(id);
-            let ins;
-            try { ins = getInputs(node); } catch { continue; } // 未知类型已在节点段报过
-            for (const inp of ins) {
-                const inEdges = doc.edges.filter(e => e.kind !== "seq" && e.target === id && e.targetHandle === inp.id);
-                const carriedCnt = inEdges.filter(e => selected.has(e.source)).length;
-                const hasLit = node.data?.lit?.[inp.id] !== undefined;
-                if (carriedCnt >= 2) {
-                    problems.push(`任务 ${name}：输入 ${id}.${inp.id} 有 ${carriedCnt} 条连线，只能有一个输入`);
-                } else if (inp.required && carriedCnt === 0 && !hasLit) {
-                    if (inEdges.length > 0) {
-                        problems.push(`任务 ${name}：节点 ${id} 的必填输入 ${inp.id} 依赖节点 ${inEdges.map(e => e.source).join("/")}，未选入`);
-                    } else {
-                        problems.push(`任务 ${name}：节点 ${id} 的必填输入 ${inp.id} 未连线且未填值`);
-                    }
-                }
-            }
-        }
-
-        // 无环：Kahn 拓扑（两端都在选择内的 data + seq 边都参与定序）
-        const carriedEdges = doc.edges.filter(e => selected.has(e.source) && selected.has(e.target));
-        const indeg = new Map(t.nodes.map(id => [id, 0]));
-        const adj = new Map(t.nodes.map(id => [id, []]));
-        for (const e of carriedEdges) {
-            adj.get(e.source).push(e.target);
-            indeg.set(e.target, /** @type {number} */ (indeg.get(e.target)) + 1);
-        }
-        let frontier = t.nodes.filter(id => indeg.get(id) === 0);
-        let done = 0;
-        while (frontier.length) {
-            const next = [];
-            for (const id of frontier) {
-                done++;
-                for (const m of /** @type {string[]} */ (adj.get(id))) {
-                    indeg.set(m, /** @type {number} */ (indeg.get(m)) - 1);
-                    if (indeg.get(m) === 0) next.push(m);
-                }
-            }
-            frontier = next;
-        }
-        if (done < t.nodes.length) {
-            problems.push(`任务 ${name} 存在环依赖: ${t.nodes.filter(id => indeg.get(id) > 0).join(" → ")}`);
-        }
+        // 任务级三校验（required 闭包 / 插槽唯一 / 无环）——与 GUI 定义任务共用 rules.js 实现
+        problems.push(...validateTaskSelection(t.nodes, doc.edges, nodeById, NODE_TYPES, { taskName: name }));
     }
     return problems;
 }

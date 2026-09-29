@@ -2,6 +2,7 @@ import inputNodes from "./input.js";
 import buildNodes from "./build.js";
 import remoteNodes from "./remote.js";
 import utilNodes from "./util.js";
+import { effectiveInputs, effectiveOutputs } from "../rules.js";
 
 /**
  * 节点类型注册表——引擎与前端共享的唯一事实源。
@@ -12,100 +13,24 @@ export const NODE_TYPES = Object.fromEntries(
 );
 
 /**
- * 某节点实例的有效输入列表 = 声明输入 + 动态输入。
- * 动态输入来源：
- *   countInputs（path.resolve 等）：控件 key 为整数 N → 生成 prefix1..prefixN 的同型输入口；
- *   fieldInputs（struct.make）：data.fields 的每个字段 → 同名同型输入口（值可连线覆盖手填）；
- *   dynamicInputs（文本占位符）：
- *   {{name}}     → 名为 name 的 string 输入插槽（值整个来自连线）
- *   {{obj.key}}  → 名为 obj 的 any 输入插槽（对象经连线传入，执行时按键取值）
- * @param {any} node
- * @returns {{id: string, type: string, required: boolean, dynamic: boolean}[]}
+ * 某节点实例的有效输入列表 = 声明输入 + 动态输入（规则见 rules.js effectiveInputs，
+ * 与前端共用同一实现）。@param {any} node
  */
 export function getInputs(node) {
     const def = NODE_TYPES[node.type];
     if (!def) throw new Error(`未知节点类型: ${node.type}`);
-    const declared = (def.inputs ?? []).map(i => ({ ...i, dynamic: false }));
-    /** @type {any[]} */
-    let all = declared;
-    if (def.countInputs) {
-        const { key, prefix, type, min, max } = def.countInputs;
-        const n = Math.max(min, Math.min(max, Math.trunc(Number(node.data?.[key]) || min)));
-        const ports = [];
-        for (let i = 1; i <= n; i++) {
-            const id = `${prefix}${i}`;
-            if (!all.some(d => d.id === id)) ports.push({ id, type, required: true, dynamic: true });
-        }
-        all = [...all, ...ports];
-    }
-    if (def.pairInputs) {
-        // 每行双端口：pN.from / pN.to（如 stage.copy 的复制条目）
-        const { key, prefix, min, max, sub } = def.pairInputs;
-        const n = Math.max(min, Math.min(max, Math.trunc(Number(node.data?.[key]) || min)));
-        const ports = [];
-        for (let i = 1; i <= n; i++) {
-            for (const subDef of sub) {
-                const id = `${prefix}${i}.${subDef.suffix}`;
-                if (!all.some(d => d.id === id)) ports.push({ id, type: "string", required: subDef.suffix === sub[0].suffix, dynamic: true, ...(subDef.suffix !== sub[0].suffix ? { noHandle: true } : {}) });
-            }
-        }
-        all = [...all, ...ports];
-    }
-    if (def.tplVars) {
-        // 渲染模板：模板路径可推导时按文件 {{VAR}} 生成 string 口（DevNode 写 data.varsList）；
-        // 路径不可推导（varsUnresolved）时降级为一个 struct 口（运行时整个 struct 对象即变量集）
-        if ((node.data?.varsList ?? []).length) {
-            const tplPorts = node.data.varsList
-                .filter(v => v && !all.some(d => d.id === v))
-                .map(v => ({ id: v, type: "string", required: true, dynamic: true }));
-            all = [...all, ...tplPorts];
-        } else if (node.data?.varsUnresolved) {
-            all = [...all, { id: "vars", type: "struct", required: false, dynamic: true }];
-        }
-    }
-    if (def.fieldInputs) {
-        const fieldPorts = (node.data?.fields ?? [])
-            .filter(f => f.key && !all.some(d => d.id === f.key))
-            .map(f => ({ id: f.key, type: f.type ?? "string", required: false, dynamic: true, fromField: true }));
-        all = [...all, ...fieldPorts];
-    }
-    if (!def.dynamicInputs) return all;
-    const text = String(node.data?.[def.dynamicInputs.source] ?? "");
-    /** @type {Map<string, string>} id → 类型 */
-    const dyn = new Map();
-    for (const m of text.matchAll(/\{\{(\w+)(?:\.(\w+))?\}\}/g)) {
-        if (m[2]) dyn.set(m[1], "any");
-        else dyn.set(m[1], def.dynamicInputs.type);
-    }
-    const dynamic = [...dyn.entries()]
-        .filter(([id]) => !all.some(i => i.id === id))
-        .map(([id, type]) => ({ id, type, required: true, dynamic: true }));
-    return [...all, ...dynamic];
+    return effectiveInputs(def, node.data);
 }
 
-/** 动态出口规则：按节点 data 与图上下文解析输出插槽（前端 types.js 有同规则镜像）。 */
-const DYNAMIC_OUTPUTS = {
-    /** struct.split：回溯入边的上游 struct.make 字段定义，按序输出同名字段；未接线 → []。 */
-    structSplit(node, graph) {
-        const edge = (graph?.edges ?? []).find(e => e.kind !== "seq" && e.target === node.id);
-        const src = edge ? (graph?.nodes ?? []).find(n => n.id === edge.source) : null;
-        if (src?.type !== "struct.make") return [];
-        return (src.data?.fields ?? [])
-            .filter(f => f.key)
-            .map(f => ({ id: f.key, type: f.type ?? "string" }));
-    },
-};
-
 /**
- * 节点有效输出列表 = 声明输出，或按 dynamicOutputs 规则解析的动态输出。
+ * 节点有效输出列表 = 声明输出，或按 dynamicOutputs 规则解析（规则见 rules.js effectiveOutputs）。
  * @param {any} node
  * @param {any} [graph] { nodes, edges }（structSplit 回溯上游需要）
  */
 export function getOutputs(node, graph) {
     const def = NODE_TYPES[node.type];
     if (!def) throw new Error(`未知节点类型: ${node.type}`);
-    if (def.dynamicOutputs) return /** @type {any} */ (DYNAMIC_OUTPUTS)[def.dynamicOutputs](node, graph);
-    return def.outputs ?? [];
+    return effectiveOutputs(def, node.data, { edges: graph?.edges, nodes: graph?.nodes, id: node.id });
 }
 
 /**
