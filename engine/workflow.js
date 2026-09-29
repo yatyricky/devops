@@ -82,7 +82,13 @@ export function validateWorkflow(doc) {
         if (!n?.id) { problems.push(`节点缺少 id: ${JSON.stringify(n)?.slice(0, 60)}`); continue; }
         if (ids.has(n.id)) problems.push(`节点 id 重复: ${n.id}`);
         ids.add(n.id);
-        if (!NODE_TYPES[n.type]) problems.push(`节点 ${n.id} 类型未知: ${n.type}`);
+        if (!NODE_TYPES[n.type] && n.type !== "group") problems.push(`节点 ${n.id} 类型未知: ${n.type}`);
+        // group = 画布容器（纯前端视觉，引擎不执行）：合法节点类型，仅校验结构
+        if (n.type === "group" && n.parentId !== undefined) problems.push(`Group 容器 ${n.id} 不支持嵌套（parentId 应为空）`);
+        // 悬空 parentId：父节点不存在 → xyflow 渲染异常，早暴露
+        if (n.parentId !== undefined && !doc.nodes.some(p => p.id === n.parentId)) {
+            problems.push(`节点 ${n.id} 的 parentId 悬空: ${n.parentId}`);
+        }
         if (!Array.isArray(n.position) || n.position.length !== 2) problems.push(`节点 ${n.id} 缺少 position [x,y]`);
         if (!n.data || typeof n.data !== "object") problems.push(`节点 ${n.id} 缺少 data 对象`);
         // struct.make：字段定义合法性（key 供插槽/占位符使用，须为 \w 且唯一）
@@ -263,6 +269,8 @@ export async function executeTask(ctx, doc, taskName) {
     async function runNode(id) {
         const node = nodeById.get(id);
         if (!node) throw new Error(`节点不存在: ${id}`);
+        // group = 画布容器（纯前端），不应出现在任务路径；防御性跳过
+        if (node.type === "group") return {};
         const def = NODE_TYPES[node.type];
         /** @type {Record<string, any>} */
         const inputValues = {};
