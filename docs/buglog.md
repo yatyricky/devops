@@ -94,3 +94,21 @@
 - **回归**：verify 新增 ln 实参顺序锁定断言（含端口顺序），46/46 通过。服务器侧一次性清理（删循环坏链）由用户执行后重跑「打包」确认。
 - **状态**：已实施（待用户真实链路确认）。
 - **更正（同日）**：BUG-2026-09-28-03 的还原保留了旧反向命名（link 口装真实路径），用户按标准语义（target=真实路径，link=symlink）自行调换接线后再次反向。终态以标准语义为准：端口 `[ssh, target, link]`，run `ln -sfn <target> <link>`——target 口=真实路径（第一参数）、link 口=符号链接（第二参数），名字=含义=命令行顺序；verify 锁定断言已同步翻转。
+
+## BUG-2026-09-29-01 任务悬停高亮失效（hoverTask → pathHighlight 写回 effect 丢失）
+
+- **现象**：悬停任务按钮不再临时高亮其包含节点（此前正常）。
+- **根因**：多轮大块脚本编辑 App.svelte 时，`activeSet` derived 与写回 `ui.pathHighlight` 的 `$effect` 整段丢失（hoverTask 状态与按钮 onmouseenter/onmouseleave 绑定仍在，断链在写回层）。
+- **修复**：补回 derived（hoverTask → tasks[..].nodes/path；definer 模式 → definer.nodes）+ `$effect` 写 `ui.pathHighlight = Object.fromEntries(p.map(id => [id, true]))`。
+- **教训（流程）**：对大文件的整块 python 正则/脚本替换必须逐符号 grep 核对删除与残留清单，禁止凭脚本输出"成功"即认为完成——本轮同一时期还有 onNodeDragStop 整函数、onnodedrag/onnodedragstart 绑定、onNodeDragStopWrap 残留等同源丢失，均已补回/清理。
+- **回归**：浏览器悬停任一任务按钮 → 路径上节点以橙色虚线框点亮，移开即灭。已实测通过。
+- **状态**：已修复（22911f4）。
+
+## BUG-2026-09-29-02 groupbox 清理残留：onNodeDragStop 整函数误删 + 失效绑定/变量报错
+
+- **现象**：页面初始化即抛 `onNodeDragStop/onNodeDrag/onNodeDragStart/groupableIds is not defined` 系列错误，节点不可拖动。
+- **根因**：移除 groupbox 背景板（被 Group 真容器取代）时清理不彻底——`onNodeDragStop`（拖动停止 reparent + 位置记账）整函数被误删、`onnodedrag`/`onnodedragstart` 绑定与 `groupableIds` 坏引用残留。
+- **修复**：恢复 onNodeDragStop（Group reparent + 位置记账 + layoutDirty）；删除 onnodedrag/onnodedragstart 失效绑定与「组合/拆分」按钮（建组交互由 Group 拖入取代）。
+- **教训**：删除功能时必须 grep 全部符号引用清零后再构建，且构建后必须浏览器回归一轮再提交。
+- **回归**：拖动任意节点正常、无控制台报错；Group 卡片 ✕ = 拆组（成员保留）。
+- **状态**：已修复（5c269d0）。

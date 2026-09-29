@@ -1,27 +1,18 @@
-# 「暂存复制」控件与输入重做（含 to 可选 + 暂存目录唯一性）
+# GroupBox 隧道接口 + 收缩黑箱条（实施延续，方向已批准）
 
-## 新形态
+## GroupBox.svelte（背景板）增强
 
-- **控件1「条目个数」**：新增 stepper 控件 kind——`[-]` + 数字输入 + `[+]`，1-16，输入/点按均 clamp。
-- **输入口**：`root`（string，required，`~` 展开）+ N 行双端口 `pN.from` / `pN.to`（string；from required，**to 可选**）。点号 id 全链路安全（已验证）。
-- **卡片一行布局**：`pN [from 30%] [to 30%]` 右对齐挤压 label；两个 target Handle 同行上下错开；行内手填框带 nodrag。
+- context 消费新增：`groupEdges(gid)`（App 返回该组跨组入/出边）与 `oncollapse(gid, collapsed)`。
+- **收起态（黑箱条）**：高 = 标题行 + max(入,出)×接口距；无卡片摘要（组名短标签 + 入/出计数 + 收起/展开开关 + 左右接口列）。
+- **展开态**：现状（组名/颜色/色板）+ 左右缘隧道接口小点（转发段边锚点）。
 
-## to 语义（含你补充的缺省规则）
+## App.svelte
 
-- to 可选。**未填时**：root 与 from 都解析为绝对路径后——若 from 在 root 之下 → to = from 去掉 root 前缀的相对路径（保持原结构）；若 from 在 root 之外 → to = from 的 **basename**，并打印警告（“to 未填且 from 在 root 外，使用 basename”）。
-- to 非法值仍报错：绝对路径 / 含 `..` 段（防污染暂存目录外）。
-- 编辑期：to 输入框的 **placeholder 实时显示缺省值**（root/from 可推断时；与 Path Resolve 同一推断设施）。
-
-## 暂存目录唯一性（回应你的质疑）
-
-目录 = `.tmp/stage-<节点id>`。语义：**同一节点重跑 = rmrf 后重建（覆盖，不堆积）**；节点 id 由 genId（时间戳+序号）生成，同一工作流内唯一。唯一的理论撞名场景是**复制整个工作流 JSON**（节点 id 原样复制）——此时两份工作流的同名节点共享暂存目录。保持现命名的理由：重跑覆盖是期望行为（幂等、不产生垃圾目录）。若你复制工作流文件的场景多，说一声我再加工作流 hash 前缀。
-
-## run() 其余语义
-
-- from 判定：`/`、盘符、`~` 开头 = 绝对（`~` 展开）；否则相对 root（`./` `../` 段走 path.resolve 语义）。
-- 复制：from 目录 → 递归复制（默认排除 node_modules/.git）；from 文件 → 单文件复制（to 可改名）；目标父目录自动创建。
-- dry-run 打印每条复制计划。
+- context 新增 `groupEdges(gid)` 与 `oncollapse(gid, collapsed)`：
+  - oncollapse：组 `data.collapsed` 切换 + 成员 `hidden` 联动（收起时成员不可见、不可连线）+ 组尺寸条形化（宽 230、高按接口数）。
+- **隧道派生段边 effect**（幂等 diff）：跨组原边 `hidden`，代之以双段——外部源 → 组缘 `tunnel-in-k` ＋ 组缘 → 组内目标口（入）；组内源 → 组缘 `tunnel-out-k` ＋ 组缘 → 外部目标口（出）。段边 id `tnl-<原边id>-a/b`，toDoc 过滤不入库；接口编号与 GroupNode 渲染序一致。
+- AABB 联动 effect 跳过 collapsed 组（保持条形）；loadDoc 还原 collapsed。
 
 ## 验证
 
-verify 新增用例（临时目录真实跑）：你给的四条用例形态（dist 递归 / 外部模板改名进 config.json / 子目录自动创建 / 同名复制）+ to 缺省（root 外 → basename + 警告）+ to 非法报错；全量跑绿。浏览器：stepper 控件与行布局目测 + 截图。git 提交。
+浏览器（编辑类操作）：建组 → 跨组连线 → 左右缘接口点与双段转发线 → 收起黑箱条（成员隐藏、外部线仍接条缘）→ 展开 → 保存/刷新还原；截图；verify 全绿；git 提交。
