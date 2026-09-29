@@ -237,7 +237,7 @@
       version: 1,
       ...(docRepoDir ? { repoDir: docRepoDir } : {}),
       nodes: realNodes.map(n => ({ id: n.id, type: n.type, position: [Math.round(n.position.x), Math.round(n.position.y)], data: stripDecor(n.data) })),
-      edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, ...(e.kind ? { kind: e.kind } : {}) })),
+      edges: edges.filter(e => !String(e.id).startsWith("tnl-")).map(e => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, ...(e.kind ? { kind: e.kind } : {}) })),
       tasks: JSON.parse(JSON.stringify(tasks)),
       // 分组：从 groupbox 节点还原（空组丢弃——全部成员删掉的组不再保留；collapsed 随条持久化）
       groups: nodes.filter(n => n.type === "groupbox").map(g => ({
