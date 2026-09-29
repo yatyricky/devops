@@ -359,7 +359,8 @@
 
   // ── 分组：groupbox 背景板 = 专用 xyflow 节点（zIndex 垫底、不可 DEL），位置尺寸由成员实时 AABB 计算；
   //    成员-组关系存在 data.memberIds，落盘时从 groupbox 节点还原成 doc.groups。 ────
-  const GROUP_PAD = 14, GROUP_PAD_TOP = 42;
+  // GROUP_PAD_X 左右留白加大：给隧道接口↔组内节点的转发段边留出横向空间走曲线（直贴边像渲染错误）
+  const GROUP_PAD = 14, GROUP_PAD_X = 150, GROUP_PAD_TOP = 42;
   const GROUP_COLORS = ["#4da3ff", "#4cc38a", "#f5a623", "#ff6b6b", "#b18cff", "#56b6c2"];
   /** 成员 AABB + padding；成员为空返回 null */
   function groupAABB(memberIds) {
@@ -373,8 +374,8 @@
       maxX = Math.max(maxX, m.position.x + w); maxY = Math.max(maxY, m.position.y + h);
     }
     if (!found) return null;
-    return { x: minX - GROUP_PAD, y: minY - GROUP_PAD_TOP,
-      width: (maxX - minX) + GROUP_PAD * 2, height: (maxY - minY) + GROUP_PAD_TOP + GROUP_PAD };
+    return { x: minX - GROUP_PAD_X, y: minY - GROUP_PAD_TOP,
+      width: (maxX - minX) + GROUP_PAD_X * 2, height: (maxY - minY) + GROUP_PAD_TOP + GROUP_PAD };
   }
   /** 按 __gid 定位 groupbox 节点——xyflow 节点 id 是 `grp-${gid}`，别按裸 id 找 */
   function groupBoxOf(gid) {
