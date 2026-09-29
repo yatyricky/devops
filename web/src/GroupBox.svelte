@@ -65,7 +65,9 @@
         </span>
       {/if}
     {/if}
-    <span class="tunnelcounts" title="入 {tunnels.in.length} / 出 {tunnels.out.length}">⇥{tunnels.in.length} ⇤{tunnels.out.length}</span>
+    {#if collapsed}
+      <span class="tunnelcounts" title="入 {tunnels.in.length} / 出 {tunnels.out.length}">⇥{tunnels.in.length} ⇤{tunnels.out.length}</span>
+    {/if}
     {#if !collapsed}
       <span class="gdotwrap nodrag">
         <span class="gdot" title="组颜色" style:background={data.color} onclick={togglePalette}></span>
@@ -85,23 +87,8 @@
   </div>
 
   {#if !collapsed}
+    <!-- 展开态：无隧道接口，跨组边直连（连线增删行为与无组时一致）；标题条与板底分色 -->
     <div class="gbody"></div>
-    <!-- 展开态隧道接口：每个隧道位渲染同 id 的 target+source 双类型（xyflow 段边按类型查锚点，
-         单类型会让另一半段边不渲染）。透明孪生只做段边锚点。
-         xyflow 位置类自带 left:0/right:0 + translate(±50%,-50%) 把圆点居中在容器边上，
-         可见口不写 left/right；孪生因位置类方向相反，需显式换边并覆盖 transform。 -->
-    {#each tunnels.in as e, i (e.id)}
-      <Handle id={`tunnel-in-${i}`} type="target" position={Position.Left} connectable={false}
-        style="background:#4da3ff; opacity:.55; width:9px; height:9px; top:{34 + i * 20}px" />
-      <Handle id={`tunnel-in-${i}`} type="source" position={Position.Right} connectable={false}
-        style="background:transparent; border-color:transparent; width:9px; height:9px; left:0; right:auto; transform:translate(-50%,-50%); top:{34 + i * 20}px" />
-    {/each}
-    {#each tunnels.out as e, i (e.id)}
-      <Handle id={`tunnel-out-${i}`} type="source" position={Position.Right} connectable={false}
-        style="background:#ff9e64; opacity:.55; width:9px; height:9px; top:{34 + i * 20}px" />
-      <Handle id={`tunnel-out-${i}`} type="target" position={Position.Left} connectable={false}
-        style="background:transparent; border-color:transparent; width:9px; height:9px; left:auto; right:0; transform:translate(50%,-50%); top:{34 + i * 20}px" />
-    {/each}
   {:else}
     <!-- 收起黑箱条：标题行(36) + 入口行(左对齐) + 分隔线 + 出口行(右对齐) + 页脚
          （行位与总高由 types.js GROUP_BAR 推导，与 App 的节点高度同源）；
@@ -131,16 +118,21 @@
 </div>
 
 <style>
-  .gbox { position: relative; width: 100%; height: 100%; border-radius: 12px;
+  .gbox { position: relative; width: 100%; height: 100%; border-radius: 12px; display: flex; flex-direction: column;
     background: color-mix(in srgb, var(--gc) 9%, transparent);
     border: 1px solid color-mix(in srgb, var(--gc) 35%, transparent); }
   .gbox.selected { border-color: var(--gc); box-shadow: 0 0 0 1px var(--gc); }
   .gbox.collapsed { background: color-mix(in srgb, var(--gc) 16%, var(--panel));
     border-color: color-mix(in srgb, var(--gc) 60%, transparent); border-radius: 10px; }
-  /* 板 wrapper 点击穿透（app.css 置 none），交互集中在标题行与收起条标签——保证被板盖住的组外节点仍可点选 */
-  .ghead { position: absolute; top: 7px; left: 10px; right: 10px; height: 28px;
-    display: flex; align-items: center; gap: 6px; cursor: grab; pointer-events: auto; }
-  .collapsed .ghead { position: static; height: 36px; box-sizing: border-box; padding: 0 10px; }
+  /* 标题条：全宽、与板底分色（两态通用）。
+     板 wrapper 在 app.css 置 pointer-events:none（保证被板盖住的组外节点仍可点选），交互集中在标题条与收起条标签 */
+  .ghead { height: 30px; flex: none; box-sizing: border-box; padding: 0 10px;
+    display: flex; align-items: center; gap: 6px; cursor: grab; pointer-events: auto;
+    background: color-mix(in srgb, var(--gc) 28%, var(--panel));
+    border-bottom: 1px solid color-mix(in srgb, var(--gc) 55%, transparent);
+    border-radius: 11px 11px 0 0; }
+  .collapsed .ghead { height: 36px; border-radius: 9px 9px 0 0; }
+  .gbody { flex: 1; }
   .ghead:active { cursor: grabbing; }
   .gname { font-size: 12px; font-weight: 600; color: var(--fg);
     max-width: calc(100% - 30px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

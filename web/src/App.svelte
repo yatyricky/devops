@@ -435,6 +435,35 @@
     nodes = nodes.map(n => (idSet.has(n.id) ? { ...n, zIndex: 2 } : n));
     markCritical();
   }
+  /** 【克隆】：选中节点各复制一份——data 深拷贝（常量/lit/便笺/条目数全保留）、连线不复制、位置偏移 (40,40)；
+   *  原节点在组内则克隆同入该组（避免克隆卡落到背景板下层被色罩盖住）；克隆卡置为选中 */
+  function cloneSelected() {
+    const ids = groupableIds;
+    if (!ids.length) return;
+    const idMap = new Map();
+    const clones = [];
+    for (const id of ids) {
+      const n = nodes.find(x => x.id === id);
+      if (!n || n.type === "groupbox") continue;
+      const nid = genId(n.type.split(".")[1] ?? "n");
+      idMap.set(id, nid);
+      clones.push({
+        id: nid, type: n.type,
+        position: { x: n.position.x + 40, y: n.position.y + 40 },
+        data: JSON.parse(JSON.stringify(n.data)),
+        ...(n.zIndex !== undefined ? { zIndex: n.zIndex } : {}),
+      });
+    }
+    if (!clones.length) return;
+    nodes = [...nodes.map(n => ({ ...n, selected: false })),
+      ...clones.map(c => ({ ...c, selected: true }))];
+    nodes = nodes.map(n => {
+      if (n.type !== "groupbox") return n;
+      const add = (n.data.memberIds ?? []).filter(x => idMap.has(x)).map(x => idMap.get(x));
+      return add.length ? { ...n, data: { ...n.data, memberIds: [...n.data.memberIds, ...add] } } : n;
+    });
+    markCritical();
+  }
   /** 【拆分】：删背景板，成员世界坐标不动（层级回落到普通节点） */
   function ungroupSelected() {
     if (!selectedGroupBox) return;
@@ -541,9 +570,10 @@
     }
     markCritical();
   }
-  /** @param {{ nodes: any[], edges: any[] }} m xyflow 内置删除键（DEL/Backspace）触发 */
-  function onBeforeDelete({ nodes: delNodes }) {
-    return confirmTaskRemoval(delNodes.map(n => n.id));
+  /** @param {{ nodes: any[], edges: any[] }} p xyflow 内置删除键（DEL/Backspace）触发；收起态隧道段边不可删 */
+  function onBeforeDelete({ nodes: delNodes, edges: delEdges }) {
+    if (!confirmTaskRemoval(delNodes.map(n => n.id))) return false;
+    return { nodes: delNodes, edges: delEdges.filter(e => !String(e.id).startsWith("tnl-")) };
   }
   function onDelete({ nodes: delNodes, edges: delEdges }) {
     if (delNodes.length) { stripFromTasks(delNodes.map(n => n.id)); stripFromGroups(delNodes.map(n => n.id)); markCritical(); }
@@ -610,16 +640,15 @@
     ui.pathHighlight = Object.fromEntries(p.map(id => [id, true]));
   });
 
-  // ── Group 隧道：跨组边隐藏，代之以双段转发边（外部源→组缘入口 / 组缘出口→外部目标）。
-  //    段边纯视觉转发（selectable/deletable=false，不入库——toDoc 过滤 tnl- 前缀）。
-  //    收起时成员 hidden：指向组内节点的段自动消失，外部→组缘入口的段保持（黑箱条上仍可见）。
+  // ── Group 隧道：仅【收起态】把跨组边隐藏，代之以双段转发边（外部源→条缘入口 / 条缘出口→外部目标）。
+  //    展开态保持 411e38d 的直连边样子——连线增删行为与无组时完全一致，不做任何变换。
+  //    段边纯视觉转发（selectable:false——收起态与组相连的边不可增删，删除请先展开；不入库——toDoc 过滤 tnl- 前缀）。
   //    段边不得就地改属性：与动画 effect 同理，需整组替换对象。 ────
   $effect(() => {
-    const gboxes = nodes.filter(n => n.type === "groupbox");
-    if (!gboxes.length) return;
+    const gboxes = nodes.filter(n => n.type === "groupbox" && n.data.collapsed);
     /** @type {any[]} 段边期望态 */
     const want = [];
-    /** @type {Map<string, { in: number, out: number }>} 每组同侧递增编号（与 GroupBox 渲染序一致） */
+    /** @type {Map<string, { in: number, out: number }>} 每组同侧递增编号（与 GroupBox 收起条渲染序一致） */
     const counters = new Map();
     /** @type {Set<string>} 需隐藏的原跨组边 */
     const hide = new Set();
@@ -638,12 +667,14 @@
       const th = `tunnel-${side}-${k}`;
       hide.add(e.id);
       // 段边端点必须是 groupbox 的 xyflow 节点 id（g.id = grp-${gid}），裸 gid 指向不存在的节点
-      want.push({ id: `tnl-${e.id}-a`, source: e.source, sourceHandle: e.sourceHandle ?? null, target: g.id, targetHandle: th });
-      want.push({ id: `tnl-${e.id}-b`, source: g.id, sourceHandle: th, target: e.target, targetHandle: e.targetHandle ?? null });
+      want.push({ id: `tnl-${e.id}-a`, source: e.source, sourceHandle: e.sourceHandle ?? null, target: g.id, targetHandle: th, selectable: false });
+      want.push({ id: `tnl-${e.id}-b`, source: g.id, sourceHandle: th, target: e.target, targetHandle: e.targetHandle ?? null, selectable: false });
     }
-    // 幂等 diff：原跨组边补 hidden；段边补缺/去多/清 stale
-    const needHide = [...hide].filter(id => { const e = edges.find(x => x.id === id); return e && !e.hidden; });
-    if (needHide.length) edges = edges.map(e => (hide.has(e.id) ? { ...e, hidden: true } : e));
+    // hidden 同步：hide 集内必 hidden、集外真实边必可见（收起→展开时自动复原直连边）
+    if (edges.some(e => !String(e.id).startsWith("tnl-") && hide.has(e.id) !== !!e.hidden)) {
+      edges = edges.map(e => (String(e.id).startsWith("tnl-") || hide.has(e.id) === !!e.hidden) ? e : { ...e, hidden: hide.has(e.id) });
+    }
+    // 幂等 diff：段边补缺/去多/清 stale
     const curTnl = new Map(edges.filter(e => String(e.id).startsWith("tnl-")).map(e => [e.id, e]));
     const missing = [...want].filter(w => {
       const c = curTnl.get(w.id);
@@ -772,7 +803,6 @@
     </select>
     <button onclick={() => (openModal = { mode: "open", path: "", title: "" })}>打开…</button>
     <button onclick={() => (openModal = { mode: "new", path: "", title: "" })}>新建…</button>
-    <button title="刷新画布上所有下拉列表（git refs / npm scripts / ssh 别名）" onclick={() => ui.refreshTick++}>刷新列表</button>
     <button class="primary" disabled={!dirty} onclick={() => save()}>{dirty ? "保存 *" : "保存"}</button>
     <span class="badge">{busyText}</span>
     <input class="token" type="password" placeholder="token" bind:value={tokenVal} onchange={tokenChange} />
@@ -795,7 +825,10 @@
     <button class="define" class:active={!!definer} onclick={() => (definer = definer ? null : { nodes: [], name: "", label: "", mutates: true, problems: [] })}>
       {definer ? "取消定义" : "定义任务"}
     </button>
+    <button title="刷新画布上所有下拉列表（git refs / npm scripts / ssh 别名）" onclick={() => ui.refreshTick++}>刷新列表</button>
     <span class="sep"></span>
+    <button title="克隆选中的节点：常量属性复制、连线不复制，位置偏移 (40,40)"
+      disabled={!groupableIds.length} onclick={cloneSelected}>克隆</button>
     <button title="把当前选中的多个节点编为一组" disabled={groupableIds.length < 2} onclick={groupSelected}>组合</button>
     <button title="拆散选中的分组（成员位置不动）" disabled={!selectedGroupBox} onclick={ungroupSelected}>拆分</button>
     <label class="mut" title="开启后移动节点按 16px 网格吸附（以节点左上角为基准）">
