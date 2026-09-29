@@ -96,6 +96,19 @@ export function genId(prefix = "n") {
   return `${prefix}${Date.now().toString(36).slice(-4)}${seq}`;
 }
 
+// ── Group 收起黑箱条布局常量（App 计算节点高度与 GroupBox 渲染行必须同源）────
+export const GROUP_BAR = { header: 36, row: 20, div: 9, pad: 8 };
+/** 收起条总高 = 标题行 + 入口数×行高 +（出入口都有时分隔线）+ 出口数×行高 + 页脚 padding */
+export function groupBarHeight(nIn, nOut) {
+  return GROUP_BAR.header + nIn * GROUP_BAR.row + (nIn && nOut ? GROUP_BAR.div : 0) + nOut * GROUP_BAR.row + GROUP_BAR.pad;
+}
+/** 收起条内第 i 行 label 的 top；side = "in" | "out"，入口在标题下、分隔线后是出口 */
+export function groupBarRowTop(side, i, nIn) {
+  return side === "in"
+    ? GROUP_BAR.header + i * GROUP_BAR.row
+    : GROUP_BAR.header + nIn * GROUP_BAR.row + (nIn ? GROUP_BAR.div : 0) + i * GROUP_BAR.row;
+}
+
 /**
  * 任务选点校验（engine/workflow.js 同规则的客户端镜像；服务端仍是权威）：
  * 闭包（required 入边源必选）/ 插槽唯一 / 无环。

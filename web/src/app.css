@@ -112,3 +112,7 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 .devnode .notebtn.hasnote { border-color: var(--ok); color: var(--ok); opacity: 1; }
 .devnode .noterow { display: block; padding: 4px 10px 2px; border-top: 1px dashed var(--line); }
 .devnode .noterow textarea { width: 100%; font-size: 12px; resize: vertical; }
+
+/* Group 背景板层级在组外节点之上（板 z1、成员 z2）：wrapper 不拦截指针，
+   被板盖住的组外节点仍可点选；组的交互集中在标题行与收起条标签（板内各自 pointer-events:auto） */
+.svelte-flow__node.svelte-flow__node-groupbox { pointer-events: none; }

@@ -4,9 +4,10 @@
   // 纯视觉转发，不可操作）。collapsed = 收缩黑箱条（成员隐藏，仅标题 + 左右接口列）。
   import { getContext } from "svelte";
   import { Handle, Position } from "@xyflow/svelte";
+  import { groupBarRowTop } from "./types.js";
 
   let { id, data, selected } = $props();
-  const { ongroup, onpalette, groupEdges, oncollapse } = getContext("devnode-actions");
+  const { ongroup, onpalette, groupEdges, oncollapse, tunnelLabel } = getContext("devnode-actions");
 
   const COLORS = ["#4da3ff", "#4cc38a", "#f5a623", "#ff6b6b", "#b18cff", "#56b6c2"];
 
@@ -86,33 +87,45 @@
   {#if !collapsed}
     <div class="gbody"></div>
     <!-- 展开态隧道接口：每个隧道位渲染同 id 的 target+source 双类型（xyflow 段边按类型查锚点，
-         只渲染单类型会让另一半段边无锚点不渲染）。透明孪生只做段边锚点，path 方向朝组内。 -->
+         单类型会让另一半段边不渲染）。透明孪生只做段边锚点。
+         9px 圆口压在边框中线（±4.5px）；xyflow 位置类自带 left/right，与内联冲突时 left 获胜——
+         两侧都显式声明 left/right 防止锚点被钉到对侧（出口段边接错入口的根因）。 -->
     {#each tunnels.in as e, i (e.id)}
       <Handle id={`tunnel-in-${i}`} type="target" position={Position.Left} connectable={false}
-        style="background:#4da3ff; opacity:.55; left:-4px; top:{34 + i * 20}px" />
+        style="background:#4da3ff; opacity:.55; width:9px; height:9px; left:-4.5px; top:{34 + i * 20}px" />
       <Handle id={`tunnel-in-${i}`} type="source" position={Position.Right} connectable={false}
-        style="background:transparent; border-color:transparent; width:6px; height:6px; left:-4px; top:{34 + i * 20}px" />
+        style="background:transparent; border-color:transparent; width:9px; height:9px; left:-4.5px; right:auto; top:{34 + i * 20}px" />
     {/each}
     {#each tunnels.out as e, i (e.id)}
       <Handle id={`tunnel-out-${i}`} type="source" position={Position.Right} connectable={false}
-        style="background:#ff9e64; opacity:.55; right:-4px; top:{34 + i * 20}px" />
+        style="background:#ff9e64; opacity:.55; width:9px; height:9px; left:auto; right:-4.5px; top:{34 + i * 20}px" />
       <Handle id={`tunnel-out-${i}`} type="target" position={Position.Left} connectable={false}
-        style="background:transparent; border-color:transparent; width:6px; height:6px; right:-4px; top:{34 + i * 20}px" />
+        style="background:transparent; border-color:transparent; width:9px; height:9px; left:auto; right:-4.5px; top:{34 + i * 20}px" />
     {/each}
   {:else}
-    <!-- 收起态：xyflow Handle 基类 position:absolute，flex 列排布无效——沿用内联定位
-         （条高 = 40 + 20×max(入,出)，接口行距 20，标题行占顶部 40px）；同 id 双类型同上 -->
+    <!-- 收起黑箱条：标题行(36) + 入口行(左对齐) + 分隔线 + 出口行(右对齐) + 页脚
+         （行位与总高由 types.js GROUP_BAR 推导，与 App 的节点高度同源）；
+         label = <节点标题>: <端口label>，超宽省略号截断、title 悬停看全文 -->
     {#each tunnels.in as e, i (e.id)}
+      {@const rtop = groupBarRowTop("in", i, tunnels.in.length)}
+      {@const lbl = tunnelLabel(e, "in")}
+      <div class="tlabel in nodrag" style="top:{rtop}px" title={lbl}>{lbl}</div>
       <Handle id={`tunnel-in-${i}`} type="target" position={Position.Left} connectable={false}
-        style="background:#4da3ff; pointer-events:none; left:-4px; top:{50 + i * 20}px" />
+        style="background:#4da3ff; pointer-events:none; width:9px; height:9px; left:-4.5px; top:{rtop + 10}px" />
       <Handle id={`tunnel-in-${i}`} type="source" position={Position.Right} connectable={false}
-        style="background:transparent; border-color:transparent; width:6px; height:6px; pointer-events:none; left:-4px; top:{50 + i * 20}px" />
+        style="background:transparent; border-color:transparent; width:9px; height:9px; pointer-events:none; left:-4.5px; right:auto; top:{rtop + 10}px" />
     {/each}
+    {#if tunnels.in.length && tunnels.out.length}
+      <div class="tdiv" style="top:{groupBarRowTop('out', 0, tunnels.in.length) - 5}px"></div>
+    {/if}
     {#each tunnels.out as e, i (e.id)}
+      {@const rtop = groupBarRowTop("out", i, tunnels.in.length)}
+      {@const lbl = tunnelLabel(e, "out")}
+      <div class="tlabel out nodrag" style="top:{rtop}px" title={lbl}>{lbl}</div>
       <Handle id={`tunnel-out-${i}`} type="source" position={Position.Right} connectable={false}
-        style="background:#ff9e64; pointer-events:none; right:-4px; top:{50 + i * 20}px" />
+        style="background:#ff9e64; pointer-events:none; width:9px; height:9px; left:auto; right:-4.5px; top:{rtop + 10}px" />
       <Handle id={`tunnel-out-${i}`} type="target" position={Position.Left} connectable={false}
-        style="background:transparent; border-color:transparent; width:6px; height:6px; pointer-events:none; right:-4px; top:{50 + i * 20}px" />
+        style="background:transparent; border-color:transparent; width:9px; height:9px; pointer-events:none; left:auto; right:-4.5px; top:{rtop + 10}px" />
     {/each}
   {/if}
 </div>
@@ -124,9 +137,10 @@
   .gbox.selected { border-color: var(--gc); box-shadow: 0 0 0 1px var(--gc); }
   .gbox.collapsed { background: color-mix(in srgb, var(--gc) 16%, var(--panel));
     border-color: color-mix(in srgb, var(--gc) 60%, transparent); border-radius: 10px; }
+  /* 板 wrapper 点击穿透（app.css 置 none），交互集中在标题行与收起条标签——保证被板盖住的组外节点仍可点选 */
   .ghead { position: absolute; top: 7px; left: 10px; right: 10px; height: 28px;
-    display: flex; align-items: center; gap: 6px; cursor: grab; }
-  .collapsed .ghead { position: static; padding: 4px 10px; height: auto; }
+    display: flex; align-items: center; gap: 6px; cursor: grab; pointer-events: auto; }
+  .collapsed .ghead { position: static; height: 36px; box-sizing: border-box; padding: 0 10px; }
   .ghead:active { cursor: grabbing; }
   .gname { font-size: 12px; font-weight: 600; color: var(--fg);
     max-width: calc(100% - 30px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -146,4 +160,10 @@
   .gcollapse { background: none; border: 1px solid var(--line); border-radius: 5px;
     color: var(--dim); cursor: pointer; padding: 1px 7px; font-size: 12px; flex: none; }
   .gcollapse:hover { color: var(--accent); border-color: var(--accent); }
+  .tlabel { position: absolute; left: 16px; right: 16px; height: 20px; line-height: 20px;
+    font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    pointer-events: auto; }
+  .tlabel.in { text-align: left; }
+  .tlabel.out { text-align: right; }
+  .tdiv { position: absolute; left: 10px; right: 10px; height: 1px; background: var(--line); pointer-events: none; }
 </style>

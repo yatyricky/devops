@@ -121,3 +121,12 @@
 - **验证期追加根因②（段边只渲染一半）**：xyflow 边按 handle 类型（source/target）分区查锚点——`tunnel-in-*` 只渲染成 target 型时，段边 `-b`（以它为 sourceHandle）查不到锚点整条不渲染，out 侧对称。修复：每个隧道位渲染同 id 的 source+target 双类型 Handle（可见的一个 + 透明同位孪生），孪生的 position 顺带调顺段边出线方向（in 的 source 朝右、out 的 target 朝左）。
 - **回归**：临时 wf 上建组 → 跨组连线 → 左右缘出现插槽点且双段转发线可见（外部源→组缘入口、组缘出口→组内目标）→ 点收起：成员隐藏、组收缩为宽 230 黑箱条、外部线仍接条缘、标题显示入/出计数 → 点展开：成员恢复、板体 AABB 包裹成员 → 保存/刷新后收起态还原。
 - **状态**：已修复（本次提交）。
+
+## BUG-2026-09-29-04 Group 打磨四项：出口段边接错入口 / 接口未压边不同尺寸 / 背景板层级 / 收起条带标签分栏
+
+- **现象**：① 组内连向组出口的 nodes 接到了入口；② 隧道口未压在 group 边框上、比普通插槽小；③ 背景板层级要求 组外节点 < 背景板 < 自己的成员；④ 收起条要在插槽处展示 `<节点标题>: <端口label>`（超宽截断 + title 悬停），入口在上左对齐、分隔线后出口在下右对齐，总高 = 标题 + 入口 + 出口 + 页脚（原出口插槽贴圆角）。
+- **根因①**：CSS 绝对定位同时声明 left/right 时 left 获胜——出口孪生 Handle 内联 `right:-4.5px` 被 xyflow 位置类自带的 `left:-4px` 压住，锚点被钉在左缘。修复：孪生两侧都显式 `left:auto/right:auto`（GroupBox 展开+收起两态）。
+- **修复②③**：隧道口统一 9px（与 `.devnode` 普通插槽同尺寸）、`±4.5px` 压边框中线，圆形保留；层级体系 板 zIndex 1、成员 2（组合/loadDoc 抬 2、拆分回 0、色板置顶仍 1000/回落 1）；配套 `.svelte-flow__node-groupbox { pointer-events:none }`（app.css）+ 板内 `.ghead/.tlabel` 显式 auto——被板盖住的组外节点仍可点选，交互集中在标题行与标签。
+- **修复④**：types.js 新增 `GROUP_BAR{header:36,row:20,div:9,pad:8}` + `groupBarHeight/groupBarRowTop`（App 算高与 GroupBox 渲染行同源）；收起高度公式改为 `36+nIn×20+(双向都有?9:0)+nOut×20+8`；App context 新增 `tunnelLabel(edge, side)`（入侧=目标口/出侧=源口，格式镜像 DevNode，节点标题后缀取 data.note）；`.collapsed .ghead` 锁 36px。
+- **回归**：临时 wf（入1+出2+组内边）组合后：入口两锚点在左缘、出口两锚点在右缘（归一化 cx≈0/1）；收起条实测高 113=公式值，入口行 `Print Log - 打印入口: value (any)*` 左对齐、分隔线 top 61、出口两行右对齐、title 属性可悬停；刷新后收起态与标签完整还原；无控制台报错。
+- **状态**：已修复（本次提交）。

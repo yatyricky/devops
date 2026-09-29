@@ -2,7 +2,7 @@
   import { getContext, setContext } from "svelte";
   import { SvelteFlow, Background, Controls, MiniMap } from "@xyflow/svelte";
   import { api } from "./api.js";
-  import { canConnect, effectiveInputs, effectiveOutputs, genId, validateTaskSelection } from "./types.js";
+  import { canConnect, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, GROUP_BAR, groupBarHeight } from "./types.js";
   import { ui } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
   import GroupBox from "./GroupBox.svelte";
@@ -142,6 +142,21 @@
       });
       markCritical();
     },
+    /** 收起条隧道 label：<节点标题>: <端口 label>（端口格式与 DevNode 卡片一致；入侧=目标口，出侧=源口） */
+    tunnelLabel(e, side) {
+      const nid = side === "in" ? e.target : e.source;
+      const hid = (side === "in" ? e.targetHandle : e.sourceHandle) ?? "";
+      const n = nodes.find(x => x.id === nid);
+      if (!n) return "";
+      const meta = ui.nodeTypesMap[n.type];
+      const note = String(n.data?.note ?? "").trim();
+      const title = `${meta?.title ?? n.type}${note ? ` - ${note}` : ""}`;
+      const port = (side === "in" ? effectiveInputs(meta, n.data) : effectiveOutputs(meta, n.data))
+        .find(p => p.id === hid);
+      if (!port) return title;
+      const req = side === "in" && port.required ? "*" : "";
+      return `${title}: ${port.id} (${port.type}${port.dynamic ? "⭑" : ""})${req}`;
+    },
     /** 渲染模板：解析模板文件 → { vars, basename } 或 { error }（configDir 取当前工作流目录） */
     async resolveTplVars(p) {
       const dirOf = x => { const i = Math.max(x.lastIndexOf("/"), x.lastIndexOf("\\")); return i > 0 ? x.slice(0, i) : x; };
@@ -216,7 +231,11 @@
     // 分组背景板：由 doc.groups 重建（含收起态；首帧 AABB 用近似尺寸，挂载后联动 effect 校正）
     const groupBoxes = (doc.groups ?? [])
       .map(g => makeGroupNode(g.id, g.name ?? "新分组", g.color ?? "#4da3ff", (g.nodes ?? []).filter(id => nodes.some(n => n.id === id)), !!g.collapsed));
-    if (groupBoxes.length) nodes = [...nodes, ...groupBoxes];
+    if (groupBoxes.length) {
+      // 成员卡片抬到自己组的背景板之上（与 groupSelected 同一层级体系）
+      const members = new Set(groupBoxes.flatMap(g => g.data.memberIds ?? []));
+      nodes = [...nodes.map(n => (members.has(n.id) ? { ...n, zIndex: 2 } : n)), ...groupBoxes];
+    }
     hoverTask = null; definer = null;
     ui.runTaskNodes = null; ui.nodeRunStatus = null; ui.runNodeInputs = null;
     ignoreDirtyUntil = Date.now() + 1000;
@@ -373,11 +392,11 @@
     }
     return { in: inE, out: outE };
   }
-  /** 收起黑箱条规格：宽=默认节点宽；高=标题行 + max(入,出)×接口距 */
+  /** 收起黑箱条规格：宽=默认节点宽；高=标题行 + 入口分栏 + 分隔线 + 出口分栏 + 页脚（types.js 同源公式） */
   const GROUP_COLLAPSED_W = 230;
   function collapsedHeight(gbox) {
     const r = crossEdges(gbox);
-    return 40 + 20 * Math.max(r.in.length, r.out.length);
+    return groupBarHeight(r.in.length, r.out.length);
   }
   function makeGroupNode(gid, name, color, memberIds, collapsed = false) {
     const aabb = groupAABB(memberIds) ?? { x: 80, y: 80, width: 320, height: 200 };
@@ -386,7 +405,8 @@
       id: `grp-${gid}`, type: "groupbox", position: { x: aabb.x, y: aabb.y },
       width: collapsed ? GROUP_COLLAPSED_W : aabb.width,
       height: collapsed ? collapsedHeight({ data }) : aabb.height,
-      zIndex: -1,
+      // 层级：组外节点(0) < 背景板(1) < 组内成员(2)
+      zIndex: 1,
       draggable: true, selectable: true, deletable: false,
       data, selected: true,
     };
@@ -401,12 +421,16 @@
     nodes = nodes.map(n => (n.type === "groupbox" && (n.data.memberIds ?? []).some(x => idSet.has(x)))
       ? { ...n, data: { ...n.data, memberIds: n.data.memberIds.filter(x => !idSet.has(x)) }, selected: false } : n);
     nodes = [...nodes, makeGroupNode(genId("grp"), "新分组", GROUP_COLORS[0], ids)];
+    // 成员卡片抬到自己组的背景板之上（板 z1、成员 z2、组外节点 z0）
+    nodes = nodes.map(n => (idSet.has(n.id) ? { ...n, zIndex: 2 } : n));
     markCritical();
   }
-  /** 【拆分】：删背景板，成员世界坐标不动 */
+  /** 【拆分】：删背景板，成员世界坐标不动（层级回落到普通节点） */
   function ungroupSelected() {
     if (!selectedGroupBox) return;
-    nodes = nodes.filter(n => n.id !== selectedGroupBox.id);
+    const members = new Set(selectedGroupBox.data.memberIds ?? []);
+    nodes = nodes.filter(n => n.id !== selectedGroupBox.id)
+      .map(n => (members.has(n.id) ? { ...n, zIndex: 0 } : n));
     markCritical();
   }
   /** 组名/颜色编辑（GroupBox 组件经 context 回调） */
@@ -415,10 +439,10 @@
       ? { ...n, data: { ...n.data, ...patch } } : n);
     markCritical();
   }
-  /** 色板开关：打开时背景板临时置顶——板 wrapper 在 zIndex -1 层，色板作为其子元素永远压不过成员卡片 */
+  /** 色板开关：打开时背景板临时置顶——色板作为板的子元素压不过成员卡片（板常态 z1，见 makeGroupNode） */
   function onPalette(gid, open) {
     nodes = nodes.map(n => (n.type === "groupbox" && n.data.__gid === gid)
-      ? { ...n, zIndex: open ? 1000 : -1 } : n);
+      ? { ...n, zIndex: open ? 1000 : 1 } : n);
   }
   /** 节点删除时从所属组中摘除（背景板随之收缩） */
   function stripFromGroups(ids) {
