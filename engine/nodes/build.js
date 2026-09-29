@@ -121,7 +121,7 @@ export default [
     {
         type: "stage.copy",
         desc: "把 N 条 from 复制/改名到一次性暂存目录，输出暂存目录供打包。from：绝对路径（/ 盘符 ~ 开头）或相对 root（支持 ./ ../）；to：相对暂存目录，不许绝对路径或 ..（防污染外部）；to 未填 = from 去掉 root 前缀的相对路径，from 在 root 外时用 basename（警告）。目录递归复制（排除 node_modules/.git），目标父目录自动创建。",
-        title: "暂存复制",
+        title: "Staged Copy",
         category: "构建",
         color: "#4cc38a",
         pairInputs: { key: "count", prefix: "p", min: 1, max: 16, sub: [{ suffix: "from" }, { suffix: "to" }] },

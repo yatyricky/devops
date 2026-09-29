@@ -2,7 +2,6 @@
   "untested": [
     "git.ref",
     "cmd.exec",
-    "stage.copy",
     "ssh.exec",
     "remote.deps",
     "remote.chown",
