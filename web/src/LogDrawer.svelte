@@ -66,6 +66,6 @@
   .st { font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 0 10px; }
   .st.ok { color: var(--ok); border-color: var(--ok); }
   .st.failed { color: var(--err); border-color: var(--err); }
-  .lines { flex: 1; overflow: auto; padding: 8px 14px; font: 12px/1.5 Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+  .lines { flex: 1; overflow: auto; padding: 8px 14px; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; }
   .l-err { color: var(--err); }
 </style>

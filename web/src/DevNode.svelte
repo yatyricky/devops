@@ -1,13 +1,14 @@
 <script>
   import { getContext } from "svelte";
   import { Handle, Position, useUpdateNodeInternals } from "@xyflow/svelte";
-  import { TYPE_COLORS, effectiveInputs, effectiveOutputs } from "./types.js";
+  import { TYPE_COLORS, effectiveInputs, effectiveOutputs, nodeTitle, portLabel } from "./types.js";
+  import { expandHomeLocal } from "./lib/infer.js";
   import { api } from "./api.js";
   import { ui } from "./store.svelte.js";
 
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
-  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveTplVars, inferOutput } = getContext("devnode-actions");
+  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveOutputs, resolveTplVars, inferOutput } = getContext("devnode-actions");
   const updateNodeInternals = useUpdateNodeInternals();
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
@@ -19,15 +20,8 @@
   let runSt = $derived(ui.nodeRunStatus?.[id]);
   let offTask = $derived(ui.runTaskNodes != null && !ui.runTaskNodes.has(id));
 
-  // ── 动态出口：structSplit 回溯上游字段定义 ────
-  let outputs = $derived.by(() => {
-    if (!meta) return [];
-    if (meta.dynamicOutputs === "structSplit") {
-      const src = getSourceNode?.(id, "struct");
-      return (src?.data?.fields ?? []).filter(f => f.key).map(f => ({ id: f.key, type: f.type ?? "string" }));
-    }
-    return meta.outputs ?? [];
-  });
+  // ── 动态出口：structSplit 回溯上游字段定义（effectiveOutputs 同规则，经 context 由 App 提供图上下文） ────
+  let outputs = $derived(resolveOutputs?.(id) ?? (meta?.outputs ?? []));
 
 // 动态插槽（structSplit 出口 / {{}} 动态输入）增删 handle 时节点外框尺寸不变，
   // ResizeObserver 不触发 → 内部 handleBounds 不重测 → 指向新 handle 的边不渲染、
@@ -79,10 +73,8 @@
     const rootV = resolveInput?.(nodeId, "root");
     const fromV = resolveInput?.(nodeId, fromInp.id);
     if (rootV === undefined || fromV === undefined) return "";
-    const home = localStorage.getItem("devops-home") ?? "";
-    const exp = v => (v === "~" ? (home || "~") : v.startsWith("~/") ? (home ? home + v.slice(1) : v) : v);
-    const rootR = exp(String(rootV)).replace(/\\/g, "/");
-    const fromR = exp(String(fromV)).replace(/\\/g, "/");
+    const rootR = expandHomeLocal(String(rootV)).replace(/\\/g, "/");
+    const fromR = expandHomeLocal(String(fromV)).replace(/\\/g, "/");
     const base = fromR.slice(fromR.lastIndexOf("/") + 1);
     if (fromR === rootR || fromR.startsWith(rootR + "/")) {
       return fromR.slice(rootR.length + 1);
@@ -266,7 +258,7 @@
   {/snippet}
 
   <div class="head" style="background:{color}">
-    <span class="htitle">{meta?.title ?? data.__type}{noteText ? ` - ${noteText}` : ""}</span>
+    <span class="htitle">{nodeTitle(meta, data)}</span>
     <button class="del nodrag" title="删除节点" onclick={() => ondelete?.(id)}>{@render trash(11)}</button>
   </div>
   {#if meta?.desc}<div class="ndesc">{meta.desc}</div>{/if}
@@ -278,7 +270,7 @@
       {@const toPeer = pairToOf(inp)}
       <div class="kv in {toPeer ? "pairrow" : ""}" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}（可连线或直接填值）` : undefined}>
         <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[inp.type]}; {toPeer ? "top:30%" : ""}" />
-        <span class="lbl" title="{inp.id} ({inp.type}{inp.dynamic ? "⭑" : ""}){inp.required ? " · 必填：连线或直接填值" : ""}">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
+        <span class="lbl" title="{portLabel(inp)}{inp.required ? " · 必填：连线或直接填值" : ""}">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
         {#if !inp.fromField && (inp.type === "string" || inp.type === "number" || inp.type === "boolean")}
           {@const liveVal = ui.runNodeInputs?.[id]?.[inp.id]}
           {#if isWiredAsTarget?.(id, inp.id) && liveVal !== undefined && liveVal !== null && liveVal !== ""}

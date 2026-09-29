@@ -8,6 +8,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import url from "url";
+import crypto from "crypto";
 import { loadUiConfig, rememberWorkflow, forgetWorkflow, loadUntested, saveUntested, migrateUntestedFromLocalConfig } from "./engine/config.js";
 import { loadWorkflows, findWorkflow, pruneMissingWorkflows } from "./engine/registry.js";
 import { nodeTypesMeta } from "./engine/nodes/index.js";
@@ -33,11 +34,26 @@ const app = express();
 app.use(express.json({ limit: "2mb" })); // 保存整张图
 
 // ── 认证：配置了 token 才启用；值不落日志 ────
+/** 恒时比较（防时序侧信道）；query 通道已移除（token 不进代理/浏览器历史）。 */
+function tokenOk(headerVal) {
+    const a = Buffer.from(String(headerVal ?? ""));
+    const b = Buffer.from(TOKEN);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 app.use("/api", (req, res, next) => {
     if (!TOKEN) return next();
-    if (req.headers["x-devops-token"] === TOKEN || req.query.token === TOKEN) return next();
+    if (tokenOk(req.headers["x-devops-token"])) return next();
     return res.status(401).json({ error: "unauthorized（在设置里填 token）" });
 });
+
+// ── 启动清扫：.tmp 下一次性暂存目录与 verify 残留（启动时无任务在跑，删除安全） ────
+try {
+    for (const f of fs.readdirSync(path.join(__dirname, ".tmp"), { withFileTypes: true })) {
+        if (/^(stage-|tarpack-)/.test(f.name) || /^rendered-tpl-verify-/.test(f.name)) {
+            fs.rmSync(path.join(__dirname, ".tmp", f.name), { recursive: true, force: true });
+        }
+    }
+} catch { /* .tmp 不存在则忽略 */ }
 
 // ── 工作流 ────
 app.get("/api/workflows", (req, res) => {
@@ -198,7 +214,9 @@ app.post("/api/jobs", (req, res) => {
             // GUI 内存态执行：load 后一切以内存为准，未保存的改动也能直接运行
             const problems = validateWorkflow(doc);
             if (problems.length) return res.status(400).json({ error: `内存态校验失败:\n  - ${problems.join("\n  - ")}` });
-            wf = { path: String(req.body?.workflowPath || `memory:${doc.name}`), doc };
+            // name 回填（与磁盘加载一致：title ?? 文件名）——audit 与 prod 门禁比对依赖它
+            const memDoc = { ...doc, name: doc.title ?? doc.name ?? String(req.body?.workflowPath || "memory").split(/[\\/]/).pop().replace(/\.json$/i, "") };
+            wf = { path: String(req.body?.workflowPath || `memory:${memDoc.name}`), doc: memDoc };
         } else {
             wf = findWorkflow(String(wfRef || ""));
         }
@@ -271,6 +289,7 @@ app.post("/api/jobs/:id/stream", (req, res) => {
         if (run.status === "ok" || run.status === "failed") {
             send({ type: "end", status: run.status });
             stop();
+            clearInterval(heartbeat); // 终态显式清心跳（不依赖 res finish 补发 close）
             res.end();
         }
     };

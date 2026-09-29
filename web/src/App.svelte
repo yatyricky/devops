@@ -2,13 +2,18 @@
   import { getContext, setContext } from "svelte";
   import { SvelteFlow, Background, Controls, MiniMap } from "@xyflow/svelte";
   import { api } from "./api.js";
-  import { canConnect, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, GROUP_BAR, groupBarHeight } from "./types.js";
+  import { canConnect, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, isTunnelEdge, nodeTitle, portLabel, basenameNoExt, dirOf } from "./types.js";
+  import { makeInfer } from "./lib/infer.js";
+  import { GROUP_COLORS, groupAABB, groupBoxOf, crossEdges, collapsedWidth, collapsedHeight, makeGroupNode } from "./lib/groups.js";
+  import { toDocument } from "./lib/docIO.js";
   import { ui } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
   import GroupBox from "./GroupBox.svelte";
   import Palette from "./Palette.svelte";
   import CanvasDrop from "./CanvasDrop.svelte";
   import LogDrawer from "./LogDrawer.svelte";
+  import OpenModal from "./OpenModal.svelte";
+  import RunModal from "./RunModal.svelte";
 
   // ── 全局状态 ────
   let metas = $state([]);
@@ -16,7 +21,7 @@
   let currentPath = $state("");
   let title = $state("");          // 显示名（工作流唯一可编辑标识；文件路径即身份）
   let docRepoDir = $state("");     // 透传字段：旧文档里的 repoDir 原样保留，不再提供编辑框
-  let displayName = $derived(title || (currentPath ? currentPath.split(/[\\/]/).pop().replace(/\.json$/i, "") : ""));
+  let displayName = $derived(title || (currentPath ? basenameNoExt(currentPath) : ""));
   let nodes = $state([]), edges = $state([]), tasks = $state({});
   let autoDirty = $state(false);   // 关键变更未落盘（自动写盘管）
   let layoutDirty = $state(false); // 布局（节点位置）未保存（手动"保存"管）
@@ -27,8 +32,8 @@
   let ignoreDirtyUntil = 0;
   let definer = $state(/** @type {{ nodes: string[], name: string, label: string, mutates: boolean, problems: string[] } | null} */ (null));
   let hoverTask = $state(/** @type {string | null} */ (null));
-  let runModal = $state(/** @type {{ task: string, label: string, mutates: boolean, inputs: {name:string,label:string,fallback:string,value:string}[], dryRun: boolean, needProd: boolean, prodVal: string } | null} */(null));
-  let openModal = $state(/** @type {{ mode: "open" | "new", path: string, title: string } | null} */(null));
+  let runModal = $state(/** @type {{ task: string, label: string, needProd: boolean } | null} */(null));
+  let openModal = $state(/** @type {{ mode: "open" | "new" } | null} */(null));
   let logRef = $state(null);
 
   const typeMap = $derived(ui.nodeTypesMap);
@@ -38,66 +43,9 @@
 
   // 节点卡片经 context 拿编辑/删除回调与连线查询（xyflow 自建组件树，props 传不进节点组件）
 
-  /**
-   * 编辑期解析某节点某输入口的当前值：连线（上游为 path.resolve 时递归推断）→
-   * 上游按 outputValueKey 取 data 字段 → 未连线回读手填 lit。不可解 → undefined。
-   */
-  function resolvePortValue(nodeId, handleId, depth = 0) {
-    if (depth > 8) return undefined;
-    const e = edges.find(x => x.kind !== "seq" && !String(x.id).startsWith("tnl-") && x.target === nodeId && x.targetHandle === handleId);
-    if (e) {
-      const src = nodes.find(n => n.id === e.source);
-      if (!src) return undefined;
-      if (src.type === "path.resolve") return inferPathResolve(src, depth + 1);
-      if (src.type === "string.join") return inferStringJoin(src, depth + 1);
-      const key = typeMap[src.type]?.outputValueKey ?? handleId;
-      return src.data?.[key];
-    }
-    const self = nodes.find(n => n.id === nodeId);
-    return self?.data?.lit?.[handleId];
-  }
-
-  /**
-   * path.resolve 编辑期输出推断（与引擎 run 同语义）：
-   * 全部 pN 来源为 string 常量接入或手填（lit）→ 返回拼接结果；任一非常量来源 → undefined（运行时才知道）。
-   */
-  function inferPathResolve(src, depth = 0) {
-    const count = Math.min(16, Math.max(1, Number(src.data.count ?? 2) || 2));
-    const style = ["posix", "windows", "auto"].includes(src.data.style) ? src.data.style : "posix";
-    const home = localStorage.getItem("devops-home") ?? ""; // 不可用时 ~ 原样保留
-    const expandHome = v => (v === "~" ? (home || "~") : v.startsWith("~/") ? (home ? home + v.slice(1) : v) : v);
-    const norm = v => expandHome(String(v)).replace(/\\/g, "/");
-    const segs = [];
-    for (let i = 1; i <= count; i++) {
-      const v = String(resolvePortValue(src.id, `p${i}`, depth) ?? "").trim();
-      if (!v) return undefined; // 任一段不可静态确定 → 整体不可推断
-      segs.push(norm(v));
-    }
-    const isAbsBase = seg => seg.startsWith("/") || /^[A-Za-z]:\//.test(seg);
-    let full = "";
-    for (const seg of segs) {
-      full = (!full || isAbsBase(seg)) ? seg : `${full.replace(/\/+$/, "")}/${seg}`;
-    }
-    let out = full || "/";
-    if (style === "windows") out = out.replace(/\//g, "\\");
-    else if (style === "auto" && /^[A-Za-z]:\//.test(out)) out = out.replace(/\//g, "\\");
-    return out;
-  }
-
-  /**
-   * string.join 编辑期输出推断（与引擎 run 同语义）：
-   * 全部 pN 来源为 string 常量接入或手填（lit）→ 返回拼接结果；任一非常量来源 → undefined（运行时才知道）。
-   */
-  function inferStringJoin(src, depth = 0) {
-    const count = Math.min(16, Math.max(1, Number(src.data.count ?? 2) || 2));
-    const delimiter = String(src.data.delimiter ?? "");
-    const segs = [];
-    for (let i = 1; i <= count; i++) {
-      const v = String(resolvePortValue(src.id, `p${i}`, depth) ?? "").trim();
-      if (!v) return undefined; // 任一段不可静态确定 → 整体不可推断
-      segs.push(v);
-    }
-    return segs.join(delimiter);
+  /** 编辑期取值/推断（lib/infer 工厂注入当前图状态；调用时取当前 $state 值） */
+  function infer() {
+    return makeInfer({ nodes, edges, typeMap: ui.nodeTypesMap });
   }
 
   setContext("devnode-actions", {
@@ -109,32 +57,39 @@
     onpalette: onPalette,
     /** 某输入口是否已连线（struct 字段口连线时隐藏手填控件） */
     isWiredAsTarget(nodeId, handleId) {
-      return edges.some(e => e.kind !== "seq" && !String(e.id).startsWith("tnl-") && e.target === nodeId && e.targetHandle === handleId);
+      return edges.some(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === nodeId && e.targetHandle === handleId);
     },
     /** 某输入口的连线源节点（struct.split 回溯上游字段定义用） */
     getSourceNode(nodeId, handleId) {
-      const e = edges.find(e => e.kind !== "seq" && !String(e.id).startsWith("tnl-") && e.target === nodeId && e.targetHandle === handleId);
+      const e = edges.find(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === nodeId && e.targetHandle === handleId);
       return nodes.find(n => n.id === e?.source);
     },
     resolveInput(nodeId, handleId) {
-      return resolvePortValue(nodeId, handleId);
+      return infer().resolvePortValue(nodeId, handleId);
+    },
+    /** 某节点的有效出口列表（structSplit 回溯需要全图上下文，App 提供；规则=effectiveOutputs 单源） */
+    resolveOutputs(nodeId) {
+      const n = nodes.find(x => x.id === nodeId);
+      if (!n) return undefined;
+      const meta = ui.nodeTypesMap[n.type];
+      return effectiveOutputs(meta, n.data, { edges, nodes, id: nodeId });
     },
     /** Group 隧道：某组的跨组边（入 = 组外→组内；出 = 组内→组外），与编号 effect 同序 */
     groupEdges(gid) {
-      return crossEdges(groupBoxOf(gid));
+      return crossEdges(edges, groupBoxOf(nodes, gid));
     },
     /** 收起/展开黑箱条：成员 hidden 联动 + 组尺寸条形化/恢复 AABB */
     oncollapse(gid, collapsed) {
-      const g = groupBoxOf(gid);
+      const g = groupBoxOf(nodes, gid);
       if (!g) return;
       const members = g.data.memberIds ?? [];
-      const barH = collapsedHeight(g);
+      const barH = collapsedHeight(edges, g);
       nodes = nodes.map(n => {
         if (n.type === "groupbox" && n.data.__gid === gid) {
           if (collapsed) {
-            return { ...n, data: { ...n.data, collapsed: true }, width: collapsedWidth(g), height: barH };
+            return { ...n, data: { ...n.data, collapsed: true }, width: collapsedWidth(nodes, g), height: barH };
           }
-          const aabb = groupAABB(members) ?? { width: 320, height: 200 };
+          const aabb = groupAABB(nodes, members) ?? { width: 320, height: 200 };
           return { ...n, data: { ...n.data, collapsed: false }, width: aabb.width, height: aabb.height };
         }
         if (members.includes(n.id)) return { ...n, hidden: collapsed };
@@ -149,17 +104,13 @@
       const n = nodes.find(x => x.id === nid);
       if (!n) return "";
       const meta = ui.nodeTypesMap[n.type];
-      const note = String(n.data?.note ?? "").trim();
-      const title = `${meta?.title ?? n.type}${note ? ` - ${note}` : ""}`;
-      const port = (side === "in" ? effectiveInputs(meta, n.data) : effectiveOutputs(meta, n.data))
+      const head = nodeTitle(meta, n.data);
+      const port = (side === "in" ? effectiveInputs(meta, n.data) : effectiveOutputs(meta, n.data, { edges, nodes, id: nid }))
         .find(p => p.id === hid);
-      if (!port) return title;
-      const req = side === "in" && port.required ? "*" : "";
-      return `${title}: ${port.id} (${port.type}${port.dynamic ? "⭑" : ""})${req}`;
+      if (!port) return head;
+      return `${head}: ${portLabel(port)}${side === "in" && port.required ? "*" : ""}`;
     },
-    /** 渲染模板：解析模板文件 → { vars, basename } 或 { error }（configDir 取当前工作流目录） */
     async resolveTplVars(p) {
-      const dirOf = x => { const i = Math.max(x.lastIndexOf("/"), x.lastIndexOf("\\")); return i > 0 ? x.slice(0, i) : x; };
       return api("/api/template/vars", { method: "POST", body: JSON.stringify({
         path: p, configDir: currentPath ? dirOf(currentPath) : "", repoDir: docRepoDir,
       }) });
@@ -168,14 +119,20 @@
     inferOutput(nodeId) {
       const n = nodes.find(x => x.id === nodeId);
       if (!n) return undefined;
-      if (n.type === "path.resolve") return inferPathResolve(n);
-      if (n.type === "string.join") return inferStringJoin(n);
+      const f = infer();
+      if (n.type === "path.resolve") return f.inferPathResolve(n);
+      if (n.type === "string.join") return f.inferStringJoin(n);
       if (n.type === "template.render") return n.data?.inferredOut;
       return undefined;
     },
   });
 
-  function showToast(msg) { toast = msg; setTimeout(() => (toast = ""), 3000); }
+  let toastTimer = null;
+  function showToast(msg) {
+    toast = msg;
+    clearTimeout(toastTimer); // 连发时以最后一条为准，前一条的定时器不再提前清掉新提示
+    toastTimer = setTimeout(() => (toast = ""), 3000);
+  }
 
   // ── 初始化 ────
   $effect(() => { (async () => {
@@ -195,12 +152,16 @@
     try { ui.untestedNodeTypes = new Set((await api("/api/node-usage")).untested ?? []); } catch { /* 静默 */ }
   }
 
-  const busyTimer = setInterval(async () => {
-    try {
-      const cur = await api("/api/current");
-      busyText = cur ? `运行中: ${cur.app}/${cur.task}` : "空闲";
-    } catch { /* 静默 */ }
-  }, 5000);
+  // 状态栏轮询（组件销毁时清理，HMR/卸载不泄漏定时器）
+  $effect(() => {
+    const busyTimer = setInterval(async () => {
+      try {
+        const cur = await api("/api/current");
+        busyText = cur ? `运行中: ${cur.app}/${cur.task}` : "空闲";
+      } catch { /* 静默 */ }
+    }, 5000);
+    return () => clearInterval(busyTimer);
+  });
 
   // ── 工作流加载/保存 ────
   async function selectWorkflow(fp) {
@@ -211,7 +172,7 @@
   }
   function loadDoc(fp, doc) {
     currentPath = fp;
-    title = doc.title ?? doc.name ?? fp.split(/[\\/]/).pop().replace(/\.json$/i, "");
+    title = doc.title ?? doc.name ?? basenameNoExt(fp);
     docRepoDir = doc.repoDir ?? "";
     // 收起组的成员加载即 hidden（与 oncollapse 的联动态一致）
     const collapsedMembers = new Set((doc.groups ?? []).filter(g => g.collapsed).flatMap(g => g.nodes ?? []));
@@ -232,7 +193,7 @@
     tasks = doc.tasks ?? {};
     // 分组背景板：由 doc.groups 重建（含收起态；首帧 AABB 用近似尺寸，挂载后联动 effect 校正）
     const groupBoxes = (doc.groups ?? [])
-      .map(g => makeGroupNode(g.id, g.name ?? "新分组", g.color ?? "#4da3ff", (g.nodes ?? []).filter(id => nodes.some(n => n.id === id)), !!g.collapsed));
+      .map(g => makeGroupNode(nodes, g.id, g.name ?? "新分组", g.color ?? "#4da3ff", (g.nodes ?? []).filter(id => nodes.some(n => n.id === id)), !!g.collapsed));
     if (groupBoxes.length) {
       // 成员卡片抬到自己组的背景板之上（与 groupSelected 同一层级体系）
       const members = new Set(groupBoxes.flatMap(g => g.data.memberIds ?? []));
@@ -243,23 +204,7 @@
     ignoreDirtyUntil = Date.now() + 1000;
   }
   function toDoc() {
-    const realNodes = nodes.filter(n => n.type !== "groupbox");
-    return {
-      ...(title ? { title } : {}),
-      version: 1,
-      ...(docRepoDir ? { repoDir: docRepoDir } : {}),
-      nodes: realNodes.map(n => ({ id: n.id, type: n.type, position: [Math.round(n.position.x), Math.round(n.position.y)], data: stripDecor(n.data) })),
-      edges: edges.filter(e => !String(e.id).startsWith("tnl-")).map(e => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, ...(e.kind ? { kind: e.kind } : {}) })),
-      tasks: JSON.parse(JSON.stringify(tasks)),
-      // 分组：从 groupbox 节点还原（空组丢弃——全部成员删掉的组不再保留；collapsed 随条持久化）
-      groups: nodes.filter(n => n.type === "groupbox").map(g => ({
-        id: g.data.__gid, name: g.data.name, color: g.data.color, collapsed: !!g.data.collapsed,
-        nodes: (g.data.memberIds ?? []).filter(id => realNodes.some(m => m.id === id)),
-      })).filter(g => g.nodes.length),
-    };
-  }
-  function stripDecor(data) {
-    return Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith("__")));
+    return toDocument(nodes, edges, tasks, title, docRepoDir);
   }
   // ── 保存：关键变更（serializable 编辑 / node·edge·tasks 增删改）自动写盘（防抖）；
   //    节点位置等展示信息仍依赖手动保存（layoutDirty）。 ────
@@ -282,12 +227,13 @@
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => save(true), 600);
   }
-  async function doOpen() {
+  /** @param {{ mode: "open" | "new", path: string, title: string }} m 弹窗确认（OpenModal 组件回调） */
+  async function doOpen(m) {
     try {
-      const { path: fp } = openModal;
-      if (openModal.mode === "new") {
+      const fp = m.path;
+      if (m.mode === "new") {
         const doc = {
-          ...(openModal.title ? { title: openModal.title } : {}),
+          ...(m.title ? { title: m.title } : {}),
           version: 1,
           nodes: [
             { id: "ssh1", type: "ssh.session", position: [80, 200], data: {} },
@@ -361,79 +307,22 @@
   }
 
   // ── 分组：groupbox 背景板 = 专用 xyflow 节点（zIndex 垫底、不可 DEL），位置尺寸由成员实时 AABB 计算；
-  //    成员-组关系存在 data.memberIds，落盘时从 groupbox 节点还原成 doc.groups。 ────
-  // GROUP_PAD_X 左右留白加大：给隧道接口↔组内节点的转发段边留出横向空间走曲线（直贴边像渲染错误）
-  const GROUP_PAD = 14, GROUP_PAD_X = 150, GROUP_PAD_TOP = 42;
-  const GROUP_COLORS = ["#4da3ff", "#4cc38a", "#f5a623", "#ff6b6b", "#b18cff", "#56b6c2"];
-  /** 成员 AABB + padding；成员为空返回 null */
-  function groupAABB(memberIds) {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, found = 0;
-    for (const id of memberIds) {
-      const m = nodes.find(n => n.id === id);
-      if (!m || m.type === "groupbox") continue;
-      found++;
-      const w = m.measured?.width ?? 240, h = m.measured?.height ?? 60;
-      minX = Math.min(minX, m.position.x); minY = Math.min(minY, m.position.y);
-      maxX = Math.max(maxX, m.position.x + w); maxY = Math.max(maxY, m.position.y + h);
-    }
-    if (!found) return null;
-    return { x: minX - GROUP_PAD_X, y: minY - GROUP_PAD_TOP,
-      width: (maxX - minX) + GROUP_PAD_X * 2, height: (maxY - minY) + GROUP_PAD_TOP + GROUP_PAD };
-  }
-  /** 按 __gid 定位 groupbox 节点——xyflow 节点 id 是 `grp-${gid}`，别按裸 id 找 */
-  function groupBoxOf(gid) {
-    return nodes.find(n => n.type === "groupbox" && n.data.__gid === gid) ?? null;
-  }
-  /** 某组的跨组边（入 = 组外→组内；出 = 组内→组外）；过滤 tnl- 派生段边 */
-  function crossEdges(gbox) {
-    const members = new Set(gbox?.data.memberIds ?? []);
-    const inE = [], outE = [];
-    for (const e of edges) {
-      if (String(e.id).startsWith("tnl-")) continue;
-      const sIn = members.has(e.source), tIn = members.has(e.target);
-      if (sIn && !tIn) outE.push(e);
-      else if (!sIn && tIn) inE.push(e);
-    }
-    return { in: inE, out: outE };
-  }
-  /** 收起黑箱条规格：宽=与成员卡片一致（成员实测宽最大值，卡片内容自适应无统一常量；未测量回退 230）；
-   *  高=标题行 + 入口分栏 + 分隔线 + 出口分栏 + 页脚（types.js 同源公式） */
-  const GROUP_COLLAPSED_W = 230;
-  function collapsedWidth(gbox) {
-    let w = 0;
-    for (const id of gbox?.data.memberIds ?? []) {
-      const m = nodes.find(n => n.id === id);
-      w = Math.max(w, m?.measured?.width ?? 0);
-    }
-    return Math.round(w) || GROUP_COLLAPSED_W;
-  }
-  function collapsedHeight(gbox) {
-    const r = crossEdges(gbox);
-    return groupBarHeight(r.in.length, r.out.length);
-  }
-  function makeGroupNode(gid, name, color, memberIds, collapsed = false) {
-    const aabb = groupAABB(memberIds) ?? { x: 80, y: 80, width: 320, height: 200 };
-    const data = { __gid: gid, name, color, memberIds: [...memberIds], collapsed };
-    return {
-      id: `grp-${gid}`, type: "groupbox", position: { x: aabb.x, y: aabb.y },
-      width: collapsed ? collapsedWidth({ data }) : aabb.width,
-      height: collapsed ? collapsedHeight({ data }) : aabb.height,
-      // 层级：组外节点(0) < 背景板(1) < 组内成员(2)
-      zIndex: 1,
-      draggable: true, selectable: true, deletable: false,
-      data, selected: true,
-    };
-  }
+  //    成员-组关系存在 data.memberIds，落盘时从 groupbox 节点还原成 doc.groups。
+  //    纯逻辑（AABB/跨组边/收起条尺寸/构造）在 lib/groups.js，此处只留写状态的编排。 ────
   let groupableIds = $derived(nodes.filter(n => n.type !== "groupbox" && n.selected).map(n => n.id));
   let selectedGroupBox = $derived(nodes.find(n => n.type === "groupbox" && n.selected) ?? null);
-  /** 【组合】：shift+框选 >1 节点 → 建组（节点只属一个组，先从既有组移除） */
+  /** 按 __gid 给 groupbox 节点打补丁（data 合并或整节点替换），返回新的 nodes 数组 */
+  function patchGroupBox(gid, fn) {
+    return nodes.map(n => (n.type === "groupbox" && n.data.__gid === gid) ? fn(n) : n);
+  }
+  /** 【组合】：Ctrl+点选 >1 节点 → 建组（节点只属一个组，先从既有组移除） */
   function groupSelected() {
     const ids = groupableIds;
     if (ids.length < 2) return;
     const idSet = new Set(ids);
-    nodes = nodes.map(n => (n.type === "groupbox" && (n.data.memberIds ?? []).some(x => idSet.has(x)))
-      ? { ...n, data: { ...n.data, memberIds: n.data.memberIds.filter(x => !idSet.has(x)) }, selected: false } : n);
-    nodes = [...nodes, makeGroupNode(genId("grp"), "新分组", GROUP_COLORS[0], ids)];
+    stripFromGroups(ids); // 先从既有组移除（与节点删除同一条路径）
+    nodes = [...nodes.map(n => (n.type === "groupbox" ? { ...n, selected: false } : n)),
+      makeGroupNode(nodes, genId("grp"), "新分组", GROUP_COLORS[0], ids)];
     // 成员卡片抬到自己组的背景板之上（板 z1、成员 z2、组外节点 z0）
     nodes = nodes.map(n => (idSet.has(n.id) ? { ...n, zIndex: 2 } : n));
     markCritical();
@@ -477,14 +366,12 @@
   }
   /** 组名/颜色编辑（GroupBox 组件经 context 回调） */
   function onGroupData(gid, patch) {
-    nodes = nodes.map(n => (n.type === "groupbox" && n.data.__gid === gid)
-      ? { ...n, data: { ...n.data, ...patch } } : n);
+    nodes = patchGroupBox(gid, n => ({ ...n, data: { ...n.data, ...patch } }));
     markCritical();
   }
   /** 色板开关：打开时背景板临时置顶——色板作为板的子元素压不过成员卡片（板常态 z1，见 makeGroupNode） */
   function onPalette(gid, open) {
-    nodes = nodes.map(n => (n.type === "groupbox" && n.data.__gid === gid)
-      ? { ...n, zIndex: open ? 1000 : 1 } : n);
+    nodes = patchGroupBox(gid, n => ({ ...n, zIndex: open ? 1000 : 1 }));
   }
   /** 节点删除时从所属组中摘除（背景板随之收缩） */
   function stripFromGroups(ids) {
@@ -576,13 +463,14 @@
   /** @param {{ nodes: any[], edges: any[] }} p xyflow 内置删除键（DEL/Backspace）触发；收起态隧道段边不可删 */
   function onBeforeDelete({ nodes: delNodes, edges: delEdges }) {
     if (!confirmTaskRemoval(delNodes.map(n => n.id))) return false;
-    return { nodes: delNodes, edges: delEdges.filter(e => !String(e.id).startsWith("tnl-")) };
+    return { nodes: delNodes, edges: delEdges.filter(e => !isTunnelEdge(e)) };
   }
   function onDelete({ nodes: delNodes, edges: delEdges }) {
     if (delNodes.length) { stripFromTasks(delNodes.map(n => n.id)); stripFromGroups(delNodes.map(n => n.id)); markCritical(); }
     else if (delEdges.length) markCritical();
   }
-  function onMoveEnd() { if (Date.now() > ignoreDirtyUntil) layoutDirty = true; }
+  // 视口平移/缩放不改变文档内容（toDoc 不含视口）——不点亮保存星号；节点拖动由 onNodeDragStop 记 layoutDirty
+  function onMoveEnd() {}
 
   // ── 分组联动 ────
   // AABB 跟随：成员位置/测量尺寸变化 → 背景板重算（组拖拽中跳过，避免与原生拖拽互相拉扯）
@@ -596,11 +484,11 @@
       if (n.type !== "groupbox") return n;
       // 收起黑箱条：保持条形尺寸（宽=成员卡宽、高=groupBarHeight 公式），不做 AABB 重算
       if (n.data.collapsed) {
-        const barH = collapsedHeight(n);
-        const barW = collapsedWidth(n);
+        const barH = collapsedHeight(edges, n);
+        const barW = collapsedWidth(nodes, n);
         return (n.width === barW && n.height === barH) ? n : { ...n, width: barW, height: barH };
       }
-      const aabb = groupAABB(n.data.memberIds ?? []);
+      const aabb = groupAABB(nodes, n.data.memberIds ?? []);
       if (!aabb) return n;
       if (n.position.x === aabb.x && n.position.y === aabb.y && n.width === aabb.width && n.height === aabb.height) return n;
       return { ...n, position: { x: aabb.x, y: aabb.y }, width: aabb.width, height: aabb.height };
@@ -656,7 +544,7 @@
     /** @type {Set<string>} 需隐藏的原跨组边 */
     const hide = new Set();
     for (const e of edges) {
-      if (String(e.id).startsWith("tnl-")) continue;
+      if (isTunnelEdge(e)) continue;
       const sg = gboxes.find(g => (g.data.memberIds ?? []).includes(e.source));
       const tg = gboxes.find(g => (g.data.memberIds ?? []).includes(e.target));
       if (sg && tg) continue; // 两端都在组内（不同组互连暂不支持，不处理）
@@ -674,11 +562,11 @@
       want.push({ id: `tnl-${e.id}-b`, source: g.id, sourceHandle: th, target: e.target, targetHandle: e.targetHandle ?? null, selectable: false });
     }
     // hidden 同步：hide 集内必 hidden、集外真实边必可见（收起→展开时自动复原直连边）
-    if (edges.some(e => !String(e.id).startsWith("tnl-") && hide.has(e.id) !== !!e.hidden)) {
-      edges = edges.map(e => (String(e.id).startsWith("tnl-") || hide.has(e.id) === !!e.hidden) ? e : { ...e, hidden: hide.has(e.id) });
+    if (edges.some(e => !isTunnelEdge(e) && hide.has(e.id) !== !!e.hidden)) {
+      edges = edges.map(e => (isTunnelEdge(e) || hide.has(e.id) === !!e.hidden) ? e : { ...e, hidden: hide.has(e.id) });
     }
     // 幂等 diff：段边补缺/去多/清 stale
-    const curTnl = new Map(edges.filter(e => String(e.id).startsWith("tnl-")).map(e => [e.id, e]));
+    const curTnl = new Map(edges.filter(isTunnelEdge).map(e => [e.id, e]));
     const missing = [...want].filter(w => {
       const c = curTnl.get(w.id);
       return !c || c.hidden || c.source !== w.source || c.target !== w.target || c.sourceHandle !== w.sourceHandle || c.targetHandle !== w.targetHandle;
@@ -690,19 +578,24 @@
   });
 
   // 连线动画跟随选中：仅与选中节点相连（或被选中）的数据边播放虚线动画；顺序边恒为静态。
-  // EdgeWrapper 只响应 edge 对象引用变化，因此必须整组替换对象，不能就地改属性。
+  // EdgeWrapper 只响应 edge 对象引用变化——只替换 animated 需要翻转的边，未变的保引用（避免全体重渲染）。
   $effect(() => {
-    const anim = e => e.kind !== "seq" && !String(e.id).startsWith("tnl-") && (selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target) || !!e.selected);
-    if (edges.some(e => !!e.animated !== anim(e))) {
-      edges = edges.map(e => ({ ...e, animated: anim(e) }));
-    }
+    const anim = e => e.kind !== "seq" && !isTunnelEdge(e) && (selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target) || !!e.selected);
+    let changed = false;
+    const next = edges.map(e => {
+      const want = anim(e);
+      if (!!e.animated === want) return e;
+      changed = true;
+      return { ...e, animated: want };
+    });
+    if (changed) edges = next;
   });
 
   // ── 动态出口：源节点的有效出口不含某边的 sourceHandle 时，该边自动消失 ────
   // 例：struct.split 的上游字段删除 → 对应出口上的连线随之断开。出口列表未知（[] 由规则明确给出）也删。
   $effect(() => {
     const dead = edges.filter(e => {
-      if (e.kind === "seq" || String(e.id).startsWith("tnl-")) return false; // tnl- 是派生段边（伪句柄），删除会与隧道 effect 无限乒乓
+      if (e.kind === "seq" || isTunnelEdge(e)) return false; // tnl- 是派生段边（伪句柄），删除会与隧道 effect 无限乒乓
       const src = nodes.find(n => n.id === e.source);
       const meta = typeMap[src?.data?.__type ?? src?.type];
       if (!src || !meta) return false;
@@ -727,10 +620,8 @@
   function openRun(taskName) {
     const t = tasks[taskName];
     runModal = {
-      task: taskName, label: t.label ?? taskName, mutates: !!t.mutates,
-      dryRun: false,
+      task: taskName, label: t.label ?? taskName,
       needProd: !!t.mutates && currentEntry?.serverType === "prod",
-      prodVal: "",
     };
   }
   /** 定义任务模式下点任务按钮 = 载入该任务进入编辑（保存同名任务即覆盖） */
@@ -750,21 +641,22 @@
     ui.runTaskNodes = null;
     ui.runNodeInputs = null;
   }
-  async function doRun() {
+  /** @param {{ dryRun: boolean, prodVal: string }} p RunModal 确认回调 */
+  async function doRun(p) {
     const m = runModal;
-    if (m.needProd && !m.dryRun && m.prodVal !== displayName) { showToast(`需输入显示名 "${displayName}" 确认`); return; }
+    if (m.needProd && !p.dryRun && p.prodVal !== displayName) { showToast(`需输入显示名 "${displayName}" 确认`); return; }
     try {
       const { id } = await api("/api/jobs", { method: "POST", body: JSON.stringify({
-        workflow: currentPath, task: m.task, dryRun: m.dryRun,
+        workflow: currentPath, task: m.task, dryRun: p.dryRun,
         doc: toDoc(), // 内存态执行：未保存的改动也能直接跑（后端校验后以内存为准）
-        ...(m.needProd && !m.dryRun ? { confirmProd: m.prodVal } : {}),
+        ...(m.needProd && !p.dryRun ? { confirmProd: p.prodVal } : {}),
       }) });
       runModal = null;
       // 卡片外框状态：任务选点集（集外半透明灰）+ 节点执行状态清零，随流式事件更新
       ui.runTaskNodes = new Set(tasks[m.task].nodes ?? tasks[m.task].path ?? []);
       ui.nodeRunStatus = {};
       ui.runNodeInputs = {};
-      await logRef?.follow(id, `${displayName}/${m.task}${m.dryRun ? " (dry-run)" : ""}`, {
+      await logRef?.follow(id, `${displayName}/${m.task}${p.dryRun ? " (dry-run)" : ""}`, {
         onNode: ns => { ui.nodeRunStatus = ns ?? {}; },
         onNodeInputs: ni => { ui.runNodeInputs = ni ?? {}; },
       });
@@ -802,8 +694,8 @@
         <option value={w.path}>{w.error ? `✗ ${w.path}` : `${w.name}${w.serverType === "prod" ? " ⚠PROD" : ""}`}</option>
       {/each}
     </select>
-    <button onclick={() => (openModal = { mode: "open", path: "", title: "" })}>打开…</button>
-    <button onclick={() => (openModal = { mode: "new", path: "", title: "" })}>新建…</button>
+    <button onclick={() => (openModal = { mode: "open" })}>打开…</button>
+    <button onclick={() => (openModal = { mode: "new" })}>新建…</button>
     <button class="primary" disabled={!dirty} onclick={() => save()}>{dirty ? "保存 *" : "保存"}</button>
     <span class="badge">{busyText}</span>
     <input class="token" type="password" placeholder="token" bind:value={tokenVal} onchange={tokenChange} />
@@ -898,36 +790,12 @@
 </div>
 
 {#if openModal}
-  <!-- 关闭只走显式按钮；点背景不关闭，防长表单误触丢内容 -->
-  <div class="overlay">
-    <div class="modal">
-      <h3>{openModal.mode === "new" ? "新建工作流" : "打开工作流"}</h3>
-      {#if openModal.mode === "new"}
-        <label>显示名（别名，可留空 = 用文件名）<input bind:value={openModal.title} placeholder="我的部署流程" /></label>
-      {/if}
-      <label>JSON 文件完整路径（可在磁盘任意位置）<input class="mono" bind:value={openModal.path} placeholder="C:/Users/yatyr/workspace/devops/workflows/my-app.json" /></label>
-      <div class="row">
-        <button class="primary" onclick={doOpen}>{openModal.mode === "new" ? "创建" : "打开"}</button>
-        <button onclick={() => (openModal = null)}>取消</button>
-      </div>
-    </div>
-  </div>
+  <OpenModal mode={openModal.mode} onconfirm={doOpen} oncancel={() => (openModal = null)} />
 {/if}
 
 {#if runModal}
-  <div class="overlay">
-    <div class="modal">
-      <h3>运行 {runModal.label}</h3>
-      <label class="mut"><input type="checkbox" bind:checked={runModal.dryRun} /> dry-run（只打印计划，不产生副作用）</label>
-      {#if runModal.needProd && !runModal.dryRun}
-        <label style="color:var(--err)">PROD：输入显示名 <b>{displayName}</b> 确认<input bind:value={runModal.prodVal} placeholder={displayName} /></label>
-      {/if}
-      <div class="row">
-        <button class="primary" onclick={doRun}>运行</button>
-        <button onclick={() => (runModal = null)}>取消</button>
-      </div>
-    </div>
-  </div>
+  <RunModal label={runModal.label} needProd={runModal.needProd} displayName={displayName}
+    onrun={doRun} oncancel={() => (runModal = null)} />
 {/if}
 
 <style>
@@ -955,12 +823,6 @@
   .definer .row input { width: auto; flex: 1; }
   .mut { display: flex; gap: 6px; align-items: center; font-size: 13px; }
   .mut input { width: auto; }
-  .overlay { position: fixed; inset: 0; background: rgba(4, 8, 14, .66); display: flex; align-items: center; justify-content: center; z-index: 50; }
-  .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; width: min(520px, 92vw); }
-  .modal h3 { margin: 0 0 10px; font-size: 15px; }
-  .modal label { display: block; margin: 8px 0; font-size: 13px; }
-  .modal label input[type="text"], .modal label input:not([type]) { display: block; margin-top: 3px; }
-  .modal .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
   .dim { color: var(--dim); font-size: 12px; }
-  .mono { font-family: Consolas, monospace; }
+  .mono { font-family: var(--mono); }
 </style>

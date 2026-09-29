@@ -175,3 +175,12 @@
 - **P1-11 verify 补测**：sshconfig 首块语义/别名顺序/不支持指令（49→50 项）。
 - **P1-12 runModal.inputs 死功能**：删除（无填充点，弹窗恒走「无运行时输入」分支）。
 - **回归**：verify 50 项全绿；构建无警告；临时 wf 实测组合/收起/展开（gcollapse 为原生 button 且可点）、展开态直连边、自动保存落盘 groups/edges 干净、无控制台报错。
+
+## BUG-2026-09-30-03 里程碑1 评审 P2 全量清理（结构/DRY/死代码/打磨，review-milestone-1.md）
+
+- **镜像根治（提交 577ab8f）**：抽 engine/rules.js 零依赖纯规则模块（SOCKET_TYPES/canConnect/coerce/effectiveInputs/effectiveOutputs/isTunnelEdge/validateTaskSelection），引擎三处接入（types 转发、getInputs/getOutputs 委托、workflow 任务校验），web 经 file:.. 包依赖 import 同一文件——双端漂移根除，web/types.js 只留前端专用。
+- **引擎清理（提交 7eb7c25）**：删死代码（withDeployVersion/sshExec/sshSudo/validateReleaseName/ENVS_DIR/引擎 TYPE_COLORS/resolveRepoDir+repos 键/trackRemoteFile 三件套/cancelled 死分支）；expandHome/normalizePath/模板路径三分支/tar 互斥四处双写归一；remote.js runRemote 样板五处复用；getRefs 排序 NaN 安全。
+- **前端拆分与 DRY（本提交）**：App.svelte 846→~700 行——lib/infer.js（makeInfer 工厂+expandHomeLocal）、lib/groups.js（分组纯逻辑+GROUP_COLORS 单源）、lib/docIO.js（toDocument）抽出；OpenModal/RunModal 组件化（自持输入态，弹窗状态对象瘦身）；tnl- 内联判断 ×11 清零（isTunnelEdge 单源，含 lib 三处）；groupbox patch 模式 ×6 → patchGroupBox（groupSelected 复用 stripFromGroups）；端口 label/节点标题双写 → portLabel/nodeTitle（DevNode 与 tunnelLabel 同源）；DevNode 第三份 structSplit 镜像 → context.resolveOutputs（effectiveOutputs 单源）。
+- **杂项**：动画 effect 只替换 animated 翻转的边（保引用）；onMoveEnd 不再点星（视口不入文档）；showToast 计时器句柄化；busyTimer $effect 清理；index.html webview 补丁加固（无 RO 不 patch/兜底轮询可停/per-instance 轮询表/rAF 落败定时器清理）；/api/template/vars 错误统一 4xx（DevNode 补 .catch）；cli follow 30 分钟超时+注释修正；token 恒时比较（timingSafeEqual）+移除 query 通道；内存态 doc 回填 name；SSE 终态显式清心跳；remote.check 正则限长 500；CSS --mono 变量归一六处；.tmp stage/tarpack/verify 残留启动清扫。
+- **回归**：verify 50 项全绿；构建无警告；临时 wf 实测——打开（新 OpenModal）/组合/收起（标签经共享 portLabel/nodeTitle 正常）/展开复原/克隆（深拷贝+随组+不复制连线）/落盘干净/无控制台报错。
+- **明确未做（记录）**：App.svelte 的 HeaderBar/TaskBar/TaskDefiner 组件抽取（与数十个绑定纠缠，收益/风险比低，等下次功能迭代顺手做）；DevNode 三个 picker 刷新函数 usePicker 化（三者返回结构差异大，抽象后反而不直观）；HTTP 层自动化测试（需启动真实服务器进程，另行安排）。

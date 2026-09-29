@@ -18,6 +18,28 @@ export function genId(prefix = "n") {
   return `${prefix}${Date.now().toString(36).slice(-4)}${seq}`;
 }
 
+/** 端口 label 纯文本（DevNode 卡片 title 提示与 GroupBox 收起条 tunnelLabel 共用同一格式）。 */
+export function portLabel(p) {
+  return `${p.id} (${p.type}${p.dynamic ? "⭑" : ""})`;
+}
+
+/** 节点标题 `<类型 title>[ - 便笺]`（DevNode 头部与 tunnelLabel 共用）。 */
+export function nodeTitle(meta, data) {
+  const note = String(data?.note ?? "").trim();
+  return `${meta?.title ?? data?.__type ?? "?"}${note ? ` - ${note}` : ""}`;
+}
+
+/** 路径目录（浏览器端无 path.dirname；兼容 / 与 \）。 */
+export function dirOf(x) {
+  const i = Math.max(x.lastIndexOf("/"), x.lastIndexOf("\\"));
+  return i > 0 ? x.slice(0, i) : x;
+}
+
+/** 文件名去扩展名（默认 wf 显示名兜底用）。 */
+export function basenameNoExt(fp) {
+  return fp.split(/[\\/]/).pop().replace(/\.json$/i, "");
+}
+
 // ── Group 收起黑箱条布局常量（App 计算节点高度与 GroupBox 渲染行必须同源）────
 export const GROUP_BAR = { header: 36, row: 20, div: 9, pad: 8 };
 /** 收起条总高 = 标题行 + 入口数×行高 +（出入口都有时分隔线）+ 出口数×行高 + 页脚 padding */

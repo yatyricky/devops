@@ -8,7 +8,7 @@
  *   node cli.js run <wf> <task> [options]             # 运行任务（子图拓扑并发）
  *     <wf>   工作流名或 JSON 文件路径
  *     --dry-run            全节点打印计划，不产生副作用
- * *     --confirm-prod X     prod 门禁的显式确认（= 工作流名；非交互场景）
+ *     --confirm-prod X     prod 门禁的显式确认（= 工作流名；非交互场景）
  */
 import readline from "readline";
 import { findWorkflow, loadWorkflows } from "./engine/registry.js";
@@ -44,10 +44,12 @@ function parseArgs(argv) {
 
 /**
  * 跟随任务执行，流式打印日志。
+ * 30 分钟无进展（任务消失且不到终态）即超时退出——防队列异常时 CLI 永久轮询。
  * @param {string} id
  */
 async function follow(id) {
     let printed = 0;
+    const deadline = Date.now() + 30 * 60_000;
     for (;;) {
         const run = getRun(id);
         if (run) {
@@ -57,6 +59,9 @@ async function follow(id) {
                 console.error(`${C.r}[Failed] ${run.app}/${run.task}: ${run.error ?? ""}${C.R}`);
                 return 1;
             }
+        } else if (Date.now() > deadline) {
+            console.error(`${C.r}[Timeout] 任务 ${id} 长时间无进展，放弃等待（检查服务器与 .runs/）${C.R}`);
+            return 1;
         }
         await new Promise(r => setTimeout(r, 250));
     }

@@ -5,11 +5,10 @@
   import { getContext } from "svelte";
   import { Handle, Position } from "@xyflow/svelte";
   import { groupBarRowTop } from "./types.js";
+  import { GROUP_COLORS as COLORS } from "./lib/groups.js";
 
   let { id, data, selected } = $props();
   const { ongroup, onpalette, groupEdges, oncollapse, tunnelLabel } = getContext("devnode-actions");
-
-  const COLORS = ["#4da3ff", "#4cc38a", "#f5a623", "#ff6b6b", "#b18cff", "#56b6c2"];
 
   let editingName = $state(false);
   let nameDraft = $state("");
@@ -150,7 +149,7 @@
   .gswatch { width: 14px; height: 14px; border-radius: 50%; cursor: pointer;
     border: 1px solid rgba(255, 255, 255, .3); }
   .gswatch.on { outline: 2px solid #fff; outline-offset: 1px; }
-  .tunnelcounts { font-size: 10px; color: var(--dim); font-family: Consolas, monospace; flex: none; }
+  .tunnelcounts { font-size: 10px; color: var(--dim); font-family: var(--mono); flex: none; }
   .gcollapse { background: none; border: 1px solid var(--line); border-radius: 5px;
     color: var(--dim); cursor: pointer; padding: 1px 7px; font-size: 12px; flex: none; }
   .gcollapse:hover { color: var(--accent); border-color: var(--accent); }

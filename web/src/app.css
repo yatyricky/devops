@@ -3,6 +3,7 @@
   --bg: #10141a; --panel: #171d26; --panel2: #1d2530; --line: #2a3442;
   --fg: #d7dee8; --dim: #8a97a8; --accent: #4da3ff; --ok: #4cc38a;
   --warn: #f5a623; --err: #ff6b6b;
+  --mono: Consolas, "Cascadia Mono", monospace;
 }
 button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
   border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
@@ -12,7 +13,7 @@ button.danger { border-color: var(--err); color: var(--err); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 input, select, textarea { background: var(--panel2); border: 1px solid var(--line); color: var(--fg);
   border-radius: 6px; padding: 4px 8px; font-size: 13px; width: 100%; }
-textarea { font: 12px/1.5 Consolas, monospace; }
+textarea { font: 12px/1.5 var(--mono); }
 .badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
 .badge.prod { color: var(--err); border-color: var(--err); }
 
@@ -76,7 +77,7 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 .devnode .body .kv.pairrow .lbl { flex: 1 1 auto; min-width: 0; font-size: 10px; }
 .devnode .body .kv.pairrow input.inlit { flex: none; width: 30%; }
 .devnode .body .kvline { display: block; color: var(--dim); font-size: 11px; margin-top: 3px;
-  font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 连接端口用普通指针（覆盖 Svelte Flow 默认十字准星） */
 .svelte-flow__handle { cursor: default; }
@@ -105,7 +106,7 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 
 /* 卡片底部：ID + 便笺按钮一行；备注 TextArea 折叠在其上方 */
 .devnode .nidrow { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 1px 10px 5px; }
-.devnode .nid { font: italic 9px/1.4 Consolas, monospace; color: var(--dim); opacity: .7;
+.devnode .nid { font: italic 9px/1.4 var(--mono); color: var(--dim); opacity: .7;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .devnode .notebtn { font-size: 9px; padding: 0 6px; line-height: 1.5; flex: none; opacity: .6; }
 .devnode .notebtn:hover { opacity: 1; }
