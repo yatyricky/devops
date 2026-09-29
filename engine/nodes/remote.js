@@ -259,7 +259,7 @@ export default [
         outputs: [],
         widgets: [{ key: "useSudo", label: "sudo -n", kind: "boolean", default: true }],
         async run(ctx, node, inputs) {
-            const cmdStr = `chown -R ${inputs.user}:${inputs.user} ${sq(inputs.path)}`;
+            const cmdStr = `chown -R ${sq(inputs.user)}:${sq(inputs.user)} ${sq(inputs.path)}`;
             if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${buildCommand(cmdStr, node)}`); return; }
             const r = await sshRun(inputs.ssh, buildCommand(cmdStr, node), { log: ctx.log });
             if (r.code !== 0) throw new Error(`chown 失败: ${cmdStr}\n${r.err}`);

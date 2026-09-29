@@ -149,15 +149,6 @@
     if (meta?.sshAliasesPicker) refreshSshAliases();
   });
 
-  // ── 顶栏「刷新列表」一键触发：refreshTick +1 时各卡片刷自己的下拉 ────
-  $effect(() => {
-    const tick = ui.refreshTick;
-    if (!tick || !id) return;
-    if (meta?.refsPicker) refreshRefs();
-    if (meta?.scriptsPicker) refreshScripts();
-    if (meta?.sshAliasesPicker) refreshSshAliases();
-  });
-
   // ── 渲染模板：编辑期现场解析模板文件 → {{VAR}} 动态端口 / 不可推导时 struct 口 + 推断输出路径 ────
   let tplErr = $state("");
   $effect(() => {

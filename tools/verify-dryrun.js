@@ -347,6 +347,23 @@ await test("日志掩码: SECRET/TOKEN/PASSWORD 值打码", () => {
     assert.strictEqual(maskLine("DOMAIN=x"), "DOMAIN=x");
 });
 
+await test("日志掩码: JSON 形态 \"KEY\":\"VALUE\" 同样打码（struct/打印场景）", () => {
+    assert.strictEqual(maskLine('"JWT_SECRET":"topsecret"'), '"JWT_SECRET":"***"');
+    assert.strictEqual(maskLine('  "API_TOKEN": "abc123",'), '  "API_TOKEN": "***",');
+    assert.strictEqual(maskLine('"db_password":"p@ss"'), '"db_password":"***"');
+    assert.strictEqual(maskLine('"NAME":"正常值"'), '"NAME":"正常值"');
+    // 幂等：已掩码行再过一遍不变
+    assert.strictEqual(maskLine(maskLine('"JWT_SECRET":"topsecret"')), '"JWT_SECRET":"***"');
+});
+
+await test("getRun: id 白名单拒绝路径穿越（..%2Flocal-config 等）", () => {
+    assert.strictEqual(getRun("../../local-config"), null);
+    assert.strictEqual(getRun("..\\..\\local-config"), null);
+    assert.strictEqual(getRun("../package"), null);
+    assert.strictEqual(getRun("audit"), null);       // 非 <ts>-<n> 格式
+    assert.strictEqual(getRun("a-b/c.json"), null);  // 含路径分隔符
+});
+
 // ── struct 构造/析构 + 动态出口 ────
 const structMake = { id: "m", type: "struct.make", position: [0, 0], data: { fields: [
     { key: "SERVER_TYPE", type: "string", value: "prod" },

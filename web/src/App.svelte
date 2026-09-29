@@ -700,7 +700,7 @@
   // 例：struct.split 的上游字段删除 → 对应出口上的连线随之断开。出口列表未知（[] 由规则明确给出）也删。
   $effect(() => {
     const dead = edges.filter(e => {
-      if (e.kind === "seq") return false;
+      if (e.kind === "seq" || String(e.id).startsWith("tnl-")) return false; // tnl- 是派生段边（伪句柄），删除会与隧道 effect 无限乒乓
       const src = nodes.find(n => n.id === e.source);
       const meta = typeMap[src?.data?.__type ?? src?.type];
       if (!src || !meta) return false;

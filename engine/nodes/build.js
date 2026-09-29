@@ -62,6 +62,8 @@ export default [
             if (!repoDir) throw new Error("git.checkout 未连接仓库目录");
             const ref = String(inputs.ref ?? "").trim();
             if (!ref) throw new Error("git.checkout 未配置 ref");
+            // ref 白名单（分支/tag/hash 字符集）：cmd 走 shell，拒绝一切元字符注入
+            if (!/^[A-Za-z0-9._/-]+$/.test(ref)) throw new Error(`git.checkout 非法 ref（仅允许字母数字._/-）: ${ref}`);
             /** 切换前的 HEAD：分支名；detached 时为 hash */
             let original;
             try {

@@ -149,3 +149,13 @@
 - **回归**：平移画布 → 星亮 → 点保存 → 星灭且按钮禁用；编辑字段 → 自动保存后星灭；拖节点 → 星亮 → 手动保存 → 星灭。
 - **顺带观察（未改）**：`onMoveEnd` 对纯视口平移/缩放也置 layoutDirty，而 toDoc 不持久化视口——保存前星号亮属轻微误报，用户可点保存熄灭；若在意可后续区分视口移动与节点拖动。
 - **状态**：已修复（本次提交）。
+
+## BUG-2026-09-30-01 里程碑1 评审 P0 六项修复（review-milestone-1.md）
+
+- **P0-1 收起组跨组 seq 边 → effect 乒乓死循环**：动态出口清理 effect 不过滤 tnl- 段边，段边伪句柄 `__seqOut` 不在 effectiveOutputs → 判 dead 删除 → 隧道 effect 重建 → 无限乒乓（Svelte effect_update_depth_exceeded / toast 刷屏）。修复：dead 过滤加 `tnl-` 排除（App.svelte）。
+- **P0-2 getRun 路径穿越**：`/api/jobs/:id` 未校验 id 即拼路径，`..%2F..%2Flocal-config` 可读出 token 明文。修复：id 白名单 `/^[0-9a-z]+-[0-9a-z]+$/`（与 listRuns 文件名同源格式）。
+- **P0-3 队列可被持久化故障打死**：finally 里 persist/appendAudit 裸同步写，`.runs/` 不可写 → queueTail rejected 无人 catch → 队列永久死锁 + unhandledRejection 终止进程。修复：persist/appendAudit 内建 try/catch（保内存运行），队列闭包不再可能 reject。
+- **P0-4 DevNode 复制粘贴的重复 refreshTick effect**：删一个——刷新列表不再双倍请求。
+- **P0-5 shell 注入点 ×3**：git.checkout ref 白名单 `[A-Za-z0-9._/-]+`；remote.chown 的 user 过 sq()；finalize 的 rm 改用 shellQuote。
+- **P0-6 掩码不识 JSON 形态**：`"JWT_SECRET":"xxx"` 完全漏过（log.print 打印 struct 即泄漏）。修复：正则补 JSON 形态（KEY 与值各自的引号）+ 大小写不敏感；掩码上移到 ctx.log 统一执行（覆盖 sshRun 回传的远端 stdout/stderr）；run.error 也掩码。幂等（已掩码行再过不变）。
+- **回归**：verify 47→49 项全绿（新增掩码 JSON 形态 5 断言 + getRun 白名单 5 断言）；临时 wf 实测跨组 seq 边收起——段边一次生成、两帧采样稳定、无 toast/报错，展开后三条原边直连复原。

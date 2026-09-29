@@ -3,6 +3,7 @@ import path from "path";
 import url from "url";
 import { sshRun, sshClose } from "./ssh.js";
 import { executeTask, findTaskEnv } from "./workflow.js";
+import { shellQuote } from "./release.js";
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,13 +45,15 @@ function writeJson(fp, data) {
 }
 
 function appendAudit(entry) {
-    fs.appendFileSync(path.join(RUNS_DIR, "audit.jsonl"), JSON.stringify(entry) + "\n", "utf8");
+    try {
+        fs.appendFileSync(path.join(RUNS_DIR, "audit.jsonl"), JSON.stringify(entry) + "\n", "utf8");
+    } catch (e) { console.error("[runner] audit 写入失败:", e.message); }
 }
 
-/** 日志行掩码：键名含 SECRET/TOKEN/PASSWORD/PASSPHRASE 的 KEY=VALUE 只显示 ***。 */
-const SECRET_KEY_RE = /([A-Za-z_]*(?:SECRET|TOKEN|PASSWORD|PASSPHRASE)[A-Za-z_]*)=(\S+)/g;
+/** 日志行掩码：键名含 SECRET/TOKEN/PASSWORD/PASSPHRASE（不区分大小写）的 `KEY=VALUE` 与 JSON 形态 `"KEY":"VALUE"` 只显示 ***。 */
+const SECRET_KEY_RE = /([A-Za-z_]*(?:SECRET|TOKEN|PASSWORD|PASSPHRASE)[A-Za-z_]*)(\"?\s*[:=]\s*\"?)([^\s"',]+)/gi;
 export function maskLine(line) {
-    return String(line).replace(SECRET_KEY_RE, (_, k) => `${k}=***`);
+    return String(line).replace(SECRET_KEY_RE, (_, k, sep) => `${k}${sep}***`);
 }
 
 /** 键名敏感正则（markNodeInputs 值脱敏用）。 */
@@ -126,7 +129,8 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
             configDir: path.dirname(path.resolve(wfPath)),
             repoDir: wf.repoDir,
             log(msg) {
-                const line = { t: Date.now(), msg: String(msg) };
+                // 所有日志行统一掩码（含 sshRun 回传的远端 stdout/stderr——struct/JSON 形态机密不落日志）
+                const line = { t: Date.now(), msg: maskLine(String(msg)) };
                 run.logLines.push(line);
                 persist(run);
             },
@@ -159,7 +163,7 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
             run.status = "ok";
         } catch (err) {
             run.status = "failed";
-            run.error = err?.message ?? String(err);
+            run.error = maskLine(err?.message ?? String(err));
         } finally {
             try { await finalize(ctx); } catch (e) {
                 ctx.log(`[WARN] 收尾清理异常：${e.message}`);
@@ -193,7 +197,7 @@ async function finalize(ctx) {
         try { await fn(); } catch (e) { ctx.log(`[WARN] git 恢复失败：${e.message}`); }
     }
     for (const { ssh, path: p } of ctx.remoteFiles.reverse()) {
-        try { await sshRun(ssh, `sudo -n rm -f '${p}'`, { log: () => {} }); ctx.log(`[cleanup] 远端临时文件 ${p}`); } catch { /* 尽力 */ }
+        try { await sshRun(ssh, `sudo -n rm -f ${shellQuote(p)}`, { log: () => {} }); ctx.log(`[cleanup] 远端临时文件 ${p}`); } catch { /* 尽力 */ }
     }
     for (const s of ctx.sessions) sshClose(s);
 }
@@ -205,7 +209,9 @@ function sanitizeOptions(options) {
 
 /** @param {any} run */
 function persist(run) {
-    writeJson(path.join(RUNS_DIR, `${run.id}.json`), run);
+    // 不抛错：.runs/ 不可写（盘满/权限/被删）时保内存运行，队列不能因持久化故障而死锁
+    try { writeJson(path.join(RUNS_DIR, `${run.id}.json`), run); }
+    catch (e) { console.error("[runner] persist 失败:", e.message); }
 }
 
 /**
@@ -224,6 +230,8 @@ export function listRuns(limit = 50) {
 
 /** @param {string} id */
 export function getRun(id) {
+    // id 白名单：与 listRuns 文件名同源格式——防 /api/jobs/:id 路径穿越读任意 JSON（如 local-config）
+    if (!/^[0-9a-z]+-[0-9a-z]+$/.test(String(id))) return null;
     return runs.get(id) ?? readJson(path.join(RUNS_DIR, `${id}.json`));
 }
 
