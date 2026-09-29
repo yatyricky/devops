@@ -262,12 +262,13 @@
   // ── 保存：关键变更（serializable 编辑 / node·edge·tasks 增删改）自动写盘（防抖）；
   //    节点位置等展示信息仍依赖手动保存（layoutDirty）。 ────
   let autoSaveTimer = null;
-  /** @param {boolean} [silent] 自动保存静默（不 toast）；布局脏不由自动保存清除 */
+  /** @param {boolean} [silent] 自动保存静默（不 toast、不清布局脏——布局变动以手动保存为准） */
   async function save(silent = false) {
     clearTimeout(autoSaveTimer);
     try {
       await api("/api/workflows/save", { method: "POST", body: JSON.stringify({ path: currentPath, doc: toDoc() }) });
       autoDirty = false;
+      if (!silent) layoutDirty = false; // 手动保存同时清除布局脏，星号（保存 *）才熄得掉
       if (!silent) showToast("已保存");
       wfList = await api("/api/workflows");
       refreshUsage();
