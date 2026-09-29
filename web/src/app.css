@@ -71,6 +71,10 @@ textarea { font: 12px/1.5 Consolas, monospace; }
 .devnode .body input.winvalid { border-color: var(--err); }
 .devnode .body .errline { display: block; color: var(--err); font-size: 11px; margin-top: 3px; }
 .devnode .body input, .devnode .body textarea { user-select: text; -webkit-user-select: text; }
+/* pair row (stage.copy): label flexes, from/to fixed 30% right-aligned */
+.devnode .body .kv.pairrow { justify-content: flex-end; gap: 4px; }
+.devnode .body .kv.pairrow .lbl { flex: 1 1 auto; min-width: 0; font-size: 10px; }
+.devnode .body .kv.pairrow input.inlit { flex: none; width: 30%; }
 .devnode .body .kvline { display: block; color: var(--dim); font-size: 11px; margin-top: 3px;
   font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
