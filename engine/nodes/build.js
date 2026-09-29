@@ -164,7 +164,6 @@ export default [
         widgets: [
             { key: "entries", label: "打包条目（白名单，相对 dir）", kind: "list", default: [] },
             { key: "excludes", label: "不打包条目（黑名单，路径段）", kind: "list", default: [] },
-            { key: "prefix", label: "文件名前缀（name 未连线时用）", kind: "string", default: "" },
         ],
         async run(ctx, node, inputs) {
             const entries = node.data.entries ?? [];
@@ -173,7 +172,7 @@ export default [
                 throw new Error("tar.pack：打包条目与不打包条目只能二选一（白名单或黑名单）");
             }
             const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
-            const base = inputs.name || `${node.data.prefix || "archive"}-${ts}`;
+            const base = inputs.name || `archive-${ts}`;
             const archiveName = `${base}.tgz`;
             const archivePath = path.join(TMP_DIR, archiveName);
 
