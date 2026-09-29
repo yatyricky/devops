@@ -929,4 +929,34 @@ await test("stage.copy: from 相对 root 解析（非 cwd）+ 递归 + to 缺省
     fsMod.rmSync(extFile, { force: true });
 });
 
+// ── sshconfig 解析（首块生效语义） ────
+await test("sshconfig: OpenSSH 首块生效（User/Port 首值优先；HostName 取首个显式设置的块）+ 别名顺序", async () => {
+    const { parseConfig, listAliases } = await import("../engine/sshconfig.js");
+    const fp = path.join(ROOT, ".tmp", "sshcfg-verify");
+    fs.writeFileSync(fp, [
+        "Host alpha beta",
+        "  User alice",
+        "Host alpha",
+        "  HostName override.example.com",
+        "  User bob",
+        "  Port 2222",
+        "Host beta",
+        "  HostName beta.example.com",
+        "Host gamma",
+        "  ProxyJump jumpbox",
+    ].join("\n"), "utf8");
+    try {
+        const m = parseConfig(fp);
+        const alpha = m.get("alpha");
+        assert.strictEqual(alpha.user, "alice", "前块 User 优先（bob 忽略）");
+        assert.strictEqual(alpha.host, "override.example.com", "前块未设 HostName，取后块显式值");
+        assert.strictEqual(alpha.port, 2222);
+        const beta = m.get("beta");
+        assert.strictEqual(beta.user, "alice", "跨块继承首值");
+        assert.strictEqual(beta.host, "beta.example.com");
+        assert.ok((m.get("gamma").unsupported ?? []).some(u => /proxyjump/i.test(u)), "不支持指令被记录");
+        assert.deepStrictEqual(listAliases(fp), ["alpha", "beta", "gamma"], "别名按出现顺序");
+    } finally { fs.unlinkSync(fp); }
+});
+
 console.log(`\nOK: ${passed} 项断言全部通过`);

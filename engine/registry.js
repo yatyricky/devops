@@ -19,9 +19,8 @@ function normalizePath(p) {
  */
 
 /**
- * 加载全部工作流；单个失败不拖垮整体。
- * 历史里的失效路径 / 损坏文件直接从历史移除（不删文件本身）；
- * 仓库目录扫描发现的文件不属于"历史"，损坏时不动文件。
+ * 加载全部工作流；单个失败不拖垮整体（列表中以 ✗ + error 呈现，不静默消失）。
+ * 纯读——失效条目的清理在启动时 pruneMissingWorkflows() 一次完成（GET 不带写副作用）。
  * @returns {{ path: string, doc?: any, error?: string }[]}
  */
 export function loadWorkflows() {
@@ -39,12 +38,14 @@ export function loadWorkflows() {
     };
 
     const openedRows = opened.map(load);
-    // 失效路径 / 损坏文件 → 从历史移除（forgetWorkflow 写回 local-config）
-    const broken = openedRows.filter(r => r.error).map(r => r.path);
-    if (broken.length) for (const p of broken) forgetWorkflow(p);
-
     const shipRows = ships.filter(fp => !opened.includes(fp)).map(load);
-    return [...openedRows.filter(r => !r.error), ...shipRows];
+    return [...openedRows, ...shipRows];
+}
+
+/** 启动时清理：失效路径 / 损坏文件从历史移除（不删文件本身）。 */
+export function pruneMissingWorkflows() {
+    const broken = loadWorkflows().filter(r => r.error).map(r => r.path);
+    for (const p of broken) forgetWorkflow(p);
 }
 
 /**

@@ -9,11 +9,15 @@
   /** @type {{raw: string, html: string}[]} */
   let lines = $state([]);
   let box = $state(null);
+  /** 上一个跟踪流的取消器：连续跑任务时先断旧流，避免两条流交织写同一日志 */
+  let curAbort = null;
+  const MAX_LINES = 5000;
 
   /** @param {string} msg */
   function append(msg) {
-    // ANSI 染色在入列时转换一次（行数多时避免重复解析）
+    // ANSI 染色在入列时转换一次（行数多时避免重复解析）；超限成对裁剪（raw/html 同源）
     lines.push({ raw: String(msg), html: ansiToHtml(msg) });
+    if (lines.length > MAX_LINES) lines.splice(0, lines.length - MAX_LINES);
     if (box) requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; });
   }
 
@@ -24,6 +28,9 @@
    * @param {{ onNode?: (nodeStatus: Record<string,string> | null) => void, onNodeInputs?: (nodeInputs: Record<string, Record<string,string>> | null) => void }} [hooks] 节点状态/实时输入回调
    */
   export async function follow(id, t, hooks = {}) {
+    curAbort?.abort();
+    curAbort = new AbortController();
+    const signal = curAbort.signal;
     title = t; lines.length = 0; status = "运行中"; open = true;
     await streamJob(id, {
       log: append,
@@ -31,7 +38,7 @@
       node: ns => hooks.onNode?.(ns),
       nodeInputs: ni => hooks.onNodeInputs?.(ni),
       end: () => {},
-    });
+    }, signal);
     if (status !== "失败") append("[Done] 任务结束");
   }
 </script>

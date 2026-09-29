@@ -132,7 +132,7 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
                 // 所有日志行统一掩码（含 sshRun 回传的远端 stdout/stderr——struct/JSON 形态机密不落日志）
                 const line = { t: Date.now(), msg: maskLine(String(msg)) };
                 run.logLines.push(line);
-                persist(run);
+                persistSoon(run);
             },
             mask: maskLine,
             // 副作用登记（finally 统一处理）
@@ -145,7 +145,7 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
             /** 节点执行状态标记（GUI 卡片外框：running/ok/failed）；随 run 持久化 + SSE 快照推送 */
             markNode(nodeId, status) {
                 run.nodeStatus = { ...run.nodeStatus, [nodeId]: status };
-                persist(run);
+                persistSoon(run);
             },
             /** 节点实际收到的输入值（GUI wired 控件实时值）；脱敏后随 run 持久化 + SSE 快照推送 */
             markNodeInputs(nodeId, inputValues) {
@@ -154,7 +154,7 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
                     out[k] = displayValue(k, v);
                 }
                 run.nodeInputs = { ...run.nodeInputs, [nodeId]: out };
-                persist(run);
+                persistSoon(run);
             },
         };
 
@@ -170,6 +170,7 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
             }
             run.endedAt = new Date().toISOString();
             currentJob = null;
+            if (run._persistTimer) { clearTimeout(run._persistTimer); run._persistTimer = null; }
             persist(run);
             appendAudit({
                 ts: run.endedAt,
@@ -181,6 +182,8 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
                 status: run.status,
                 error: run.error,
             });
+            // 终态后延迟回收内存（详情走磁盘 readJson；SSE/轮询不受影响）
+            setTimeout(() => runs.delete(run.id), 60_000).unref?.();
         }
     });
 
@@ -210,8 +213,24 @@ function sanitizeOptions(options) {
 /** @param {any} run */
 function persist(run) {
     // 不抛错：.runs/ 不可写（盘满/权限/被删）时保内存运行，队列不能因持久化故障而死锁
-    try { writeJson(path.join(RUNS_DIR, `${run.id}.json`), run); }
+    try {
+        const { _persistTimer, ...serializable } = run; // eslint-disable-line @typescript-eslint/no-unused-vars
+        writeJson(path.join(RUNS_DIR, `${run.id}.json`), serializable);
+    }
     catch (e) { console.error("[runner] persist 失败:", e.message); }
+}
+
+/**
+ * 节流持久化：每行日志/状态标记不再全量同步重写 run JSON（大日志任务 O(n²) IO 阻塞事件循环），
+ * 合并为至多 400ms 一次；终态在 finally 里 clearTimeout 后全量落盘。
+ * @param {any} run
+ */
+function persistSoon(run) {
+    if (run._persistTimer) return;
+    run._persistTimer = setTimeout(() => {
+        run._persistTimer = null;
+        persist(run);
+    }, 400);
 }
 
 /**

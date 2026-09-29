@@ -159,3 +159,19 @@
 - **P0-5 shell 注入点 ×3**：git.checkout ref 白名单 `[A-Za-z0-9._/-]+`；remote.chown 的 user 过 sq()；finalize 的 rm 改用 shellQuote。
 - **P0-6 掩码不识 JSON 形态**：`"JWT_SECRET":"xxx"` 完全漏过（log.print 打印 struct 即泄漏）。修复：正则补 JSON 形态（KEY 与值各自的引号）+ 大小写不敏感；掩码上移到 ctx.log 统一执行（覆盖 sshRun 回传的远端 stdout/stderr）；run.error 也掩码。幂等（已掩码行再过不变）。
 - **回归**：verify 47→49 项全绿（新增掩码 JSON 形态 5 断言 + getRun 白名单 5 断言）；临时 wf 实测跨组 seq 边收起——段边一次生成、两帧采样稳定、无 toast/报错，展开后三条原边直连复原。
+
+## BUG-2026-09-30-02 里程碑1 评审 P1 十二项修复（review-milestone-1.md）
+
+- **P1-1 streamJob 轮询重放/挂死/不可取消**：兜底轮询 `seen` 改从已投递行数续传（断流补齐不再整段重放）；读流 15s 无数据判挂死落到轮询（心跳 10s 一跳）；新增 AbortSignal 取消通道。
+- **P1-2 LogDrawer 流交织**：follow() 先 abort 旧流再开新流；lines 上限 5000 成对裁剪。
+- **P1-3 sshconfig 首块语义反了**：`matched` 恒 false 使 HostName 变成后块覆盖——改为 `hostSet` 显式记录（OpenSSH 首个获得的值生效，前块 User/Port 继续由 ?? 保证）；listAliases 复用 parseConfig（不再二次读盘解析）；parseConfig/listAliases 支持注入路径（可测试）。
+- **P1-4 双端镜像对齐**：web canConnect 补 SOCKET_TYPES 校验；effectiveInputs 块序对齐 engine（count→pair→tpl→field→dynamic）；effectiveOutputs structSplit 补 struct.make 源检查 + tnl- 过滤；validateTaskSelection inEdges 补 tnl- 过滤（收起组时报错文案不再把 grp-xxx 列为依赖）。
+- **P1-5 前端初始化白屏**：init effect 与 wf 下拉 onchange 补 try/catch + toast。
+- **P1-6 open|save 护栏**：仅收绝对路径（~ 可展开），拒绝相对路径（防随进程 cwd 漂移）；启动时空 token 打显著警告。
+- **P1-7 runs 内存无界 + O(n²) IO**：日志/状态持久化节流至 400ms（persistSoon，终态 finally 全量落盘并清定时器）；终态 60s 后回收内存（详情走磁盘）。
+- **P1-8 GET 副作用**：untested 迁移/播种与失效路径清理（新 pruneMissingWorkflows）移到启动时一次；GET /api/node-usage 与 loadWorkflows 变纯读（列表中失效条目显示 ✗，重启时清理）。
+- **P1-9 noteText 回弹**：textarea 去 bind:value（derived+bind+oninput 三写导致行尾空格被 trim 回弹），保留 oninput 写 data.note。
+- **P1-10 a11y**：GroupBox 四个交互 span（组名/色点/色板/收起）与 DevNode 清单 ✕ 换原生 button（unstyled 复位）；画布容器 mousedown 加 svelte-ignore 注释——构建警告清零。
+- **P1-11 verify 补测**：sshconfig 首块语义/别名顺序/不支持指令（49→50 项）。
+- **P1-12 runModal.inputs 死功能**：删除（无填充点，弹窗恒走「无运行时输入」分支）。
+- **回归**：verify 50 项全绿；构建无警告；临时 wf 实测组合/收起/展开（gcollapse 为原生 button 且可点）、展开态直连边、自动保存落盘 groups/edges 干净、无控制台报错。

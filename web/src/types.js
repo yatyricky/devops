@@ -5,8 +5,13 @@ export const TYPE_COLORS = {
   number: "#e5c07b", boolean: "#c678dd", any: "#8a97a8",
 };
 
+/** 插槽类型全集（engine/types.js 同源镜像） */
+export const SOCKET_TYPES = ["struct", "ssh", "string", "number", "boolean", "any"];
+
 /** @param {string} from @param {string} to */
 export function canConnect(from, to) {
+  // 与 engine/types.js 同规则：未知/拼错类型一律拒绝（镜像曾缺这层——folder→folder 前端放行后端拒）
+  if (!SOCKET_TYPES.includes(from) || !SOCKET_TYPES.includes(to)) return false;
   if (from === to) return true;
   return to === "any";
 }
@@ -31,19 +36,8 @@ export function effectiveInputs(meta, data) {
     }
     all = [...all, ...ports];
   }
-  if (meta?.tplVars) {
-    // 路径可推导 → 按模板 {{VAR}} 生成 string 口；不可推导 → 降级为一个 struct 口
-    if ((data?.varsList ?? []).length) {
-      const tplPorts = data.varsList
-        .filter(v => v && !all.some(d => d.id === v))
-        .map(v => ({ id: v, type: "string", required: true, dynamic: true }));
-      all = [...all, ...tplPorts];
-    } else if (data?.varsUnresolved) {
-      all = [...all, { id: "vars", type: "struct", required: false, dynamic: true }];
-    }
-  }
   if (meta?.pairInputs) {
-    // 每行双端口：pN.from / pN.to
+    // 每行双端口：pN.from / pN.to（块序与 engine/nodes/index.js getInputs 对齐：count → pair → tpl → field → dynamic）
     const { key, prefix, min, max, sub } = meta.pairInputs;
     const n = Math.max(min, Math.min(max, Math.trunc(Number(data?.[key]) || min)));
     const ports = [];
@@ -54,6 +48,17 @@ export function effectiveInputs(meta, data) {
       }
     }
     all = [...all, ...ports];
+  }
+  if (meta?.tplVars) {
+    // 路径可推导 → 按模板 {{VAR}} 生成 string 口；不可推导 → 降级为一个 struct 口
+    if ((data?.varsList ?? []).length) {
+      const tplPorts = data.varsList
+        .filter(v => v && !all.some(d => d.id === v))
+        .map(v => ({ id: v, type: "string", required: true, dynamic: true }));
+      all = [...all, ...tplPorts];
+    } else if (data?.varsUnresolved) {
+      all = [...all, { id: "vars", type: "struct", required: false, dynamic: true }];
+    }
   }
   if (meta?.fieldInputs) {
     const fieldPorts = (data?.fields ?? [])
@@ -82,9 +87,11 @@ export function effectiveInputs(meta, data) {
  */
 export function effectiveOutputs(meta, data, env = {}) {
   if (meta?.dynamicOutputs === "structSplit") {
-    const e = (env.edges ?? []).find(x => x.kind !== "seq" && x.target === env.id);
+    // 与 engine 同规则：上游必须是 struct.make（否则无字段可析构）；过滤 tnl- 派生段边
+    const e = (env.edges ?? []).find(x => x.kind !== "seq" && !String(x.id).startsWith("tnl-") && x.target === env.id);
     const src = (env.nodes ?? []).find(n => n.id === e?.source);
-    return (src?.data?.fields ?? []).filter(f => f.key).map(f => ({ id: f.key, type: f.type ?? "string" }));
+    if (src?.type !== "struct.make") return [];
+    return (src.data?.fields ?? []).filter(f => f.key).map(f => ({ id: f.key, type: f.type ?? "string" }));
   }
   return meta?.outputs ?? [];
 }
@@ -131,7 +138,7 @@ export function validateTaskSelection(sel, edges, nodesById, metasMap) {
     const meta = metasMap[node?.data?.__type ?? node?.type];
     if (!meta) { problems.push(`节点类型未知: ${id}`); continue; }
     for (const inp of effectiveInputs(meta, node.data)) {
-      const inEdges = edges.filter(e => e.kind !== "seq" && e.target === id && e.targetHandle === inp.id);
+      const inEdges = edges.filter(e => e.kind !== "seq" && !String(e.id).startsWith("tnl-") && e.target === id && e.targetHandle === inp.id);
       const carried = inEdges.filter(e => selected.has(e.source)).length;
       const hasLit = node?.data?.lit?.[inp.id] !== undefined;
       if (carried >= 2) problems.push(`输入 ${id}.${inp.id} 有 ${carried} 条连线，只能有一个输入`);

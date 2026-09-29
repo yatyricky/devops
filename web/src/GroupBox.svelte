@@ -46,6 +46,7 @@
 
 <!-- 展开态：板体整体可抓取拖动，组名/颜色/色板可编辑，左右缘半透明隧道接口点（转发段边锚点）；
      收起态：黑箱条 = 标题 + 左右隧道接口列（无卡片摘要空间），成员隐藏、外部连线仍接条缘 -->
+<!-- svelte-ignore a11y_no_static_element_interactions -- 画布容器：mousedown 只做"点外关色板"，不承载点击语义 -->
 <div class="gbox" class:selected class:collapsed style:--gc={data.color} onmousedown={closePalette}>
   <div class="ghead">
     {#if collapsed}
@@ -60,9 +61,9 @@
           onkeydown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") (editingName = false); }}
         />
       {:else}
-        <span class="gname gname-label" title={data.name} onclick={() => { nameDraft = data.name ?? ""; editingName = true; }}>
+        <button type="button" class="gname gname-label unstyled" title={data.name} onclick={() => { nameDraft = data.name ?? ""; editingName = true; }}>
           {data.name || "新分组"}
-        </span>
+        </button>
       {/if}
     {/if}
     {#if collapsed}
@@ -70,20 +71,21 @@
     {/if}
     {#if !collapsed}
       <span class="gdotwrap nodrag">
-        <span class="gdot" title="组颜色" style:background={data.color} onclick={togglePalette}></span>
+        <button type="button" class="gdot unstyled" title="组颜色" style:background={data.color} onclick={togglePalette}></button>
         {#if paletteOpen}
+          <!-- svelte-ignore a11y_no_static_element_interactions -- 浮层容器：mousedown 仅阻止冒泡（避免点色板关掉色板） -->
           <div class="gpalette" onmousedown={e => e.stopPropagation()}>
             {#each COLORS as c (c)}
-              <span class="gswatch" class:on={c === data.color} style:background={c}
-                onclick={e => pickColor(c, e)}></span>
+              <button type="button" class="gswatch unstyled" class:on={c === data.color} style:background={c}
+                onclick={e => pickColor(c, e)}></button>
             {/each}
           </div>
         {/if}
       </span>
     {/if}
-    <span class="gcollapse nodrag" title={collapsed ? "展开" : "收起为黑箱条"} onclick={toggleCollapse}>
+    <button type="button" class="gcollapse nodrag unstyled" title={collapsed ? "展开" : "收起为黑箱条"} onclick={toggleCollapse}>
       {collapsed ? "▸" : "▾"}
-    </span>
+    </button>
   </div>
 
   {#if !collapsed}
@@ -158,4 +160,7 @@
   .tlabel.in { text-align: left; }
   .tlabel.out { text-align: right; }
   .tdiv { position: absolute; left: 10px; right: 10px; height: 1px; background: var(--line); pointer-events: none; }
+  /* 原生 button 复位（a11y：可聚焦/可键盘触发）——语义交互元素不再用 span 假装 */
+  .unstyled { background: none; border: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+  button.gcollapse { border: 1px solid var(--line); border-radius: 5px; color: var(--dim); padding: 1px 7px; font-size: 12px; }
 </style>

@@ -9,7 +9,7 @@ import os from "os";
 import path from "path";
 import url from "url";
 import { loadUiConfig, rememberWorkflow, forgetWorkflow, loadUntested, saveUntested, migrateUntestedFromLocalConfig } from "./engine/config.js";
-import { loadWorkflows, findWorkflow } from "./engine/registry.js";
+import { loadWorkflows, findWorkflow, pruneMissingWorkflows } from "./engine/registry.js";
 import { nodeTypesMeta } from "./engine/nodes/index.js";
 import { readNpmScripts } from "./engine/nodes/build.js";
 import { loadWorkflow, validateWorkflow } from "./engine/workflow.js";
@@ -24,6 +24,9 @@ const cfg = loadUiConfig();
 const HOST = process.env.DEVOPS_HOST || cfg.host || "127.0.0.1";
 const PORT = Number(process.env.DEVOPS_PORT || cfg.port || 3010);
 const TOKEN = String(process.env.DEVOPS_TOKEN || cfg.token || "");
+if (!TOKEN) {
+    console.warn("[devops-console] ⚠ 未设置 token：API 完全开放（本机任意进程可读写工作流/触发任务）。建议在 local-config.json 或 DEVOPS_TOKEN 配置。");
+}
 
 const app = express();
 app.use(express.json({ limit: "2mb" })); // 保存整张图
@@ -57,10 +60,11 @@ app.get("/api/workflows", (req, res) => {
     }));
 });
 
-/** 打开磁盘任意位置的 workflow（记住路径到 local-config）。 */
+/** 打开磁盘任意位置的 workflow（记住路径到 local-config）。护栏：仅收绝对路径（~ 可展开），拒绝相对路径——避免随进程 cwd 漂移。 */
 app.post("/api/workflows/open", (req, res) => {
-    const fp = String(req.body?.path || "").trim();
+    const fp = expandHome(String(req.body?.path || "").trim());
     if (!fp) return res.status(400).json({ error: "path required" });
+    if (!path.isAbsolute(fp)) return res.status(400).json({ error: "仅支持绝对路径（如 C:/… 或 ~/…）" });
     try {
         const doc = loadWorkflow(fp);
         rememberWorkflow(fp);
@@ -70,11 +74,12 @@ app.post("/api/workflows/open", (req, res) => {
     }
 });
 
-/** 保存（写盘前全量校验；新建/另存为也走这里——存放路径由前端弹窗确认）。 */
+/** 保存（写盘前全量校验；新建/另存为也走这里——存放路径由前端弹窗确认）。护栏同 open：仅绝对路径。 */
 app.post("/api/workflows/save", (req, res) => {
-    const fp = String(req.body?.path || "").trim();
+    const fp = expandHome(String(req.body?.path || "").trim());
     const doc = req.body?.doc;
     if (!fp || !doc) return res.status(400).json({ error: "path/doc required" });
+    if (!path.isAbsolute(fp)) return res.status(400).json({ error: "仅支持绝对路径（如 C:/… 或 ~/…）" });
     const problems = validateWorkflow(doc);
     if (problems.length) return res.status(400).json({ error: `校验失败:\n  - ${problems.join("\n  - ")}` });
     try {
@@ -94,19 +99,19 @@ app.post("/api/workflows/forget", (req, res) => {
 });
 
 // ── 节点测试状态（调色板「未测试」徽章 = 手工维护清单，独立文件 node-types-untested.json，入版本管理）────
-// 首次访问时以「未出现在任何已注册工作流中的类型」为种子（排除调用方指定的例外），此后完全由用户手工维护。
-app.get("/api/node-usage", (req, res) => {
-    const used = new Set();
-    for (const w of loadWorkflows()) {
-        for (const n of w.doc?.nodes ?? []) used.add(n.type);
-    }
-    // 旧数据迁移：local-config.untestedNodeTypes → 独立文件（一次性，幂等）
+// 迁移/播种/失效路径清理都在启动时做一次（GET 保持纯读——并发 GET 不再有写竞争）。
+try {
+    pruneMissingWorkflows();
     migrateUntestedFromLocalConfig();
     if (loadUntested().length === 0) {
-        const exceptions = new Set((req.query.except ?? "").split(",").filter(Boolean));
+        const used = new Set();
+        for (const w of loadWorkflows()) for (const n of w.doc?.nodes ?? []) used.add(n.type);
         const allTypes = new Set(nodeTypesMeta().map(m => m.type));
-        saveUntested([...allTypes].filter(t => !used.has(t) && !exceptions.has(t)));
+        saveUntested([...allTypes].filter(t => !used.has(t)));
     }
+} catch (e) { console.warn("[devops-console] untested 清单初始化失败:", e.message); }
+
+app.get("/api/node-usage", (req, res) => {
     res.json({ untested: loadUntested() });
 });
 

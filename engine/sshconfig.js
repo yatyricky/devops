@@ -23,18 +23,18 @@ export function sshConfigPath() {
 }
 
 /**
- * 解析 config，返回 别名 → 配置 的 Map。
+ * 解析 config，返回 别名 → 配置 的 Map（键小写，保持文件出现顺序）。
+ * @param {string} [fp] config 文件路径（默认 ~/.ssh/config；测试可注入）
  * @returns {Map<string, {host: string, user?: string, port?: number, identityFile?: string, unsupported?: string[]}>}
  */
-export function parseConfig() {
-    const fp = sshConfigPath();
+export function parseConfig(fp = sshConfigPath()) {
     /** @type {Map<string, any>} */
     const out = new Map();
     if (!fs.existsSync(fp)) return out;
     const lines = fs.readFileSync(fp, "utf8").split(/\r?\n/);
-    /** @type {{patterns: string[], opts: Record<string, string>, unsupported: string[], matched: boolean} | null} */
+    /** @type {{patterns: string[], opts: Record<string, string> , unsupported: string[]} | null} */
     let cur = null;
-    /** @type {{patterns: string[], opts: Record<string, string>, unsupported: string[], matched: boolean}[]} */
+    /** @type {{patterns: string[], opts: Record<string, string> , unsupported: string[]}[]} */
     const blocks = [];
     for (const raw of lines) {
         const line = raw.trim();
@@ -43,7 +43,7 @@ export function parseConfig() {
         if (eq) {
             const kw = eq[1].toLowerCase();
             if (kw === "host") {
-                cur = { patterns: eq[2].split(/\s+/).filter(Boolean), opts: {}, unsupported: [], matched: false };
+                cur = { patterns: eq[2].split(/\s+/).filter(Boolean), opts: {}, unsupported: [] };
                 blocks.push(cur);
             } else {
                 // Match/Include 块整块跳过（含其缩进行——非 Host 开头的行会被丢弃）
@@ -68,21 +68,22 @@ export function parseConfig() {
             const lower = pat.toLowerCase();
             const entry = {
                 host: b.opts.hostname ?? pat,
+                // OpenSSH：每个参数取首个获得的值——前块显式设置过的 HostName 优先，
+                // 前块未设置才轮到后块（user/port/identityFile 同理由 ?? 保证）
+                hostSet: b.opts.hostname !== undefined,
                 user: b.opts.user,
                 port: b.opts.port ? Number(b.opts.port) : undefined,
                 identityFile: b.opts.identityFile ? expandHome(b.opts.identityFile) : undefined,
                 unsupported: b.unsupported,
-                matched: b.matched,
             };
             const prev = out.get(lower);
-            // OpenSSH：首个匹配块的实际值生效（未设置的字段继续向下找）
             out.set(lower, prev ? {
-                host: prev.host && prev.matched ? prev.host : entry.host,
+                host: prev.hostSet ? prev.host : entry.host,
+                hostSet: prev.hostSet || entry.hostSet,
                 user: prev.user ?? entry.user,
                 port: prev.port ?? entry.port,
                 identityFile: prev.identityFile ?? entry.identityFile,
                 unsupported: [...new Set([...(prev.unsupported ?? []), ...(entry.unsupported ?? [])])],
-                matched: prev.matched || entry.matched,
             } : entry);
         }
     }
@@ -90,22 +91,11 @@ export function parseConfig() {
 }
 
 /**
- * @returns {string[]} 可用别名（按 config 中出现顺序）
+ * @param {string} [fp] config 文件路径（默认 ~/.ssh/config）
+ * @returns {string[]} 可用别名（按 config 中首次出现顺序，小写）
  */
-export function listAliases() {
-    const fp = sshConfigPath();
-    if (!fs.existsSync(fp)) return [];
-    const aliases = [];
-    for (const raw of fs.readFileSync(fp, "utf8").split(/\r?\n/)) {
-        const line = raw.trim();
-        if (!line || line.startsWith("#")) continue;
-        const m = line.match(/^Host\s+(.+)$/i);
-        if (!m) continue;
-        for (const p of m[1].split(/\s+/).filter(Boolean)) {
-            if (!p.startsWith("!") && !aliases.includes(p)) aliases.push(p);
-        }
-    }
-    return aliases;
+export function listAliases(fp = sshConfigPath()) {
+    return [...parseConfig(fp).keys()];
 }
 
 /**

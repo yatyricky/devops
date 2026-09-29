@@ -179,13 +179,15 @@
 
   // ── 初始化 ────
   $effect(() => { (async () => {
-    metas = await api("/api/node-types");
-    ui.nodeTypesMap = Object.fromEntries(metas.map(m => [m.type, m]));
-    wfList = await api("/api/workflows");
-    api("/api/home").then(r => localStorage.setItem("devops-home", r.home ?? "")).catch(() => {});
-    await refreshUsage();
-    const first = wfList.find(w => w.name);
-    if (first) await selectWorkflow(first.path);
+    try {
+      metas = await api("/api/node-types");
+      ui.nodeTypesMap = Object.fromEntries(metas.map(m => [m.type, m]));
+      wfList = await api("/api/workflows");
+      api("/api/home").then(r => localStorage.setItem("devops-home", r.home ?? "")).catch(() => {});
+      await refreshUsage();
+      const first = wfList.find(w => w.name);
+      if (first) await selectWorkflow(first.path);
+    } catch (e) { showToast(`初始化失败：${e.message}（检查服务器是否启动）`); }
   })(); });
 
   /** 「未测试」清单（手工维护，存 local-config.untestedNodeTypes） */
@@ -726,7 +728,6 @@
     const t = tasks[taskName];
     runModal = {
       task: taskName, label: t.label ?? taskName, mutates: !!t.mutates,
-      inputs: [],
       dryRun: false,
       needProd: !!t.mutates && currentEntry?.serverType === "prod",
       prodVal: "",
@@ -752,10 +753,9 @@
   async function doRun() {
     const m = runModal;
     if (m.needProd && !m.dryRun && m.prodVal !== displayName) { showToast(`需输入显示名 "${displayName}" 确认`); return; }
-    const inputs = Object.fromEntries(m.inputs.map(i => [i.name, i.value || i.fallback]).filter(([, v]) => v !== ""));
     try {
       const { id } = await api("/api/jobs", { method: "POST", body: JSON.stringify({
-        workflow: currentPath, task: m.task, dryRun: m.dryRun, inputs,
+        workflow: currentPath, task: m.task, dryRun: m.dryRun,
         doc: toDoc(), // 内存态执行：未保存的改动也能直接跑（后端校验后以内存为准）
         ...(m.needProd && !m.dryRun ? { confirmProd: m.prodVal } : {}),
       }) });
@@ -797,7 +797,7 @@
 <div class="layout">
   <header>
     <h1>DevOps 控制台</h1>
-    <select class="wfsel" value={currentPath} onchange={e => selectWorkflow(e.target.value)}>
+    <select class="wfsel" value={currentPath} onchange={e => { selectWorkflow(e.target.value).catch(er => showToast(`打开失败：${er.message}`)); }}>
       {#each wfList as w (w.path)}
         <option value={w.path}>{w.error ? `✗ ${w.path}` : `${w.name}${w.serverType === "prod" ? " ⚠PROD" : ""}`}</option>
       {/each}
@@ -918,13 +918,6 @@
   <div class="overlay">
     <div class="modal">
       <h3>运行 {runModal.label}</h3>
-      {#if runModal.inputs.length}
-        {#each runModal.inputs as inp, i (inp.name)}
-          <label>{inp.label || inp.name}<input bind:value={runModal.inputs[i].value} placeholder={inp.fallback || ""} /></label>
-        {/each}
-      {:else}
-        <div class="dim">（无运行时输入）</div>
-      {/if}
       <label class="mut"><input type="checkbox" bind:checked={runModal.dryRun} /> dry-run（只打印计划，不产生副作用）</label>
       {#if runModal.needProd && !runModal.dryRun}
         <label style="color:var(--err)">PROD：输入显示名 <b>{displayName}</b> 确认<input bind:value={runModal.prodVal} placeholder={displayName} /></label>

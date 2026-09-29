@@ -398,7 +398,7 @@
             <span class="tblwrap">
               <span class="badges">
                 {#each get(w.key) ?? [] as item, i}
-                  <span class="badge mono">{item}<a class="rm" onclick={() => set(w.key, (get(w.key) ?? []).filter((_, j) => j !== i))}>✕</a></span>
+                  <span class="badge mono">{item}<button type="button" class="rm" onclick={() => set(w.key, (get(w.key) ?? []).filter((_, j) => j !== i))}>✕</button></span>
                 {/each}
               </span>
               <span class="trow">
@@ -502,7 +502,7 @@
   </div>
   {#if noteOpen}
     <div class="noterow nodrag nowheel">
-      <textarea rows="2" bind:value={noteText} placeholder="节点备注…" oninput={e => set("note", e.target.value)}></textarea>
+      <textarea rows="2" value={noteText} placeholder="节点备注…" oninput={e => set("note", e.target.value)}></textarea>
     </div>
   {/if}
 </div>
