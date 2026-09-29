@@ -11,13 +11,11 @@
      "host": "127.0.0.1",
      "port": 3010,
      "token": "",
-     "workflows": ["~/OneDrive/linux/kids-ledger-prod.json"],
-     "repos": {}
+     "workflows": ["~/OneDrive/linux/kids-ledger-prod.json"]
    }
    ```
 
    `workflows` 是最近打开的工作流列表（GUI「打开…」会自动追加；支持 `~/` 路径）。
-   ⚠ `repos` 键当前无运行路径消费（评审发现特性失联，见 review-milestone-1.md P2），仅占位。
 3. **设 token（强烈建议）**：`token` 为空 = API 完全开放。默认仅绑回环地址缓解了外网暴露，
    但本机任意进程/浏览器可打 API（评审发现 `:id` 路径穿越、任意路径读写等未修项，见 review P0/P1）。
    设置后在 GUI 右上角填一次即可（走 `x-devops-token` 头）。

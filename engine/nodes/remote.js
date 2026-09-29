@@ -5,14 +5,14 @@ import { resolveAlias } from "../sshconfig.js";
 import { shellQuote as sq } from "../release.js";
 
 /**
- * 远端节点：会话、命令（动态插槽）、上传、原子解压、装依赖、属主、符号链接、服务、只读检查。
+ * 远端节点：会话、命令（动态插槽）、上传、解压、装依赖、属主、符号链接、服务、只读检查。
  *
  * 语义要点（对照原幂等 bash 脚本）：
  * - loginShell 默认开启：命令经 `bash -lc` 执行，nvm 装的 node/pnpm 可用（原脚本 `bash -l` 等价）。
  * - useSudo 默认开启：`sudo -n`（NOPASSWD 缺失快速失败）。
- * - remote.extract 内部保持原子性：解压到 .tmp → 校验 expect → mv 成正式 release；失败自清 .tmp。
- * - ssh.upload 无 trap：上传即完成，文件不被自动清理；目标直写权限不足（SFTP 无法提权）时自动回退
- *   /tmp 暂存 + `sudo -n install -m 644` 落到目标（回退落盘 root:root 0644，需 NOPASSWD）。
+ * - remote.extract 是纯解压（mkdir -p + tar -xzf）；ssh.upload 无 trap（上传即保留），
+ *   目标直写权限不足（SFTP 无法提权）时自动回退 /tmp 暂存 + `sudo -n install -m 644` 落到目标
+ *   （回退落盘 root:root 0644，需 NOPASSWD）。
  */
 
 /** @param {string} cmd @param {{loginShell?: boolean, useSudo?: boolean}} node */
@@ -24,6 +24,22 @@ function buildCommand(cmd, node, opts = {}) {
     }
     if (node.data.loginShell ?? true) c = `bash -lc ${sq(c)}`;
     return c;
+}
+
+/**
+ * 远端命令执行样板：dry-run 打印计划，真执行 + 非零退出码抛错——deps/chown/symlink/nginx-reload/extract 共用。
+ * @param {any} ctx
+ * @param {any} node
+ * @param {any} ssh
+ * @param {string} cmdStr 未包装的用户态命令（sudo/loginShell 由 buildCommand 统一加）
+ * @param {string} label 失败信息前缀（如 "chown" / "nginx reload"）
+ * @param {{ sudo?: boolean, sudoWrap?: boolean }} [opts] buildCommand 透传
+ */
+async function runRemote(ctx, node, ssh, cmdStr, label, opts = {}) {
+    if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${buildCommand(cmdStr, node, opts)}`); return null; }
+    const r = await sshRun(ssh, buildCommand(cmdStr, node, opts), { log: ctx.log });
+    if (r.code !== 0) throw new Error(`${label}失败 (code=${r.code}): ${cmdStr}\n${r.err}`);
+    return r;
 }
 
 /** @param {string} text @returns {string[]} */
@@ -201,20 +217,15 @@ export default [
         outputs: [{ id: "destDir", type: "string" }],
         widgets: [],
         async run(ctx, node, inputs) {
-            const { ssh, archive } = inputs;
             const destDir = String(inputs.destDir ?? "").trim();
             if (!destDir) throw new Error("解压 未配置 destDir");
             const target = destDir;
-            const R = async (cmd) => {
-                const r = await sshRun(ssh, buildCommand(cmd, node, { sudo: false }), { log: ctx.log });
-                if (r.code !== 0) throw new Error(`remote command failed: ${cmd}\n${r.err}`);
-            };
-            const plan = [`mkdir -p ${sq(target)}`, `tar -xzf ${sq(archive)} -C ${sq(target)}`];
+            const plan = [`mkdir -p ${sq(target)}`, `tar -xzf ${sq(inputs.archive)} -C ${sq(target)}`];
             if (ctx.dryRun) {
                 for (const c of plan) ctx.log(`[dry-run] remote$ ${buildCommand(c, node, { sudo: false })}`);
                 return { destDir: target };
             }
-            for (const c of plan) await R(c);
+            for (const c of plan) await runRemote(ctx, node, inputs.ssh, c, "remote command", { sudo: false });
             ctx.log(`[extract] ${target}`);
             return { destDir: target };
         },
@@ -239,10 +250,7 @@ export default [
             const install = node.data.manager === "pnpm"
                 ? `pnpm install --prod --frozen-lockfile`
                 : `npm ci --omit=dev`;
-            const cmdStr = `cd ${sq(inputs.path)} && ${install}`;
-            if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${buildCommand(cmdStr, node)}`); return; }
-            const r = await sshRun(inputs.ssh, buildCommand(cmdStr, node), { log: ctx.log });
-            if (r.code !== 0) throw new Error(`依赖安装失败 (code=${r.code}): ${cmdStr}\n${r.err}`);
+            await runRemote(ctx, node, inputs.ssh, `cd ${sq(inputs.path)} && ${install}`, "依赖安装");
         },
     },
     {
@@ -259,10 +267,7 @@ export default [
         outputs: [],
         widgets: [{ key: "useSudo", label: "sudo -n", kind: "boolean", default: true }],
         async run(ctx, node, inputs) {
-            const cmdStr = `chown -R ${sq(inputs.user)}:${sq(inputs.user)} ${sq(inputs.path)}`;
-            if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${buildCommand(cmdStr, node)}`); return; }
-            const r = await sshRun(inputs.ssh, buildCommand(cmdStr, node), { log: ctx.log });
-            if (r.code !== 0) throw new Error(`chown 失败: ${cmdStr}\n${r.err}`);
+            await runRemote(ctx, node, inputs.ssh, `chown -R ${sq(inputs.user)}:${sq(inputs.user)} ${sq(inputs.path)}`, "chown");
         },
     },
     {
@@ -279,10 +284,7 @@ export default [
         outputs: [],
         widgets: [],
         async run(ctx, node, inputs) {
-            const cmdStr = `ln -sfn ${sq(inputs.target)} ${sq(inputs.link)}`;
-            if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${buildCommand(cmdStr, node)}`); return; }
-            const r = await sshRun(inputs.ssh, buildCommand(cmdStr, node), { log: ctx.log });
-            if (r.code !== 0) throw new Error(`symlink 失败: ${cmdStr}\n${r.err}`);
+            await runRemote(ctx, node, inputs.ssh, `ln -sfn ${sq(inputs.target)} ${sq(inputs.link)}`, "symlink");
         },
     },
     {
@@ -355,6 +357,8 @@ export default [
             }
             if (ctx.dryRun) return { out: "" };
             if (node.data.assert) {
+                // 用户正则长度上限：降低灾难性回溯的攻击面（单线程执行，超长正则可挂死整个服务）
+                if (String(node.data.assert).length > 500) throw new Error("remote.check：断言正则过长（≤500 字符）");
                 if (!new RegExp(node.data.assert).test(combined)) {
                     throw new Error(`断言失败 /${node.data.assert}/：\n${combined.trim()}`);
                 }
@@ -373,11 +377,7 @@ export default [
         outputs: [],
         widgets: [],
         async run(ctx, node, inputs) {
-            const cmdStr = "nginx -t && systemctl reload nginx";
-            const finalCmd = buildCommand(cmdStr, node, { sudoWrap: true });
-            if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${finalCmd}`); return; }
-            const r = await sshRun(inputs.ssh, finalCmd, { log: ctx.log });
-            if (r.code !== 0) throw new Error(`nginx reload 失败 (code=${r.code})\n${r.err}`);
+            await runRemote(ctx, node, inputs.ssh, "nginx -t && systemctl reload nginx", "nginx reload", { sudoWrap: true });
         },
     },
 ];

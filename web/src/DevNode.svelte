@@ -179,7 +179,7 @@
         if (get("varsUnresolved")) set("varsUnresolved", false);
         const inferred = r?.basename ? `.tmp/rendered-${id}-${r.basename}` : "";
         if (get("inferredOut") !== inferred) set("inferredOut", inferred);
-      });
+      }).catch(e => { tplErr = e?.message ?? String(e); });
     }, 400);
     return () => clearTimeout(t);
   });

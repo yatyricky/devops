@@ -37,63 +37,12 @@ export async function getRefs(repoDir, opts = {}) {
             const bT = b.refType === "tag" ? 0 : 1;
             if (aT !== bT) return aT - bT;
             if (a.refType !== "tag") return a.name.localeCompare(b.name);
-            const ap = a.name.replace("v", "").split(".").map(n => parseInt(n, 10));
-            const bp = b.name.replace("v", "").split(".").map(n => parseInt(n, 10));
-            return -(ap.length - bp.length || ap.reduce((acc, v, i) => acc || v - (bp[i] || 0), 0));
+            // 版本号降序：锚定剥离前缀 v；非数字段按 0（NaN 安全）
+            const ver = (s) => s.replace(/^v/, "").split(".").map(n => parseInt(n, 10) || 0);
+            const ap = ver(a.name), bp = ver(b.name);
+            const cmp = ap.reduce((acc, v, i) => acc || v - (bp[i] || 0), 0);
+            return -(ap.length - bp.length || cmp);
         });
-}
-
-/**
- * 部署版本管理：fetch → 校验工作树干净 → 可选 checkout 指定 ref → 回调（拿到 versionId/buildTime）→ 恢复原分支。
- * versionId 形如 `<ref>-<shorthash>[-dirty]`，与 xlgbis 一致。
- *
- * @param {string} repoDir
- * @param {{ ref?: string }} options
- * @param {(versionId: string, buildTime: string) => Promise<void>} callback
- * @param {{ log?: (msg: string) => void }} [opts]
- */
-export async function withDeployVersion(repoDir, options, callback, opts = {}) {
-    const log = opts.log ?? (() => {});
-    const C = (/** @type {string} */ c) => cmd(c, { cwd: repoDir, log });
-
-    log("git: fetch --all");
-    await C("git fetch --all");
-    const clean = await isWorkingTreeClean(repoDir, { log: () => {} });
-    if (!clean && options.ref != null) throw new Error("Working tree is not clean, unable to deploy specified ref");
-
-    /** @type {{hash: string, name: string, refType: string} | undefined} */
-    let ref;
-    if (clean) {
-        const refs = await getRefs(repoDir, { log: () => {} });
-        ref = refs.find(e => e.name === options.ref);
-        if (!ref && options.ref) throw new Error(`Ref not found: ${options.ref}`);
-    }
-    log(`git: selected working copy: ${ref?.name ?? "HEAD"}`);
-
-    /** @type {string | undefined} */
-    let original;
-    if (ref) {
-        try {
-            original = (await C("git symbolic-ref --quiet --short HEAD")).toString().trim();
-        } catch {
-            original = (await C("git rev-parse HEAD")).toString().trim();
-        }
-        await C(`git checkout ${ref.hash}`);
-        log(`git: checked out ${ref.name}`);
-    }
-
-    try {
-        const gitHash = (await C("git rev-parse --short HEAD")).trim();
-        const safeRef = (ref?.name ?? "HEAD").replace(/[^A-Za-z0-9._-]/g, "_");
-        const versionId = `${safeRef}-${gitHash}${clean ? "" : "-dirty"}`;
-        const buildTime = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
-        await callback(versionId, buildTime);
-    } finally {
-        if (original) {
-            await C(`git checkout ${original}`);
-            log(`git: restored working copy: ${original}`);
-        }
-    }
 }
 
 /**

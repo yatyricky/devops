@@ -3,6 +3,7 @@ import path from "path";
 import { canConnect, coerce } from "./types.js";
 import { validateTaskSelection } from "./rules.js";
 import { NODE_TYPES, getInputs, getOutputs } from "./nodes/index.js";
+import { tarEntriesProblem } from "./nodes/build.js";
 
 /**
  * workflow.json = 一张节点大图（nodes + edges，元图允许多条备选连线进同一输入）+ 若干命名任务。
@@ -110,11 +111,8 @@ export function validateWorkflow(doc) {
         }
         // tar.pack：白名单与黑名单互斥
         if (n.type === "tar.pack") {
-            const hasEntries = Array.isArray(n.data.entries) && n.data.entries.length > 0;
-            const hasExcludes = Array.isArray(n.data.excludes) && n.data.excludes.length > 0;
-            if (hasEntries && hasExcludes) {
-                problems.push(`节点 ${n.id}：打包条目与不打包条目只能二选一（白名单或黑名单）`);
-            }
+            const problem = tarEntriesProblem(n);
+            if (problem) problems.push(`节点 ${n.id}：${problem}`);
         }
     }
 

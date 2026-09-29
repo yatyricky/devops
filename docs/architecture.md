@@ -14,7 +14,7 @@ CLI（cli.js：run/list/tasks，与 GUI 完全同一引擎）
         │
 runner（engine/runner.js）
         串行队列 · .runs/<id>.json 持久化 · audit.jsonl · prod 门禁 ·
-        副作用收尾（git 恢复 / 远端临时文件清理 / 会话关闭）
+        副作用收尾（git 恢复 / 会话关闭）
         │
 workflow 执行器（engine/workflow.js）
         图校验（类型/悬空边/required 闭包/插槽唯一/环依赖）→
@@ -45,7 +45,7 @@ workflow 执行器（engine/workflow.js）
    依赖闭包自动执行侧挂节点"这套静态语义全部失效；
    ③ else 的第二路径打破主路径线性（与否决 rescue 自动回滚是同一逻辑）；
    ④ for-each 使节点输出从标量变数组，破坏"类型即契约"的边类型校验（环依赖目前本就是图校验错误）。
-   失败语义已分层吸收：**清理（try-finally 的归宿）= runner 任务收尾**（git 恢复 / 远端临时文件删除 /
+   失败语义已分层吸收：**清理（try-finally 的归宿）= runner 任务收尾**（git 恢复 /
    会话关闭，等价 bash trap，平台内置、用户不可编程）；**catch（rescue 自动回滚）已否决**——失败即停 +
    手动 rollback 任务。若未来确有"按条件跳过某节点"的真实需求，唯一合规形态是节点级 `when`
    （只有执行/跳过两种状态，无 else、无第二路径，需同时定义被跳过节点输出的插槽语义），届时再评估，今天不预建。
@@ -87,7 +87,7 @@ workflow 执行器（engine/workflow.js）
 ## 新增一个节点类型
 
 1. `engine/nodes/<分类>.js` 追加定义：`type/title/category/color/inputs/outputs/widgets/dynamicInputs?/run(ctx, node, inputs)`；
-2. `run` 里区分 `ctx.dryRun`（打印计划，无副作用）；需要收尾的副作用用 `ctx.registerGitRestore / trackRemoteFile / registerSession` 登记；
+2. `run` 里区分 `ctx.dryRun`（打印计划，无副作用）；需要收尾的副作用用 `ctx.registerGitRestore / registerSession` 登记；
 3. 重启服务器（注册表启动时加载）；GUI 调色板与检查器自动出现新节点。
 
 注意：动态插槽机制（dynamicInputs 占位符 / countInputs / pairInputs / fieldInputs / tplVars /

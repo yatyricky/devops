@@ -2,9 +2,16 @@ import fs from "fs";
 import path from "path";
 import { cmd, writeLF, copyTree, expandHome, rmrf } from "../exec.js";
 import { compress, makeStageDir } from "../tarball.js";
-import { renderTemplateFile } from "../render.js";
+import { renderTemplateFile, resolveTemplatePath } from "../render.js";
 import { resolveDeployVersion } from "../gitops.js";
 import { ROOT, TMP_DIR } from "../runner.js";
+
+/** tar.pack 白/黑名单互斥校验（workflow.validateWorkflow 与运行期共用同一规则）。 */
+export function tarEntriesProblem(node) {
+    const hasEntries = Array.isArray(node.data?.entries) && node.data.entries.length > 0;
+    const hasExcludes = Array.isArray(node.data?.excludes) && node.data.excludes.length > 0;
+    return hasEntries && hasExcludes ? "tar.pack：打包条目与不打包条目只能二选一（白名单或黑名单）" : "";
+}
 
 /**
  * 构建/版本类节点：git 版本、本地命令、env 生成、暂存、打包、模板渲染、npm 脚本。
@@ -194,11 +201,10 @@ export default [
             { key: "excludes", label: "不打包条目（黑名单，路径段）", kind: "list", default: [] },
         ],
         async run(ctx, node, inputs) {
+            const problem = tarEntriesProblem(node);
+            if (problem) throw new Error(problem);
             const entries = node.data.entries ?? [];
             const excludes = node.data.excludes ?? [];
-            if (entries.length && excludes.length) {
-                throw new Error("tar.pack：打包条目与不打包条目只能二选一（白名单或黑名单）");
-            }
             const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
             const base = inputs.name || `archive-${ts}`;
             const archiveName = `${base}.tgz`;
@@ -249,9 +255,7 @@ export default [
             const t = String(inputs.path ?? "").trim();
             if (!t) throw new Error("template.render 未提供模板路径（手填或连线）");
             /** "./x" = 工作流文件所在目录；绝对路径直用；其余相对应用仓库（模板随应用仓库版本管理） */
-            const fpTpl = t.startsWith("./")
-                ? path.join(ctx.configDir ?? ROOT, t.slice(2))
-                : path.isAbsolute(t) ? t : path.join(ctx.repoDir ?? ROOT, t);
+            const fpTpl = resolveTemplatePath(t, ctx.configDir ?? ROOT, ctx.repoDir ?? ROOT);
             // 变量来源：vars struct 口（整体对象）展开 + 各 {{VAR}} 散口（path 除外）
             const vars = {
                 ...(typeof inputs.vars === "object" && inputs.vars ? inputs.vars : {}),

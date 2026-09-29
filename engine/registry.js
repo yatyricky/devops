@@ -2,13 +2,7 @@ import fs from "fs";
 import path from "path";
 import { ROOT } from "./runner.js";
 import { loadWorkflow } from "./workflow.js";
-import { loadLocalConfig, forgetWorkflow } from "./config.js";
-import { expandHome } from "./exec.js";
-
-/** `~/x` 与绝对路径统一为可比对/可加载的绝对路径。 */
-function normalizePath(p) {
-    return path.resolve(expandHome(String(p)));
-}
+import { loadLocalConfig, forgetWorkflow, normalizePath } from "./config.js";
 
 /**
  * 工作流注册中心：

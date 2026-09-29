@@ -1,13 +1,4 @@
-/**
- * @param {string} value
- */
+/** shell 单引号包裹（内部 ' 转义为 '\''）——远端/本地命令拼接的用户输入一律过这里。 */
 export function shellQuote(value) {
     return `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
-/**
- * @param {string} releaseName
- */
-export function validateReleaseName(releaseName) {
-    if (!/^[A-Za-z0-9._-]+$/.test(releaseName)) throw new Error(`Invalid release name: ${releaseName}`);
 }

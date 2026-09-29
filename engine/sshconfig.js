@@ -1,6 +1,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { expandHome } from "./exec.js";
 
 /**
  * ~/.ssh/config 解析器（够用即可，不加依赖）：
@@ -8,14 +9,6 @@ import path from "path";
  * Host 多模式空格分隔、大小写不敏感匹配（OpenSSH 语义）。
  * 明确不支持：Include / Match / ProxyJump / ProxyCommand——命中别名依赖这些指令时报错而非错连。
  */
-
-/** @param {string} p */
-export function expandHome(p) {
-    if (!p) return p;
-    if (p === "~") return os.homedir();
-    if (p.startsWith("~/") || p.startsWith("~\\")) return path.join(os.homedir(), p.slice(2));
-    return p;
-}
 
 /** @returns {string} config 文件路径 */
 export function sshConfigPath() {

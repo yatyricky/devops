@@ -1,22 +1,19 @@
 import fs from "fs";
 import path from "path";
 import url from "url";
-import { sshRun, sshClose } from "./ssh.js";
+import { sshClose } from "./ssh.js";
 import { executeTask, findTaskEnv } from "./workflow.js";
-import { shellQuote } from "./release.js";
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 export const ROOT = path.resolve(__dirname, "..");
 export const RUNS_DIR = path.join(ROOT, ".runs");
 export const TMP_DIR = path.join(ROOT, ".tmp");
-export const ENVS_DIR = path.join(ROOT, "envs");
 
 /**
  * 任务运行器：串行队列 + 日志采集 + .runs/<id>.json 持久化 + audit.jsonl 审计。
  * CLI 与 GUI 共用。一个任务 = workflow.json 里选出的节点子图（引擎内按拓扑层级并发执行）。
  */
-
 fs.mkdirSync(RUNS_DIR, { recursive: true });
 fs.mkdirSync(TMP_DIR, { recursive: true });
 
@@ -112,7 +109,6 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
     runs.set(id, run);
 
     queueTail = queueTail.then(async () => {
-        if (run.status === "cancelled") return;
         run.status = "running";
         run.startedAt = new Date().toISOString();
         currentJob = run;
@@ -138,10 +134,8 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
             // 副作用登记（finally 统一处理）
             gitRestores: [],
             sessions: [],
-            remoteFiles: [],
             registerGitRestore(fn) { this.gitRestores.push(fn); },
             registerSession(ssh) { this.sessions.push(ssh); },
-            trackRemoteFile(ssh, p) { this.remoteFiles.push({ ssh, path: p }); },
             /** 节点执行状态标记（GUI 卡片外框：running/ok/failed）；随 run 持久化 + SSE 快照推送 */
             markNode(nodeId, status) {
                 run.nodeStatus = { ...run.nodeStatus, [nodeId]: status };
@@ -191,16 +185,13 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
 }
 
 /**
- * 收尾：git 工作树恢复（逆序）→ 远端临时文件清理（上传的归档，无论成败）→ 会话关闭。
- * 等价原远端脚本的 trap cleanup_deploy 语义。
+ * 收尾：git 工作树恢复（逆序）→ SSH 会话关闭。等价 bash trap 的平台内置部分。
+ * （远端临时文件清理机制已随 envs 方案移除——ssh.upload 等节点均为「无 trap，产物保留」语义。）
  * @param {any} ctx
  */
 async function finalize(ctx) {
     for (const fn of ctx.gitRestores.reverse()) {
         try { await fn(); } catch (e) { ctx.log(`[WARN] git 恢复失败：${e.message}`); }
-    }
-    for (const { ssh, path: p } of ctx.remoteFiles.reverse()) {
-        try { await sshRun(ssh, `sudo -n rm -f ${shellQuote(p)}`, { log: () => {} }); ctx.log(`[cleanup] 远端临时文件 ${p}`); } catch { /* 尽力 */ }
     }
     for (const s of ctx.sessions) sshClose(s);
 }

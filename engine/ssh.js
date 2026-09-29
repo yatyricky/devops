@@ -15,13 +15,6 @@ import path from "path";
  */
 
 /**
- * @param {string} host
- * @param {string} user
- * @param {string} fingerprint SHA256 指纹（hex 或 base64）。空串 = 未锁定（仅日志提示，不阻断——用于首次取指纹）。
- * @param {{ log?: (msg: string) => void, keyFile?: string, passphrase?: string, port?: number }} [opts]
- * @returns {Promise<NodeSSH>}
- */
-/**
  * 认证尝试级联（纯函数，可单测）：
  * - agent 可用：① 仅 agent（不传 privateKeyPath——口令保护的私钥文件会让 ssh2 在认证前解析报错，
  *   阻断 agent 认证）→ 失败且存在 keyFile 时 ② agent + keyFile 回退（覆盖 agent 未加载该密钥但密钥无口令的情况）；
@@ -118,31 +111,6 @@ export async function sshRun(ssh, cmd, opts = {}) {
         out: result.stdout ?? "",
         err: result.stderr ?? "",
     };
-}
-
-/**
- * 执行远端命令，非零退出码抛错。
- * @param {NodeSSH} ssh
- * @param {string} cmd
- * @param {{ log?: (msg: string) => void }} [opts]
- */
-export async function sshExec(ssh, cmd, opts = {}) {
-    const r = await sshRun(ssh, cmd, opts);
-    if (r.code !== 0) {
-        throw new Error(`remote command failed (code=${r.code}): ${cmd}\n${r.err}`);
-    }
-    return r;
-}
-
-// `sudo -n` 绝不交互要密码，NOPASSWD 缺失时快速失败。
-/**
- * @param {NodeSSH} ssh
- * @param {string} cmd
- * @param {{ log?: (msg: string) => void }} [opts]
- * @returns {Promise<SshExecResult>}
- */
-export function sshSudo(ssh, cmd, opts = {}) {
-    return sshRun(ssh, `sudo -n ${cmd}`, opts);
 }
 
 /**

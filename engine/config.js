@@ -7,8 +7,7 @@ import { expandHome } from "./exec.js";
 /**
  * local-config.json（gitignored）+ local-config.example.json 兜底。
  * workflows[] = 最近打开/另存的工作流路径——支持 `~/...` 格式（auto：加载时展开为
- * 用户主目录，保存主目录下文件时也自动写成 ~ 格式，跨机器可移植）；
- * repos.<name> 可覆盖 workflow 里的 repoDir。
+ * 用户主目录，保存主目录下文件时也自动写成 ~ 格式，跨机器可移植）。
  */
 export function loadLocalConfig() {
     const fp = path.join(ROOT, "local-config.json");
@@ -18,9 +17,9 @@ export function loadLocalConfig() {
     return {};
 }
 
-/** @returns {{host: string, port: number, token: string, workflows: string[], repos: Record<string,string>}} */
+/** @returns {{host: string, port: number, token: string, workflows: string[]}} */
 export function loadUiConfig() {
-    return { host: "127.0.0.1", port: 3010, token: "", workflows: [], repos: {}, ...loadLocalConfig() };
+    return { host: "127.0.0.1", port: 3010, token: "", workflows: [], ...loadLocalConfig() };
 }
 
 /** 写回 local-config.json（保留其它键）。 */
@@ -29,7 +28,7 @@ export function saveLocalConfig(cfg) {
 }
 
 /** `~/x` 与绝对路径统一为可比对的绝对路径。 */
-function normalizePath(p) {
+export function normalizePath(p) {
     return path.resolve(expandHome(String(p)));
 }
 
@@ -69,17 +68,6 @@ export function forgetWorkflow(fp) {
         cfg.workflows = next;
         saveLocalConfig(cfg);
     }
-}
-
-/**
- * 解析工作流仓库路径：local-config.repos.<name> 覆盖 > workflow.repoDir。
- * @param {any} wf workflow 文档
- */
-export function resolveRepoDir(wf) {
-    const cfg = loadLocalConfig();
-    const dir = cfg?.repos?.[wf.name] || wf.repoDir;
-    if (!dir) throw new Error(`repo dir not configured for workflow ${wf.name}`);
-    return expandHome(path.isAbsolute(dir) ? dir : path.join(ROOT, dir));
 }
 
 // ── 「未测试」节点类型清单：独立文件 node-types-untested.json，入版本管理，手工维护 ────

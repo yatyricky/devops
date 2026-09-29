@@ -17,6 +17,7 @@ import { enqueueWorkflowTask, listRuns, getRun, getCurrentJob } from "./engine/r
 import { getRefs } from "./engine/gitops.js";
 import { listAliases, resolveAlias } from "./engine/sshconfig.js";
 import { expandHome } from "./engine/exec.js";
+import { resolveTemplatePath } from "./engine/render.js";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -142,14 +143,13 @@ app.post("/api/template/vars", (req, res) => {
     const repoDir = expandHome(String(req.body?.repoDir || "").trim());
     if (!t) return res.status(400).json({ error: "path required" });
     try {
-        const fp = t.startsWith("./")
-            ? path.join(configDir, t.slice(2))
-            : path.isAbsolute(t) ? t : path.join(repoDir, t);
+        const fp = resolveTemplatePath(t, configDir, repoDir);
         const content = fs.readFileSync(fp, "utf8");
         const vars = [...new Set([...content.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))];
         res.json({ vars, basename: path.basename(fp), exists: true });
     } catch (e) {
-        res.json({ vars: [], exists: false, error: e.code === "ENOENT" ? "模板文件不存在" : e.message });
+        // 文件不存在/不可读是"路径未推导"的正常态，前端据此降级 struct 口——但保持 4xx 语义与其它端点一致
+        res.status(400).json({ error: e.code === "ENOENT" ? "模板文件不存在" : e.message, vars: [], exists: false });
     }
 });
 
