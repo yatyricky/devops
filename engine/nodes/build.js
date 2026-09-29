@@ -139,7 +139,8 @@ export default [
             for (let i = 1; i <= count; i++) {
                 const fromRaw = String(inputs[`p${i}.from`] ?? "").trim();
                 if (!fromRaw) throw new Error(`stage.copy：条目 p${i} 的 from 为空`);
-                const fromR = path.resolve(expandHome(fromRaw));
+                // from：绝对路径（含 ~ 展开）直用；相对路径以 root 为基准（不是进程 cwd）
+                const fromR = path.resolve(rootR, expandHome(fromRaw));
                 if (!fs.existsSync(fromR)) throw new Error(`暂存源不存在: ${fromR}`);
 
                 // to 缺省：from 在 root 之下 → 保持相对结构；在 root 之外 → basename（警告）

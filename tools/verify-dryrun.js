@@ -879,4 +879,37 @@ await test("symlink: ln 实参顺序锁定（target 口=第一参数 真实路�
     assert.deepStrictEqual(d.inputs.map(i => i.id), ["ssh", "target", "link"], "端口顺序应与 ln 命令行一致");
 });
 
+await test("stage.copy: from 相对 root 解析（非 cwd）+ 递归 + to 缺省保持结构", async () => {
+    const os = await import("os");
+    const pathMod = await import("path");
+    const fsMod = await import("fs");
+    // 仓库结构：root/dist/index.html + root/package.json；root 外的 external.tpl
+    const rootDir = fsMod.mkdtempSync(pathMod.join(os.tmpdir(), "verify-root-"));
+    fsMod.mkdirSync(pathMod.join(rootDir, "dist"));
+    fsMod.writeFileSync(pathMod.join(rootDir, "dist", "index.html"), "<html></html>");
+    fsMod.writeFileSync(pathMod.join(rootDir, "package.json"), "{}");
+    const extFile = pathMod.join(os.tmpdir(), `verify-ext-${Date.now()}.tpl`);
+    fsMod.writeFileSync(extFile, "tpl");
+
+    const node = {
+        id: "st1", type: "stage.copy", position: [0, 0],
+        data: { count: 3, lit: { "p1.from": "dist", "p2.from": "package.json", "p3.from": extFile } },
+    };
+    const meta = NODE_TYPES["stage.copy"];
+    const logs = [];
+    const out = await NODE_TYPES["stage.copy"].run(
+        { log: m => logs.push(String(m)), mask: x => x, dryRun: false },
+        node,
+        { root: rootDir, "p1.from": "dist", "p2.from": "package.json", "p3.from": extFile });
+
+    // 递归复制 dist；同名复制 package.json；root 外文件落 basename（to 缺省）
+    assert.ok(fsMod.existsSync(pathMod.join(out.dir, "dist", "index.html")), "dist 递归复制");
+    assert.ok(fsMod.existsSync(pathMod.join(out.dir, "package.json")), "同名复制");
+    assert.ok(fsMod.existsSync(pathMod.join(out.dir, pathMod.basename(extFile))), "root 外文件以 basename 落暂存");
+    assert.ok(logs.some(l => l.includes("basename") && l.includes("[WARN]")), "root 外 to 未填打警告");
+    assert.ok(logs.some(l => l.includes("[stage]")), "完成标记");
+    fsMod.rmSync(rootDir, { recursive: true, force: true });
+    fsMod.rmSync(extFile, { force: true });
+});
+
 console.log(`\nOK: ${passed} 项断言全部通过`);
