@@ -88,19 +88,19 @@
     <div class="gbody"></div>
     <!-- 展开态隧道接口：每个隧道位渲染同 id 的 target+source 双类型（xyflow 段边按类型查锚点，
          单类型会让另一半段边不渲染）。透明孪生只做段边锚点。
-         9px 圆口压在边框中线（±4.5px）；xyflow 位置类自带 left/right，与内联冲突时 left 获胜——
-         两侧都显式声明 left/right 防止锚点被钉到对侧（出口段边接错入口的根因）。 -->
+         xyflow 位置类自带 left:0/right:0 + translate(±50%,-50%) 把圆点居中在容器边上，
+         可见口不写 left/right；孪生因位置类方向相反，需显式换边并覆盖 transform。 -->
     {#each tunnels.in as e, i (e.id)}
       <Handle id={`tunnel-in-${i}`} type="target" position={Position.Left} connectable={false}
-        style="background:#4da3ff; opacity:.55; width:9px; height:9px; left:-4.5px; top:{34 + i * 20}px" />
+        style="background:#4da3ff; opacity:.55; width:9px; height:9px; top:{34 + i * 20}px" />
       <Handle id={`tunnel-in-${i}`} type="source" position={Position.Right} connectable={false}
-        style="background:transparent; border-color:transparent; width:9px; height:9px; left:-4.5px; right:auto; top:{34 + i * 20}px" />
+        style="background:transparent; border-color:transparent; width:9px; height:9px; left:0; right:auto; transform:translate(-50%,-50%); top:{34 + i * 20}px" />
     {/each}
     {#each tunnels.out as e, i (e.id)}
       <Handle id={`tunnel-out-${i}`} type="source" position={Position.Right} connectable={false}
-        style="background:#ff9e64; opacity:.55; width:9px; height:9px; left:auto; right:-4.5px; top:{34 + i * 20}px" />
+        style="background:#ff9e64; opacity:.55; width:9px; height:9px; top:{34 + i * 20}px" />
       <Handle id={`tunnel-out-${i}`} type="target" position={Position.Left} connectable={false}
-        style="background:transparent; border-color:transparent; width:9px; height:9px; left:auto; right:-4.5px; top:{34 + i * 20}px" />
+        style="background:transparent; border-color:transparent; width:9px; height:9px; left:auto; right:0; transform:translate(50%,-50%); top:{34 + i * 20}px" />
     {/each}
   {:else}
     <!-- 收起黑箱条：标题行(36) + 入口行(左对齐) + 分隔线 + 出口行(右对齐) + 页脚
@@ -111,9 +111,9 @@
       {@const lbl = tunnelLabel(e, "in")}
       <div class="tlabel in nodrag" style="top:{rtop}px" title={lbl}>{lbl}</div>
       <Handle id={`tunnel-in-${i}`} type="target" position={Position.Left} connectable={false}
-        style="background:#4da3ff; pointer-events:none; width:9px; height:9px; left:-4.5px; top:{rtop + 10}px" />
+        style="background:#4da3ff; pointer-events:none; width:9px; height:9px; top:{rtop + 10}px" />
       <Handle id={`tunnel-in-${i}`} type="source" position={Position.Right} connectable={false}
-        style="background:transparent; border-color:transparent; width:9px; height:9px; pointer-events:none; left:-4.5px; right:auto; top:{rtop + 10}px" />
+        style="background:transparent; border-color:transparent; width:9px; height:9px; pointer-events:none; left:0; right:auto; transform:translate(-50%,-50%); top:{rtop + 10}px" />
     {/each}
     {#if tunnels.in.length && tunnels.out.length}
       <div class="tdiv" style="top:{groupBarRowTop('out', 0, tunnels.in.length) - 5}px"></div>
@@ -123,9 +123,9 @@
       {@const lbl = tunnelLabel(e, "out")}
       <div class="tlabel out nodrag" style="top:{rtop}px" title={lbl}>{lbl}</div>
       <Handle id={`tunnel-out-${i}`} type="source" position={Position.Right} connectable={false}
-        style="background:#ff9e64; pointer-events:none; width:9px; height:9px; left:auto; right:-4.5px; top:{rtop + 10}px" />
+        style="background:#ff9e64; pointer-events:none; width:9px; height:9px; top:{rtop + 10}px" />
       <Handle id={`tunnel-out-${i}`} type="target" position={Position.Left} connectable={false}
-        style="background:transparent; border-color:transparent; width:9px; height:9px; pointer-events:none; left:auto; right:-4.5px; top:{rtop + 10}px" />
+        style="background:transparent; border-color:transparent; width:9px; height:9px; pointer-events:none; left:auto; right:0; transform:translate(50%,-50%); top:{rtop + 10}px" />
     {/each}
   {/if}
 </div>

@@ -130,3 +130,4 @@
 - **修复④**：types.js 新增 `GROUP_BAR{header:36,row:20,div:9,pad:8}` + `groupBarHeight/groupBarRowTop`（App 算高与 GroupBox 渲染行同源）；收起高度公式改为 `36+nIn×20+(双向都有?9:0)+nOut×20+8`；App context 新增 `tunnelLabel(edge, side)`（入侧=目标口/出侧=源口，格式镜像 DevNode，节点标题后缀取 data.note）；`.collapsed .ghead` 锁 36px。
 - **回归**：临时 wf（入1+出2+组内边）组合后：入口两锚点在左缘、出口两锚点在右缘（归一化 cx≈0/1）；收起条实测高 113=公式值，入口行 `Print Log - 打印入口: value (any)*` 左对齐、分隔线 top 61、出口两行右对齐、title 属性可悬停；刷新后收起态与标签完整还原；无控制台报错。
 - **状态**：已修复（本次提交）。
+- **更正（同日）**：④的「9px 压边」实现写错了——xyflow 位置类自带 `left:0/right:0 + translate(±50%,-50%)`（设计即圆点居中于容器边线，节点卡接口同理），内联再写 `±4.5px` 被 translate 叠加半宽，圆点整体飘到边框外 ≈9px。终态：可见口不写 left/right（交位置类居中），反向孪生显式 `left:0/right:0 + translate(∓50%,-50%)` 换边。实测六个 Handle 圆心距组框左右缘均 ≈1px（边框宽度级误差），展开/收起两态截图确认压线。
