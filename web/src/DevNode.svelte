@@ -311,11 +311,8 @@
         {#if toPeer}
           {@const toInp = inputs.find(x => x.id === toPeer.id)}
           {@const toLive = ui.runNodeInputs?.[id]?.[toPeer.id]}
-          <Handle id={toPeer.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[toInp.type]}; top:70%" />
-          {#if isWiredAsTarget?.(id, toPeer.id) && toLive !== undefined && toLive !== null && toLive !== ""}
+          {#if toLive !== undefined && toLive !== null && toLive !== ""}
             <input class="inlit live nodrag" disabled title={String(toLive)} value={toLive} />
-          {:else if isWiredAsTarget?.(id, toPeer.id)}
-            <input class="inlit nodrag" disabled title={`值来自连线：${resolvePreview(toInp)}`} value={resolvePreview(toInp)} />
           {:else}
             <input class="inlit nodrag" type="text" placeholder={inferStageTo(id, inp, toPeer)}
               value={getLit(toPeer.id) ?? ""}

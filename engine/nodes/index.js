@@ -46,7 +46,7 @@ export function getInputs(node) {
         for (let i = 1; i <= n; i++) {
             for (const subDef of sub) {
                 const id = `${prefix}${i}.${subDef.suffix}`;
-                if (!all.some(d => d.id === id)) ports.push({ id, type: "string", required: subDef.suffix === sub[0].suffix, dynamic: true });
+                if (!all.some(d => d.id === id)) ports.push({ id, type: "string", required: subDef.suffix === sub[0].suffix, dynamic: true, ...(subDef.suffix !== sub[0].suffix ? { noHandle: true } : {}) });
             }
         }
         all = [...all, ...ports];
