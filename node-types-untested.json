@@ -2,10 +2,7 @@
   "untested": [
     "git.ref",
     "cmd.exec",
-    "ssh.exec",
-    "remote.deps",
     "remote.chown",
-    "remote.service",
     "remote.check",
     "field.get",
     "string.format"

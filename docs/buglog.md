@@ -184,3 +184,11 @@
 - **杂项**：动画 effect 只替换 animated 翻转的边（保引用）；onMoveEnd 不再点星（视口不入文档）；showToast 计时器句柄化；busyTimer $effect 清理；index.html webview 补丁加固（无 RO 不 patch/兜底轮询可停/per-instance 轮询表/rAF 落败定时器清理）；/api/template/vars 错误统一 4xx（DevNode 补 .catch）；cli follow 30 分钟超时+注释修正；token 恒时比较（timingSafeEqual）+移除 query 通道；内存态 doc 回填 name；SSE 终态显式清心跳；remote.check 正则限长 500；CSS --mono 变量归一六处；.tmp stage/tarpack/verify 残留启动清扫。
 - **回归**：verify 50 项全绿；构建无警告；临时 wf 实测——打开（新 OpenModal）/组合/收起（标签经共享 portLabel/nodeTitle 正常）/展开复原/克隆（深拷贝+随组+不复制连线）/落盘干净/无控制台报错。
 - **明确未做（记录）**：App.svelte 的 HeaderBar/TaskBar/TaskDefiner 组件抽取（与数十个绑定纠缠，收益/风险比低，等下次功能迭代顺手做）；DevNode 三个 picker 刷新函数 usePicker 化（三者返回结构差异大，抽象后反而不直观）；HTTP 层自动化测试（需启动真实服务器进程，另行安排）。
+
+## BUG-2026-09-29-01 remote.deps 默认配置必挂（sudo -n cd：cd 是 shell 内建无可执行文件）
+
+- **现象**：「安装生产依赖」节点（remote.deps）从未跑通过——默认 `sudo -n` 开启时命令为 `bash -lc 'sudo -n cd <path> && pnpm install …'`，`cd` 是 shell 内建命令、无可执行文件，`sudo -n cd` 直接 `command not found` 退出，pnpm 永远执行不到。节点一直在「未测试」清单里佐证了这点。
+- **根因**：`buildCommand` 前缀式 sudo 只覆盖第一段（见 BUG-2026-09-28-02），而这里的复合命令第一段恰好是 `cd`——sudo 对它无意义且必挂；即便 cd 能过，pnpm 以 root 跑也会污染 .pnpm-store 属主，sudo 对本节点本来就是反模式。
+- **修复（按用户决策重做节点）**：remote.deps 原地替换为 `pnpm.install`（title 仍「安装生产依赖」）——删 manager 枚举（只做 pnpm）与 sudo 控件，恒以登录用户执行 `cd <path> && pnpm install --prod --frozen-lockfile`（frozen 语义：严格按 lockfile 装，与 package.json 不一致即失败）；控件只剩 loginShell（nvm PATH）。
+- **回归**：verify 新增断言（注册表形状；dry-run = `cd '<path>' && pnpm install --prod --frozen-lockfile` 且不含 sudo；remote.deps 不存在）。52/52 通过。真实链路由用户重跑验证。
+- **状态**：已实施。

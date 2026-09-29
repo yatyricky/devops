@@ -896,6 +896,79 @@ await test("symlink: ln 实参顺序锁定（target 口=第一参数 真实路�
     assert.deepStrictEqual(d.inputs.map(i => i.id), ["ssh", "target", "link"], "端口顺序应与 ln 命令行一致");
 });
 
+await test("注册表: remote.install 输入/控件形状；dry-run 命令形状锁定", async () => {
+    const d = NODE_TYPES["remote.install"];
+    assert.ok(d, "remote.install 已注册");
+    assert.deepStrictEqual(d.inputs, [
+        { id: "ssh", type: "ssh", required: true },
+        { id: "filePath", type: "string", required: true },
+        { id: "installPath", type: "string", required: true },
+    ]);
+    assert.deepStrictEqual(d.outputs, []);
+    assert.deepStrictEqual(d.widgets.map(w => [w.key, w.kind, w.default]), [
+        ["mode", "string", "644"], ["owner", "string", "root"], ["group", "string", "root"],
+    ]);
+    // dry-run 命令形状：sudo -n install -m mode -o owner -g group filePath installPath
+    const logs = [];
+    await NODE_TYPES["remote.install"].run({ log: m => logs.push(String(m)), mask: x => x, dryRun: true },
+        { data: { mode: "644", owner: "root", group: "root" } },
+        { ssh: {}, filePath: "/tmp/myapp.service", installPath: "/etc/systemd/system/" });
+    const line = logs.find(l => l.includes("install -m"));
+    assert.ok(line && /sudo -n install -m '644' -o 'root' -g 'root' '\/tmp\/myapp\.service' '\/etc\/systemd\/system\/'/.test(line.replaceAll("'\\''", "'")),
+        `install 形状不符: ${line}`);
+});
+
+await test("注册表: pnpm.install 形状；恒登录用户执行（无 sudo）且命令形状锁定", async () => {
+    const d = NODE_TYPES["pnpm.install"];
+    assert.ok(d, "pnpm.install 已注册");
+    assert.ok(!("remote.deps" in NODE_TYPES), "旧 remote.deps 已移除");
+    assert.deepStrictEqual(d.inputs, [
+        { id: "ssh", type: "ssh", required: true },
+        { id: "path", type: "string", required: true },
+    ]);
+    assert.deepStrictEqual(d.outputs, []);
+    assert.deepStrictEqual(d.widgets.map(w => w.key), ["loginShell"], "只剩 loginShell 控件（manager/useSudo 已删）");
+    // dry-run：cd + pnpm install --prod --frozen-lockfile，且不含 sudo（sudo -n cd 地雷根除）
+    const logs = [];
+    await NODE_TYPES["pnpm.install"].run({ log: m => logs.push(String(m)), mask: x => x, dryRun: true },
+        { data: { loginShell: true } }, { ssh: {}, path: "/opt/kids-ledger/server-live" });
+    const line = logs.find(l => l.includes("pnpm install"));
+    assert.ok(line, "pnpm.install 应有 dry-run 日志");
+    const flat = line.replaceAll("'\\''", "'");
+    assert.ok(flat.includes("cd '/opt/kids-ledger/server-live'"), `应 cd 到安装目录: ${flat}`);
+    assert.ok(flat.includes("&& pnpm install --prod --frozen-lockfile"), `应含完整安装命令: ${flat}`);
+    assert.ok(!flat.includes("sudo"), "不应出现 sudo");
+});
+
+await test("注册表: systemd.run 形状；restart 四步与 enable --now 映射锁定", async () => {
+    const d = NODE_TYPES["systemd.run"];
+    assert.ok(d, "systemd.run 已注册");
+    assert.ok(!("remote.service" in NODE_TYPES), "旧 remote.service 已移除");
+    assert.deepStrictEqual(d.inputs, [
+        { id: "ssh", type: "ssh", required: true },
+        { id: "name", type: "string", required: true },
+    ]);
+    assert.deepStrictEqual(d.outputs, [], "无输出（各步 stdout 实时进任务日志，不冗余）");
+    const actions = d.widgets[0].options;
+    for (const a of ["restart", "enable --now", "start", "status", "is-active"]) {
+        assert.ok(actions.includes(a), `枚举应含 ${a}`);
+    }
+    // restart 四步
+    let logs = [];
+    await NODE_TYPES["systemd.run"].run({ log: m => logs.push(String(m)), mask: x => x, dryRun: true },
+        { data: { action: "restart", useSudo: true, loginShell: true } }, { ssh: {}, name: "myapp.service" });
+    const flat = logs.join("\n").replaceAll("'\\''", "'");
+    for (const step of ["sudo -n systemctl daemon-reload", "sudo -n systemctl reset-failed 'myapp.service'", "sudo -n systemctl restart 'myapp.service'", "sudo -n systemctl status 'myapp.service'"]) {
+        assert.ok(flat.includes(step), `restart 应含步骤 ${step}`);
+    }
+    // enable --now 走通用映射
+    logs = [];
+    await NODE_TYPES["systemd.run"].run({ log: m => logs.push(String(m)), mask: x => x, dryRun: true },
+        { data: { action: "enable --now", useSudo: true, loginShell: true } }, { ssh: {}, name: "myapp.service" });
+    const en = logs.join("\n").replaceAll("'\\''", "'");
+    assert.ok(en.includes("sudo -n systemctl enable --now 'myapp.service'"), `enable --now 映射不符: ${en}`);
+});
+
 await test("stage.copy: from 相对 root 解析（非 cwd）+ 递归 + to 缺省保持结构", async () => {
     const os = await import("os");
     const pathMod = await import("path");

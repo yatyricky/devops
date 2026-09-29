@@ -231,8 +231,8 @@ export default [
         },
     },
     {
-        type: "remote.deps",
-        desc: "在远端目录安装生产依赖（npm ci --omit=dev 或 pnpm install --prod）。",
+        type: "pnpm.install",
+        desc: "生产环境安装依赖：cd <path> && pnpm install --prod --frozen-lockfile（严格按 pnpm-lock.yaml 装，与 package.json 不一致即失败，保证部署版本与本地测试一致）。恒以登录用户执行（pnpm 不该用 root，会污染 .pnpm-store 属主），login shell 保 nvm PATH。",
         title: "安装生产依赖",
         category: "远端",
         color: "#ff9e64",
@@ -242,15 +242,12 @@ export default [
         ],
         outputs: [],
         widgets: [
-            { key: "manager", label: "包管理器", kind: "enum", options: ["npm", "pnpm"], default: "npm" },
-            { key: "useSudo", label: "sudo -n", kind: "boolean", default: true },
             { key: "loginShell", label: "登录 shell（nvm PATH）", kind: "boolean", default: true },
         ],
         async run(ctx, node, inputs) {
-            const install = node.data.manager === "pnpm"
-                ? `pnpm install --prod --frozen-lockfile`
-                : `npm ci --omit=dev`;
-            await runRemote(ctx, node, inputs.ssh, `cd ${sq(inputs.path)} && ${install}`, "依赖安装");
+            const dir = String(inputs.path ?? "").trim();
+            if (!dir) throw new Error("pnpm.install 未连接 path");
+            await runRemote(ctx, node, inputs.ssh, `cd ${sq(dir)} && pnpm install --prod --frozen-lockfile`, "依赖安装", { sudo: false });
         },
     },
     {
@@ -288,8 +285,8 @@ export default [
         },
     },
     {
-        type: "remote.service",
-        desc: "systemd 动作：restart 附带 daemon-reload + reset-failed + 状态查看；失败即任务失败。",
+        type: "systemd.run",
+        desc: "systemd 动作：restart = daemon-reload + reset-failed + restart + 状态查看（切 symlink 后让新 release 生效的标准动作；服务未运行时 restart 即拉起）；enable --now 用于首次部署；status/is-active 不因服务状态非零而失败（可作只读检查）。无输出——各步 stdout 已实时进任务日志。systemctl 需要 root，恒经 sudo -n，需 NOPASSWD。",
         title: "systemd 服务",
         category: "远端",
         color: "#ff9e64",
@@ -297,13 +294,14 @@ export default [
             { id: "ssh", type: "ssh", required: true },
             { id: "name", type: "string", required: true },
         ],
-        outputs: [{ id: "out", type: "string" }],
+        outputs: [],
         widgets: [
-            { key: "action", label: "动作", kind: "enum", options: ["restart", "reload", "reload-or-restart", "enable", "status", "is-active"], default: "restart" },
+            { key: "action", label: "动作", kind: "enum", options: ["restart", "enable --now", "start", "reload", "reload-or-restart", "enable", "status", "is-active"], default: "restart" },
             { key: "useSudo", label: "sudo -n", kind: "boolean", default: true },
         ],
         async run(ctx, node, inputs) {
-            const name = inputs.name;
+            const name = String(inputs.name ?? "").trim();
+            if (!name) throw new Error("systemd.run 未连接 name");
             const action = node.data.action ?? "restart";
             /** @type {string[]} */
             const steps = [];
@@ -316,17 +314,14 @@ export default [
             }
             if (ctx.dryRun) {
                 for (const s of steps) ctx.log(`[dry-run] remote$ ${buildCommand(s, node)}`);
-                return { out: "" };
+                return;
             }
-            let out = "";
             for (const s of steps) {
                 const r = await sshRun(inputs.ssh, buildCommand(s, node), { log: ctx.log });
-                out = r.out;
                 if (r.code !== 0 && !s.includes("|| true") && action !== "is-active" && action !== "status") {
                     throw new Error(`systemd ${action} ${name} 失败 (code=${r.code})\n${r.err}`);
                 }
             }
-            return { out: out.trim() };
         },
     },
     {
@@ -378,6 +373,35 @@ export default [
         widgets: [],
         async run(ctx, node, inputs) {
             await runRemote(ctx, node, inputs.ssh, "nginx -t && systemctl reload nginx", "nginx reload", { sudoWrap: true });
+        },
+    },
+    {
+        type: "remote.install",
+        desc: "远端安装文件到系统目录（systemd unit 等的部署动作）：sudo install 落盘并设权限属主，等价 sudo install -m <mode> -o <owner> -g <group> <filePath> <installPath>。需 NOPASSWD。",
+        title: "Install File",
+        category: "远端",
+        color: "#ff9e64",
+        inputs: [
+            { id: "ssh", type: "ssh", required: true },
+            { id: "filePath", type: "string", required: true },
+            { id: "installPath", type: "string", required: true },
+        ],
+        outputs: [],
+        widgets: [
+            { key: "mode", label: "权限（install -m）", kind: "string", serializable: true, default: "644" },
+            { key: "owner", label: "属主（install -o）", kind: "string", serializable: true, default: "root" },
+            { key: "group", label: "属组（install -g）", kind: "string", serializable: true, default: "root" },
+        ],
+        async run(ctx, node, inputs) {
+            const file = String(inputs.filePath ?? "").trim();
+            if (!file) throw new Error("remote.install 未连接 filePath");
+            const dir = String(inputs.installPath ?? "").trim();
+            if (!dir) throw new Error("remote.install 未连接 installPath");
+            const mode = String(node.data.mode ?? "").trim() || "644";
+            const owner = String(node.data.owner ?? "").trim() || "root";
+            const group = String(node.data.group ?? "").trim() || "root";
+            const cmdStr = `install -m ${sq(mode)} -o ${sq(owner)} -g ${sq(group)} ${sq(file)} ${sq(dir)}`;
+            await runRemote(ctx, node, inputs.ssh, cmdStr, "install");
         },
     },
 ];
