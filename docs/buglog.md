@@ -204,3 +204,11 @@
 7. 选中边光晕：`.selected` stroke-width 2.6 + drop-shadow(0 0 5px var(--ec))（光晕=边自身颜色；seq 定义 --ec 银色）。
 8. 吸附与背景点阵对齐：实锤 Background 默认 gap=20 vs 吸附 [16,16]——`<Background gap={16} />`；点阵锚定流坐标原点，小白点与吸附点重合；另确认本版 snapGrid 单独传入即生效（snapToGrid: !!snapGrid）。顺带：视口平移不再点亮保存星号。
 - **回归**：verify 53 项全绿；临时 wf 实测——string 边 #61afef/2px、seq 银虚线、选中节点相连边（含 seq）animated+zIndex 1000 压过普通节点（z 0）、选中边光晕 drop-shadow(--ec)、吸附拖节点 position=-304/64 均为 16 倍数、组合展开态板宽 640=成员跨距 612+28。测试环境注意：live 服务器已配 token（kl online），浏览器回归改用 3199 一次性 token 实例（DEVOPS_PORT/DEVOPS_TOKEN 环境变量起第二实例），未触碰用户配置。
+
+## QoL-2026-09-30-02 防漂移门禁 + 四项界面升级（用户需求，承接 drift 讨论的方向一）
+
+1. **运行前实时列表新鲜度门禁**：带实时列表的节点（refsPicker/scriptsPicker/sshAliasesPicker）刷新成功时在 `ui.pickerFresh[nodeId]` 记录「派生输入键」（repoDir/path/alias 当时的值）；doRun 前逐节点比对——键不存在或不等于当前输入值 → 禁止启动并列出节点，指引「卡片刷新/顶栏刷新列表」。输入键变化（改了 repoDir/path）即自动失鲜；loadDoc 清空。输入来自运行时节点（键无法静态确定）时跳过校验。这把 drift 讨论中"部署时刻才发现"的痛点提前到点运行之前。
+2. 左侧调色板 150 → 180px；node 悬停 title 改为完整说明（meta.desc）。
+3. Control Panel 横排（orientation=horizontal）+ 主题化（panel2 底/圆角/accent hover/4px 间距）；调色板底部让出空间（bottom 128→56）。
+4. ndesc 三件：卡片头部删除按钮左侧 💡 灯泡单独开合；taskbar 吸附旁「说明」按钮全局开合（descAllTick 广播）；ndesc 默认收起（原常显）。左栏悬停已含完整说明。
+- **回归**：verify 53 绿 + 构建；3199 一次性实例实测——未刷新点运行被拦（toast 列出 g1/se 并指引刷新）、Palette 180、Controls flexDirection=row + 主题按钮、灯泡开合 ndesc、全局开=3/3 收起=0/3、悬停 title=desc；测试经 3199 一次性 token 实例，未触碰用户 live 配置。

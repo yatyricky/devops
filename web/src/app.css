@@ -28,6 +28,9 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode .head .del { display: none; border: none; background: rgba(0,0,0,.25); color: inherit;
   padding: 0 4px; font-size: 11px; border-radius: 4px; line-height: 1.4; }
 .devnode:hover .head .del, .devnode.selected .head .del { display: inline-block; }
+.devnode .head .bulb { display: none; border: none; background: rgba(0,0,0,.25); color: inherit;
+  padding: 0 4px; font-size: 11px; border-radius: 4px; line-height: 1.4; cursor: pointer; }
+.devnode:hover .head .bulb, .devnode.selected .head .bulb, .devnode .head .bulb.on { display: inline-block; }
 .devnode .body { padding: 6px 10px 8px; color: var(--fg); }
 .devnode .body .kv { position: relative; display: flex; align-items: center; color: var(--dim); }
 .devnode .body .kv.out { justify-content: flex-end; text-align: right; }
@@ -123,3 +126,12 @@ textarea { font: 12px/1.5 var(--mono); }
    被板盖住的组外节点仍可点选；组的交互集中在标题行与收起条标签（板内各自 pointer-events:auto） */
 .svelte-flow__node.svelte-flow__node-groupbox { pointer-events: none; }
 .devnode .body .badge .rm { background: none; border: none; padding: 0; font: inherit; color: inherit; } /* a→button（a11y）后复位 */
+
+/* Svelte Flow Controls：横排（释放左侧调色板竖向空间）、间距与主题统一（原白底方块太扎眼） */
+.svelte-flow__controls { gap: 4px; box-shadow: none; }
+.svelte-flow__controls.horizontal { flex-direction: row; }
+.svelte-flow__controls-button { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--fg); width: 28px; height: 28px; padding: 0; }
+.svelte-flow__controls-button:hover { background: var(--panel); border-color: var(--accent); }
+.svelte-flow__controls-button svg { fill: currentColor; }
+.svelte-flow__controls-button:disabled { pointer-events: none; }

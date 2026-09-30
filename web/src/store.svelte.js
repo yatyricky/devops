@@ -14,4 +14,9 @@ export const ui = $state({
   untestedNodeTypes: null,
   /** 一键刷新信号：顶栏按钮 +1，各卡片 effect 监听后各自触发自己的下拉刷新 */
   refreshTick: 0,
+  /** 实时列表新鲜度：nodeId → 取值键（refresh 成功时记录当时列表的派生输入；键变即失鲜——运行前强制刷新，防漂移） */
+  pickerFresh: /** @type {Record<string, string>} */ ({}),
+  /** 说明（ndesc）全局开关：taskbar 按钮翻转 open 并 tick++，各卡片 effect 跟随 */
+  descAllTick: 0,
+  descAllOpen: false,
 });

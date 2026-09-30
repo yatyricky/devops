@@ -202,6 +202,7 @@
     hoverTask = null; definer = null;
     ui.runTaskNodes = null; ui.nodeRunStatus = null; ui.runNodeInputs = null;
     ignoreDirtyUntil = Date.now() + 1000;
+    ui.pickerFresh = {}; // 换工作流 = 所有实时列表视为失鲜，运行前须重新刷新
   }
   function toDoc() {
     return toDocument(nodes, edges, tasks, title, docRepoDir);
@@ -664,6 +665,24 @@
   async function doRun(p) {
     const m = runModal;
     if (m.needProd && !p.dryRun && p.prodVal !== displayName) { showToast(`需输入显示名 "${displayName}" 确认`); return; }
+    // 防漂移门禁：任务选点中带实时列表的节点（refs/scripts/ssh 别名），其列表必须已按【当前输入】刷新过，
+    // 否则禁止启动（列表失鲜 = 选值可能已过期）。dry-run 同样受限——预览的也是计划的真实性。
+    const stale = [];
+    for (const id of tasks[m.task].nodes ?? []) {
+      const n = nodeByIdMap.get(id);
+      const meta = n && typeMap[n.data?.__type ?? n.type];
+      if (!meta) continue;
+      let want = undefined;
+      if (meta.refsPicker) want = String(infer().resolvePortValue(id, "repoDir") ?? "");
+      else if (meta.scriptsPicker) want = String(infer().resolvePortValue(id, "path") ?? "").trim();
+      else if (meta.sshAliasesPicker) want = String(n.data?.alias ?? "");
+      if (want === undefined) continue; // 输入来自运行时节点，列表新鲜度无从校验（刷新即按当时输入取）
+      if (ui.pickerFresh[id] !== want) stale.push(id);
+    }
+    if (stale.length) {
+      showToast(`实时列表未刷新（${stale.join("、")}），先点卡片「刷新」或顶栏「刷新列表」再运行`);
+      return;
+    }
     try {
       const { id } = await api("/api/jobs", { method: "POST", body: JSON.stringify({
         workflow: currentPath, task: m.task, dryRun: p.dryRun,
@@ -746,6 +765,8 @@
     <label class="mut" title="开启后移动节点按 16px 网格吸附（以节点左上角为基准）">
       <input type="checkbox" bind:checked={snapOn} onchange={snapChange} /> 吸附
     </label>
+    <button title="一键展开/收起所有节点的说明（ndesc）" class:active={ui.descAllOpen}
+      onclick={() => { ui.descAllOpen = !ui.descAllOpen; ui.descAllTick++; }}>说明</button>
   </div>
 
   <div class="main">
@@ -775,7 +796,7 @@
         connectionRadius={22}
       >
         <Background gap={16} />
-        <Controls />
+        <Controls orientation="horizontal" position="bottom-left" />
         <MiniMap nodeColor={n => typeMap[n.type]?.color ?? "#8a97a8"} pannable zoomable />
         <CanvasDrop ondropat={dropAddNode} />
       </SvelteFlow>

@@ -22,7 +22,7 @@
         </button>
         {#if !collapsed[g]}
           {#each metas.filter(m => m.category === g) as m (m.type)}
-            <button class="item" title={m.type} draggable="true"
+            <button class="item" title={m.desc || m.type} draggable="true"
               ondragstart={e => e.dataTransfer.setData("application/x-devops-node", m.type)}
               onclick={() => onadd(m)}>
               <span class="dot" style="background:{m.color}"></span>{m.title}
@@ -37,7 +37,7 @@
 
 <style>
   /* 悬浮在画布左上角，不参与 flex 布局：收起/展开不改变画布尺寸 */
-  .palette { position: absolute; top: 12px; left: 12px; bottom: 128px; width: 150px; z-index: 5;
+  .palette { position: absolute; top: 12px; left: 12px; bottom: 56px; width: 180px; z-index: 5;
     display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line);
     border-radius: 10px; padding: 8px 6px; min-height: 0; box-shadow: 0 2px 10px rgba(0,0,0,.4); }
   .palette.closed { bottom: auto; width: auto; padding: 4px; border-radius: 8px; }

@@ -125,6 +125,7 @@
     refreshing = true; refsErr = "";
     try {
       refs = await api("/api/git/refs", { method: "POST", body: JSON.stringify({ repoDir }) });
+      ui.pickerFresh[id] = String(repoDir); // 记录新鲜键：运行前校验列表与当前输入一致
     } catch (e) {
       refsErr = e.message;
     } finally {
@@ -195,6 +196,7 @@
       sshAliases = r.aliases ?? [];
       sshResolved = r.resolved ?? null;
       sshErr = r.resolved?.error ?? "";
+      ui.pickerFresh[id] = String(get("alias") ?? "");
     } catch (e) {
       sshErr = e.message;
     } finally {
@@ -215,6 +217,7 @@
       // 已序列化的值不在集合中 → 默认取第一项（回写保持 serializable 值有效）
       const cur = String(get("script") ?? "");
       if (scripts.length && !scripts.includes(cur)) set("script", scripts[0]);
+      ui.pickerFresh[id] = p;
     } catch (e) {
       scriptsErr = e.message;
     } finally {
@@ -231,6 +234,12 @@
   // ── 节点备注：便笺按钮折叠展开，内容存 data.note 随图保存 ────
   let noteOpen = $state(false);
   let noteText = $derived(String(data?.note ?? "").trim());
+  // ── 节点说明（ndesc）：灯泡单独开合；taskbar「说明」按钮全局开合（descAllTick 广播） ────
+  let descOpen = $state(false);
+  $effect(() => {
+    if (ui.descAllTick === 0) return;
+    descOpen = ui.descAllOpen;
+  });
 
   // ── struct 字段行：值控件按类型变化；字段口连线后隐藏手填 ────
   const numOk = v => String(v ?? "").trim() !== "" && Number.isFinite(Number(v));
@@ -259,9 +268,12 @@
 
   <div class="head" style="background:{color}">
     <span class="htitle">{nodeTitle(meta, data)}</span>
+    {#if meta?.desc}
+      <button type="button" class="del bulb nodrag" class:on={descOpen} title={descOpen ? "收起说明" : "展开说明"} onclick={() => (descOpen = !descOpen)}>💡</button>
+    {/if}
     <button class="del nodrag" title="删除节点" onclick={() => ondelete?.(id)}>{@render trash(11)}</button>
   </div>
-  {#if meta?.desc}<div class="ndesc">{meta.desc}</div>{/if}
+  {#if meta?.desc && descOpen}<div class="ndesc">{meta.desc}</div>{/if}
   <div class="body nowheel">
     {#each inputs as inp (inp.id)}
       {#if pairTo(inp)}
