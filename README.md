@@ -77,8 +77,9 @@ node cli.js run <名或路径> <task> --input ref=master
 |---|---|
 | 输入 | `string.const`（字符串常量）、`struct.make`（构造）、`struct.split`（析构，出口按上游字段动态生成） |
 | 版本 | `git.ref`、`git.checkout`（任务结束自动恢复原分支）、`git.getRefs` |
+| 连接 | `ssh.session`（~/.ssh/config 别名直连，可选指纹锁定）、`ssh.close` |
 | 构建 | `cmd.exec`（本地命令，动态插槽）、`stage.copy`（N 条 from/to 暂存复制）、`tar.pack`（白/黑名单）、`template.render`（`./`=工作流目录，动态变量口）、`npm.run` |
-| 远端 | `ssh.session`（~/.ssh/config 别名直连，可选 SHA256 指纹锁定）、`ssh.close`、`ssh.exec`（动态插槽，值自动引号包裹）、`ssh.upload`（权限不足回退 /tmp 暂存 + sudo install；无 trap，上传即保留）、`remote.extract`（纯解压）、`pnpm.install`（生产 pnpm install --prod --frozen-lockfile，登录用户执行）、`remote.chown`、`remote.symlink`（发布/回滚核心）、`systemd.run`（restart/enable --now/start 等 systemd 动作）、`remote.check`（断言正则）、`remote.nginx-reload`（校验后重载，整段提权）、`remote.install`（sudo install 落盘系统目录，mode/owner/group 可配） |
+| 远端 | `ssh.exec`（动态插槽，值自动引号包裹）、`ssh.upload`（权限不足回退 /tmp 暂存 + sudo install；无 trap，上传即保留）、`remote.extract`（纯解压）、`pnpm.install`（生产 pnpm install --prod --frozen-lockfile，登录用户执行）、`remote.chown`、`remote.symlink`（发布/回滚核心）、`systemd.run`（restart/enable --now/start 等 systemd 动作）、`remote.check`（断言正则）、`remote.nginx-reload`（校验后重载，整段提权）、`remote.install`（sudo install 落盘系统目录，mode/owner/group 可配） |
 | 工具 | `path.resolve`（N 段拼接，posix/windows/auto）、`path.basename`、`string.join`、`string.format`、`field.get`（struct 取单值）、`log.print`（预览端点） |
 
 ## 验证

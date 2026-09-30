@@ -40,8 +40,8 @@ export function basenameNoExt(fp) {
   return fp.split(/[\\/]/).pop().replace(/\.json$/i, "");
 }
 
-// ── Group 收起黑箱条布局常量（App 计算节点高度与 GroupBox 渲染行必须同源）────
-export const GROUP_BAR = { header: 36, row: 20, div: 9, pad: 8 };
+// ── Group 布局常量（全部以白点间距 16 为基准：title=2×、padding=1×）────
+export const GROUP_BAR = { header: 32, row: 20, div: 9, pad: 16 };
 /** 收起条总高 = 标题行 + 入口数×行高 +（出入口都有时分隔线）+ 出口数×行高 + 页脚 padding */
 export function groupBarHeight(nIn, nOut) {
   return GROUP_BAR.header + nIn * GROUP_BAR.row + (nIn && nOut ? GROUP_BAR.div : 0) + nOut * GROUP_BAR.row + GROUP_BAR.pad;

@@ -29,7 +29,7 @@ export default [
         desc: "在仓库上计算部署版本：fetch → 按需 checkout 指定 ref → 结束自动恢复原分支。输出版本号/构建时间/release 名。",
         title: "Git 版本",
         category: "版本",
-        color: "#f07178",
+        color: "#e5c07b",
         inputs: [{ id: "ref", type: "string", required: false }],
         outputs: [
             { id: "versionId", type: "string" },
@@ -57,7 +57,7 @@ export default [
         desc: "切换仓库到指定分支或 tag：输入 repoDir 与 ref，输出切换前的 HEAD（original），可用它链式切回。",
         title: "Git Checkout",
         category: "版本",
-        color: "#f07178",
+        color: "#e5c07b",
         inputs: [
             { id: "repoDir", type: "string", required: true },
             { id: "ref", type: "string", required: true },
@@ -92,7 +92,7 @@ export default [
         desc: "输出一个选定的 ref 名：卡片上点「刷新」拉取分支/tag 下拉来挑选，默认 HEAD。",
         title: "Git Get Refs",
         category: "版本",
-        color: "#f07178",
+        color: "#e5c07b",
         refsPicker: true,
         inputs: [{ id: "repoDir", type: "string", required: true }],
         outputs: [{ id: "ref", type: "string" }],

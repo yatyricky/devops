@@ -4,7 +4,7 @@
   import { api } from "./api.js";
   import { canConnect, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, isTunnelEdge, TYPE_COLORS, nodeTitle, portLabel, basenameNoExt, dirOf } from "./types.js";
   import { makeInfer } from "./lib/infer.js";
-  import { GROUP_COLORS, groupAABB, groupBoxOf, crossEdges, collapsedWidth, collapsedHeight, makeGroupNode } from "./lib/groups.js";
+  import { GROUP_COLORS, GROUP_COLLAPSED_W, groupAABB, groupBoxOf, crossEdges, collapsedHeight, makeGroupNode } from "./lib/groups.js";
   import { toDocument } from "./lib/docIO.js";
   import { ui } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
@@ -12,6 +12,7 @@
   import Palette from "./Palette.svelte";
   import CanvasDrop from "./CanvasDrop.svelte";
   import LogDrawer from "./LogDrawer.svelte";
+  import TypeEdge from "./TypeEdge.svelte";
   import OpenModal from "./OpenModal.svelte";
   import RunModal from "./RunModal.svelte";
 
@@ -38,6 +39,8 @@
 
   const typeMap = $derived(ui.nodeTypesMap);
   const components = $derived({ ...Object.fromEntries(Object.keys(typeMap).map(t => [t, DevNode])), groupbox: GroupBox });
+  /** 全部数据边用自定义边（选中时带重连锚点） */
+  const edgeTypes = { default: TypeEdge };
   let currentEntry = $derived(wfList.find(w => w.path === currentPath));
   let selectedNodeIds = $derived(new Set(nodes.filter(n => n.selected).map(n => n.id)));
 
@@ -87,7 +90,7 @@
       nodes = nodes.map(n => {
         if (n.type === "groupbox" && n.data.__gid === gid) {
           if (collapsed) {
-            return { ...n, data: { ...n.data, collapsed: true }, width: collapsedWidth(nodes, g), height: barH };
+            return { ...n, data: { ...n.data, collapsed: true }, width: GROUP_COLLAPSED_W, height: barH };
           }
           const aabb = groupAABB(nodes, members) ?? { width: 320, height: 200 };
           return { ...n, data: { ...n.data, collapsed: false }, width: aabb.width, height: aabb.height };
@@ -299,6 +302,7 @@
     }
   }
   function deleteNode(id) {
+    if (!confirm(`确认删除节点 ${id}？`)) return;
     if (!confirmTaskRemoval([id])) return;
     nodes = nodes.filter(n => n.id !== id);
     edges = edges.filter(e => e.source !== id && e.target !== id);
@@ -396,7 +400,7 @@
    * 连线裁决：null = 可连；否则返回拒绝原因（isValidConnection 与 connectend 提示共用）。
    * Svelte Flow 拖拽中实时调用 isValidConnection（高频、不可 toast）；拖放落在目标 handle
    * 上但被拒时由 onConnectEnd 弹出原因。
-   * @param {any} p connection { source, target, sourceHandle, targetHandle }
+   * @param {any} p connection { source, target, sourceHandle, targetHandle, selfId? }（selfId = 边重连时排除自身）
    * @returns {string | null}
    */
   function connectionRejectReason(p) {
@@ -420,8 +424,8 @@
     const i = p.targetHandle ? inps.find(x => x.id === p.targetHandle) : inps[0];
     if (!o || !i) return "插槽不存在（节点配置可能已变化）";
     if (!canConnect(o.type, i.type)) return `类型不兼容：${o.type}（${src.id}.${o.id}）→ ${i.type}（${tgt.id}.${i.id}）`;
-    // 四元组唯一（防重复拖拽/事件重放产生的完全相同的边）
-    if (edges.some(e => e.source === p.source && e.sourceHandle === o.id && e.target === p.target && e.targetHandle === i.id)) return "完全相同的连线已存在";
+    // 四元组唯一（防重复拖拽/事件重放产生的完全相同的边；重连时排除自身）
+    if (edges.some(e => e.id !== p.selfId && e.source === p.source && e.sourceHandle === o.id && e.target === p.target && e.targetHandle === i.id)) return "完全相同的连线已存在";
     return null;
   }
   /** @param {any} p */
@@ -461,8 +465,17 @@
     }
     markCritical();
   }
-  /** @param {{ nodes: any[], edges: any[] }} p xyflow 内置删除键（DEL/Backspace）触发；收起态隧道段边不可删 */
-  function onBeforeDelete({ nodes: delNodes, edges: delEdges }) {
+  /** 拖空白/非法 handle：库不触发 onreconnect，边原样保留（还原语义）。 */
+  /** 边重连最终校验：返回 falsy = 拒绝（边保持原样）。顺序边不可重连；新四元组过连线裁决（排除自身）。 */
+  function onBeforeReconnect(reconnected, old) {
+    if (old.kind === "seq") { showToast("顺序边不可重连：删除后重画"); return undefined; }
+    if (connectionRejectReason({ source: reconnected.source, sourceHandle: reconnected.sourceHandle, target: reconnected.target, targetHandle: reconnected.targetHandle, selfId: old.id }) !== null) return undefined;
+    return reconnected;
+  }
+  /** 重连成功：标脏（装饰 effect 自动跟随新端点校正类型色/zIndex/动画） */
+  function onReconnect() { markCritical(); }
+  /** @param {{ nodes: any[], edges: any[] }} p xyflow 内置删除键（DEL/Backspace）触发；收起态隧道段边不可删 */  function onBeforeDelete({ nodes: delNodes, edges: delEdges }) {
+    if (delNodes.length && !confirm(`确认删除 ${delNodes.length} 个节点（${delNodes.map(n => n.id).join("、")}）？`)) return false;
     if (!confirmTaskRemoval(delNodes.map(n => n.id))) return false;
     return { nodes: delNodes, edges: delEdges.filter(e => !isTunnelEdge(e)) };
   }
@@ -486,7 +499,7 @@
       // 收起黑箱条：保持条形尺寸（宽=成员卡宽、高=groupBarHeight 公式），不做 AABB 重算
       if (n.data.collapsed) {
         const barH = collapsedHeight(edges, n);
-        const barW = collapsedWidth(nodes, n);
+        const barW = GROUP_COLLAPSED_W;
         return (n.width === barW && n.height === barH) ? n : { ...n, width: barW, height: barH };
       }
       const aabb = groupAABB(nodes, n.data.memberIds ?? []);
@@ -776,10 +789,13 @@
       <SvelteFlow
         bind:nodes bind:edges
         nodeTypes={components}
+        edgeTypes={edgeTypes}
         onnodeclick={onNodeClick}
         onpaneclick={clearRunStatus}
         onconnect={onConnect}
         onconnectend={onConnectEnd}
+        onbeforereconnect={onBeforeReconnect}
+        onreconnect={onReconnect}
         isValidConnection={isValidConnection}
         ondelete={onDelete}
         onbeforedelete={onBeforeDelete}

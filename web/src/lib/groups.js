@@ -4,10 +4,10 @@
  */
 import { groupBarHeight, isTunnelEdge } from "../types.js";
 
-export const GROUP_PAD = 14, GROUP_PAD_TOP = 42;
+export const GROUP_PAD = 16, GROUP_PAD_TOP = 48; // title 32(2×) + 顶 pad 16(1×) = 卡上方 3×；其余方向 1×
 /** GROUP_COLORS 取 One Dark 家族，与插槽类型色规范一致 */
 export const GROUP_COLORS = ["#4da3ff", "#4cc38a", "#f5a623", "#ff6b6b", "#b18cff", "#56b6c2"];
-export const GROUP_COLLAPSED_W = 230;
+export const GROUP_COLLAPSED_W = 320; // = 20×点间距 = node 卡片定宽（同源常量）
 
 /** 成员 AABB + padding；成员为空返回 null。 */
 export function groupAABB(nodes, memberIds) {
@@ -44,15 +44,6 @@ export function crossEdges(edges, gbox) {
   return { in: inE, out: outE };
 }
 
-/** 收起条宽 = 组内成员实测宽最大值（卡片内容自适应无统一常量；未测量回退 230）。 */
-export function collapsedWidth(nodes, gbox) {
-  let w = 0;
-  for (const id of gbox?.data.memberIds ?? []) {
-    const m = nodes.find(n => n.id === id);
-    w = Math.max(w, m?.measured?.width ?? 0);
-  }
-  return Math.round(w) || GROUP_COLLAPSED_W;
-}
 
 /** 收起条高 = types.js GROUP_BAR 公式（与 GroupBox 渲染行同源）。 */
 export function collapsedHeight(edges, gbox) {
@@ -66,7 +57,7 @@ export function makeGroupNode(nodes, gid, name, color, memberIds, collapsed = fa
   const data = { __gid: gid, name, color, memberIds: [...memberIds], collapsed };
   return {
     id: `grp-${gid}`, type: "groupbox", position: { x: aabb.x, y: aabb.y },
-    width: collapsed ? collapsedWidth(nodes, { data }) : aabb.width,
+    width: collapsed ? GROUP_COLLAPSED_W : aabb.width,
     height: collapsed ? collapsedHeight([], { data }) : aabb.height,
     zIndex: 1,
     draggable: true, selectable: true, deletable: false,

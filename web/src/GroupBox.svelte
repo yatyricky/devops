@@ -125,18 +125,19 @@
   .gbox.selected { border-color: var(--gc); box-shadow: 0 0 0 1px var(--gc); }
   .gbox.collapsed { background: color-mix(in srgb, var(--gc) 16%, var(--panel));
     border-color: color-mix(in srgb, var(--gc) 60%, transparent); border-radius: 10px; }
-  /* 标题条：全宽、与板底分色（两态通用）。
+  /* 标题条：全宽、与板底分色（两态通用）；高 = 2×白点间距（GROUP_BAR.header=32，与收起条同源）。
      板 wrapper 在 app.css 置 pointer-events:none（保证被板盖住的组外节点仍可点选），交互集中在标题条与收起条标签 */
-  .ghead { height: 30px; flex: none; box-sizing: border-box; padding: 0 10px;
+  .ghead { height: 32px; flex: none; box-sizing: border-box; padding: 0 16px;
     display: flex; align-items: center; gap: 6px; cursor: grab; pointer-events: auto;
     background: color-mix(in srgb, var(--gc) 28%, var(--panel));
     border-bottom: 1px solid color-mix(in srgb, var(--gc) 55%, transparent);
     border-radius: 11px 11px 0 0; }
-  .collapsed .ghead { height: 36px; border-radius: 9px 9px 0 0; }
+  .collapsed .ghead { border-radius: 9px 9px 0 0; }
   .gbody { flex: 1; }
   .ghead:active { cursor: grabbing; }
-  .gname { font-size: 12px; font-weight: 600; color: var(--fg);
-    max-width: calc(100% - 30px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 控件右对齐（与 node 卡 .htitle{flex:1} 同逻辑） */
+  .gname { flex: 1; font-size: 12px; font-weight: 600; color: var(--fg);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gname-label { cursor: grab; padding: 2px 6px; border-radius: 5px; }
   .gname-label:hover { background: rgba(255, 255, 255, .08); }
   input.gname { width: 150px; padding: 1px 6px; font-size: 12px; }
