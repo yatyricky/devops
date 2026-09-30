@@ -217,7 +217,7 @@
 
 1. **删除 node 二次确认**：卡片 ✕ 与 DEL/Backspace 两路径都先 confirm（后者列出全部节点 id），任务引用确认保留在后。
 2. **边重连**：新建 TypeEdge.svelte 自定义边（xyflow 重连锚点必须在自定义 edge 组件内渲染）——选中边两端出现拖拽圆点（手指光标），拖哪个锚改哪端；`onbeforereconnect` 校验（顺序边拒绝重连/新四元组过连线裁决，connectionRejectReason 增加 selfId 排除自身），`onreconnect` 标脏；拖空白/非法 handle 时库不触发 onConnect——边原样还原。装饰 effect 自动跟随新端点校正类型色/zIndex。**实测坑：合成 PointerEvent 无法驱动锚点拖拽（库 setPointerCapture 需真实指针）——浏览器回归必须用 CUA 真实拖拽**。
-3. **调色板类别重组**：新「连接」类（ssh.session/ssh.close，橙 #ff9e64）；远端 9 节点 → magenta #e0559d（危险语义）；版本类 → 黄 #e5c07b。README 节点表同步。
+3. **调色板类别重组**：新「连接」类（ssh.session/ssh.close，橙 #ff9e64）；远端 9 节点 → 紫 #c678dd（One Dark 紫，原定 magenta #e0559d 因过于刺眼改紫，仍保留危险语义）；版本类 → 黄 #e5c07b。README 节点表同步。
 4. **尺寸标准化（点间距 16 为基准）**：node 卡定宽 320（=20×16，`.devnode width`）；收起条定宽 320（collapsedWidth 成员最大宽逻辑删除）；GROUP_BAR header 36→32（title 2×）、pad 8→16（1×）；GROUP_PAD 14→16、GROUP_PAD_TOP 42→48（title 32+顶 16=卡上方 3×）；ghead 30/36→32。
 - **回归**：verify 53 绿 + 构建零警告；3199 实例实测——confirm 拒绝保留/确认删除；选中边双端锚点（pointer 手指）出现、CUA 拖拽重连 ta→tc 改 ta→tb 成功、拖空白边还原（aria 不变）、选中边 z=1000；卡片 320、板宽 352=320+32（左右 16）、topPad 48、ghead 32、收起条 320×48（0 接口情形 32+16）、调色板三色分组正确。
 

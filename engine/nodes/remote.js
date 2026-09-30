@@ -123,7 +123,7 @@ export default [
         desc: "远端逐行执行命令：{{name}} 占位符自动生成输入口，值自动安全加引号；sudo 与登录 shell 可开关。sudo 开启时整行经 sudo -n bash -c 提权（复合命令 && 也整段生效）。",
         title: "SSH 命令",
         category: "远端",
-        color: "#e0559d",
+        color: "#c678dd",
         inputs: [{ id: "ssh", type: "ssh", required: true }],
         outputs: [{ id: "out", type: "string" }],
         widgets: [
@@ -152,7 +152,7 @@ export default [
         desc: "上传本机文件到远端：remotePath 恒为目标文件路径（父目录自动 mkdir -p，权限不足时 sudo -n mkdir）。目标直写 Permission denied 时自动回退：暂存 /tmp 后 sudo -n install -m 644 落到目标（root:root 0644，需 NOPASSWD）。无 trap——上传即完成，文件不会被自动清理。输出远端文件完整路径。",
         title: "Upload File",
         category: "远端",
-        color: "#e0559d",
+        color: "#c678dd",
         inputs: [
             { id: "ssh", type: "ssh", required: true },
             { id: "localPath", type: "string", required: true },
@@ -208,7 +208,7 @@ export default [
         desc: "把远端 t.gz 解压到目标目录（压缩包一级内容直接进 destDir）。输出实际解压目录。",
         title: "Extract Archive",
         category: "远端",
-        color: "#e0559d",
+        color: "#c678dd",
         inputs: [
             { id: "ssh", type: "ssh", required: true },
             { id: "archive", type: "string", required: true },
@@ -235,7 +235,7 @@ export default [
         desc: "生产环境安装依赖：cd <path> && pnpm install --prod --frozen-lockfile（严格按 pnpm-lock.yaml 装，与 package.json 不一致即失败，保证部署版本与本地测试一致）。恒以登录用户执行（pnpm 不该用 root，会污染 .pnpm-store 属主），login shell 保 nvm PATH。",
         title: "安装生产依赖",
         category: "远端",
-        color: "#e0559d",
+        color: "#c678dd",
         inputs: [
             { id: "ssh", type: "ssh", required: true },
             { id: "path", type: "string", required: true },
@@ -255,7 +255,7 @@ export default [
         desc: "递归修改远端路径属主（sudo 可关）。",
         title: "修改属主",
         category: "远端",
-        color: "#e0559d",
+        color: "#c678dd",
         inputs: [
             { id: "ssh", type: "ssh", required: true },
             { id: "path", type: "string", required: true },
@@ -272,7 +272,7 @@ export default [
         desc: "远端 ln -sfn 切换符号链接（发布/回滚的核心动作）。target 口＝真实路径（链指向的目标，ln 第一参数）；link 口＝要创建/替换的符号链接（第二参数）。",
         title: "Symlink",
         category: "远端",
-        color: "#e0559d",
+        color: "#c678dd",
         inputs: [
             { id: "ssh", type: "ssh", required: true },
             { id: "target", type: "string", required: true },
@@ -289,7 +289,7 @@ export default [
         desc: "systemd 动作：restart = daemon-reload + reset-failed + restart + 状态查看（切 symlink 后让新 release 生效的标准动作；服务未运行时 restart 即拉起）；enable --now 用于首次部署；status/is-active 不因服务状态非零而失败（可作只读检查）。无输出——各步 stdout 已实时进任务日志。systemctl 需要 root，恒经 sudo -n，需 NOPASSWD。",
         title: "systemd 服务",
         category: "远端",
-        color: "#e0559d",
+        color: "#c678dd",
         inputs: [
             { id: "ssh", type: "ssh", required: true },
             { id: "name", type: "string", required: true },
@@ -329,7 +329,7 @@ export default [
         desc: "远端只读命令 + 断言正则：对合并输出做匹配，不匹配即任务失败（如版本预检）。",
         title: "只读检查",
         category: "远端",
-        color: "#e0559d",
+        color: "#c678dd",
         inputs: [{ id: "ssh", type: "ssh", required: true }],
         outputs: [{ id: "out", type: "string" }],
         widgets: [
@@ -366,7 +366,7 @@ export default [
         type: "remote.nginx-reload",
         title: "Nginx Reload",
         category: "远端",
-        color: "#e0559d",
+        color: "#c678dd",
         desc: "远端 nginx -t 校验配置，通过后 systemctl reload nginx；校验不过即任务失败（不会带病重载）。整段经 sudo -n bash -c 提权（含 reload），需 NOPASSWD。",
         inputs: [{ id: "ssh", type: "ssh", required: true }],
         outputs: [],
@@ -380,7 +380,7 @@ export default [
         desc: "远端安装文件到系统目录（systemd unit 等的部署动作）：sudo install 落盘并设权限属主，等价 sudo install -m <mode> -o <owner> -g <group> <filePath> <installPath>。需 NOPASSWD。",
         title: "Install File",
         category: "远端",
-        color: "#e0559d",
+        color: "#c678dd",
         inputs: [
             { id: "ssh", type: "ssh", required: true },
             { id: "filePath", type: "string", required: true },
