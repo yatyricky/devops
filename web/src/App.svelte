@@ -8,7 +8,6 @@
   import { toDocument } from "./lib/docIO.js";
   import { ui } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
-  import Placeholder from "./Placeholder.svelte";
   import GroupBox from "./GroupBox.svelte";
   import Palette from "./Palette.svelte";
   import CanvasDrop from "./CanvasDrop.svelte";
@@ -39,8 +38,7 @@
   let logRef = $state(null);
 
   const typeMap = $derived(ui.nodeTypesMap);
-  // 二分：临时全部替换为静态占位卡
-  const components = $derived({ ...Object.fromEntries(Object.keys(typeMap).map(t => [t, DevNode])), groupbox: Placeholder });
+  const components = $derived({ ...Object.fromEntries(Object.keys(typeMap).map(t => [t, DevNode])), groupbox: GroupBox });
   /** 全部数据边用自定义边（选中时带重连锚点） */
   const edgeTypes = { default: TypeEdge };
   let currentEntry = $derived(wfList.find(w => w.path === currentPath));
@@ -623,6 +621,7 @@
     const next = edges.map(e => {
       let style = e.style;
       if (e.kind !== "seq") {
+        // 颜色：seq 边走 class 银色样式，不打类型色
         const origId = isTunnelEdge(e) ? String(e.id).slice(4, -2) : e.id;
         const orig = isTunnelEdge(e) ? edges.find(x => x.id === origId) : e;
         const src = orig && nodeByIdMap.get(orig.source);
@@ -819,6 +818,7 @@
       <SvelteFlow
         bind:nodes bind:edges
         nodeTypes={components}
+        edgeTypes={edgeTypes}
         onnodeclick={onNodeClick}
         onpaneclick={clearRunStatus}
         onconnect={onConnect}
