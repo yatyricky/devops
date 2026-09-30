@@ -220,3 +220,9 @@
 3. **调色板类别重组**：新「连接」类（ssh.session/ssh.close，橙 #ff9e64）；远端 9 节点 → magenta #e0559d（危险语义）；版本类 → 黄 #e5c07b。README 节点表同步。
 4. **尺寸标准化（点间距 16 为基准）**：node 卡定宽 320（=20×16，`.devnode width`）；收起条定宽 320（collapsedWidth 成员最大宽逻辑删除）；GROUP_BAR header 36→32（title 2×）、pad 8→16（1×）；GROUP_PAD 14→16、GROUP_PAD_TOP 42→48（title 32+顶 16=卡上方 3×）；ghead 30/36→32。
 - **回归**：verify 53 绿 + 构建零警告；3199 实例实测——confirm 拒绝保留/确认删除；选中边双端锚点（pointer 手指）出现、CUA 拖拽重连 ta→tc 改 ta→tb 成功、拖空白边还原（aria 不变）、选中边 z=1000；卡片 320、板宽 352=320+32（左右 16）、topPad 48、ghead 32、收起条 320×48（0 接口情形 32+16）、调色板三色分组正确。
+
+## QoL-2026-09-30-04 视觉二轮：重连锚点压边 / 双开关 switch 统一
+
+1. **重连锚点压在 node 边框线上**：实测 xyflow 边端点比 handle 视觉圆心偏外 4.5（=handle 半宽 9/2，恒定、与 zoom 无关——双 zoom 读数 4.5 flow px 确认）。TypeEdge 增加 onNodeEdge 修正：锚点 position 沿 handle 朝向回推 4.5（left→x+4.5 / right→x-4.5），修正后双 zoom 读数 dx=dy=0，锚点圆与常规端点圆同心。
+2. **吸附/说明开关统一 switch**：两个控件（原 checkbox 裸框 + active 按钮）统一为轨道滑块 switch（关=灰滑块居左，开=accent 滑块居右，聚焦描边）；「说明」从按钮改为 checkbox+track 同款，逻辑不变（descAllTick 广播）。
+- **回归**：双 zoom 锚点 dx/dy=0；switch 双开状态正确、说明全局开合联动 ndesc 4/4；构建零警告。测试环境：3199 一次性 token 实例。

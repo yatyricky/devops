@@ -775,11 +775,14 @@
       disabled={!groupableIds.length} onclick={cloneSelected}>克隆</button>
     <button title="把当前选中的多个节点编为一组" disabled={groupableIds.length < 2} onclick={groupSelected}>组合</button>
     <button title="拆散选中的分组（成员位置不动）" disabled={!selectedGroupBox} onclick={ungroupSelected}>拆分</button>
-    <label class="mut" title="开启后移动节点按 16px 网格吸附（以节点左上角为基准）">
-      <input type="checkbox" bind:checked={snapOn} onchange={snapChange} /> 吸附
+    <label class="switch" title="开启后移动节点按 16px 网格吸附（以节点左上角为基准）">
+      <input type="checkbox" bind:checked={snapOn} onchange={snapChange} />
+      <span class="track"></span>吸附
     </label>
-    <button title="一键展开/收起所有节点的说明（ndesc）" class:active={ui.descAllOpen}
-      onclick={() => { ui.descAllOpen = !ui.descAllOpen; ui.descAllTick++; }}>说明</button>
+    <label class="switch" title="一键展开/收起所有节点的说明（ndesc）">
+      <input type="checkbox" checked={ui.descAllOpen} onchange={() => { ui.descAllOpen = !ui.descAllOpen; ui.descAllTick++; }} />
+      <span class="track"></span>说明
+    </label>
   </div>
 
   <div class="main">
@@ -880,6 +883,16 @@
   .definer .row input { width: auto; flex: 1; }
   .mut { display: flex; gap: 6px; align-items: center; font-size: 13px; }
   .mut input { width: auto; }
+  /* 开关（吸附/说明统一）：关=灰滑块居左，开=accent 滑块居右 */
+  .switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; user-select: none; }
+  .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .switch .track { width: 34px; height: 18px; border-radius: 999px; background: var(--panel2);
+    border: 1px solid var(--line); position: relative; transition: background .15s, border-color .15s; flex: none; }
+  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+    border-radius: 50%; background: var(--dim); transition: left .15s, background .15s; }
+  .switch input:checked + .track { background: color-mix(in srgb, var(--accent) 30%, var(--panel2)); border-color: var(--accent); }
+  .switch input:checked + .track::after { left: 18px; background: var(--accent); }
+  .switch input:focus-visible + .track { outline: 1px solid var(--accent); }
   .dim { color: var(--dim); font-size: 12px; }
   .mono { font-family: var(--mono); }
 </style>
