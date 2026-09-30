@@ -226,3 +226,9 @@
 1. **重连锚点压在 node 边框线上**：实测 xyflow 边端点比 handle 视觉圆心偏外 4.5（=handle 半宽 9/2，恒定、与 zoom 无关——双 zoom 读数 4.5 flow px 确认）。TypeEdge 增加 onNodeEdge 修正：锚点 position 沿 handle 朝向回推 4.5（left→x+4.5 / right→x-4.5），修正后双 zoom 读数 dx=dy=0，锚点圆与常规端点圆同心。
 2. **吸附/说明开关统一 switch**：两个控件（原 checkbox 裸框 + active 按钮）统一为轨道滑块 switch（关=灰滑块居左，开=accent 滑块居右，聚焦描边）；「说明」从按钮改为 checkbox+track 同款，逻辑不变（descAllTick 广播）。
 - **回归**：双 zoom 锚点 dx/dy=0；switch 双开状态正确、说明全局开合联动 ndesc 4/4；构建零警告。测试环境：3199 一次性 token 实例。
+
+## QoL-2026-09-30-05 Group 组名按钮去 flex:1（恢复标题条拖拽面）
+
+- **现象**：组名控件 `flex:1`（上一轮"控件右对齐"引入）使组名按钮撑满整条标题条——按钮的 click 是打开重命名编辑，用户点/拖标题条任意位置都进编辑态，板没有可拖拽面（无法拖拽 group）。
+- **修复**：组名去 `flex:1`，宽=文字宽度、靠左；控件簇（色板/折叠）用 `margin-left:auto` 保持靠右；中间留白 = 拖拽面（mousedown 冒泡到 wrapper 触发 xyflow 拖拽，不触发重命名）。编辑名仍点组名进入。
+- **回归**：临时 wf 实测——组名按钮宽 42（=文字），标题条留白区拖拽板 position 随动且 16 网格吸附，留白点击不进重命名。

@@ -133,15 +133,16 @@
     border-bottom: 1px solid color-mix(in srgb, var(--gc) 55%, transparent);
     border-radius: 11px 11px 0 0; }
   .collapsed .ghead { border-radius: 9px 9px 0 0; }
-  .gbody { flex: 1; }
   .ghead:active { cursor: grabbing; }
-  /* 控件右对齐（与 node 卡 .htitle{flex:1} 同逻辑） */
-  .gname { flex: 1; font-size: 12px; font-weight: 600; color: var(--fg);
+  .gbody { flex: 1; }
+  /* 组名按钮：靠左、宽=文字宽度（不撑满标题条——撑满会吃掉拖拽面，且易误入重命名）；控件簇靠右 */
+  .gname { font-size: 12px; font-weight: 600; color: var(--fg); max-width: 60%;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gname-label { cursor: grab; padding: 2px 6px; border-radius: 5px; }
   .gname-label:hover { background: rgba(255, 255, 255, .08); }
   input.gname { width: 150px; padding: 1px 6px; font-size: 12px; }
-  .gdotwrap { position: relative; flex: none; display: flex; align-items: center; }
+  .gdotwrap { position: relative; flex: none; display: flex; align-items: center; margin-left: auto; }
+  .collapsed .tunnelcounts { margin-left: auto; }
   .gdot { width: 14px; height: 14px; border-radius: 50%; cursor: pointer;
     border: 1px solid rgba(255, 255, 255, .55); box-shadow: 0 0 4px rgba(0, 0, 0, .4); }
   .gpalette { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); z-index: 5;
