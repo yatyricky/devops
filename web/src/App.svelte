@@ -8,6 +8,7 @@
   import { toDocument } from "./lib/docIO.js";
   import { ui } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
+  import Placeholder from "./Placeholder.svelte";
   import GroupBox from "./GroupBox.svelte";
   import Palette from "./Palette.svelte";
   import CanvasDrop from "./CanvasDrop.svelte";
@@ -38,7 +39,8 @@
   let logRef = $state(null);
 
   const typeMap = $derived(ui.nodeTypesMap);
-  const components = $derived({ ...Object.fromEntries(Object.keys(typeMap).map(t => [t, DevNode])), groupbox: GroupBox });
+  // 二分：临时全部替换为静态占位卡
+  const components = $derived({ ...Object.fromEntries(Object.keys(typeMap).map(t => [t, DevNode])), groupbox: Placeholder });
   /** 全部数据边用自定义边（选中时带重连锚点） */
   const edgeTypes = { default: TypeEdge };
   let currentEntry = $derived(wfList.find(w => w.path === currentPath));
@@ -171,12 +173,14 @@
     try { ui.untestedNodeTypes = new Set((await api("/api/node-usage")).untested ?? []); } catch { /* 静默 */ }
   }
 
-  // 状态栏轮询（组件销毁时清理，HMR/卸载不泄漏定时器）
+  // 状态栏轮询（组件销毁时清理，HMR/卸载不泄漏定时器）；只在值变化时写 busyText
+  let lastBusy = null;
   $effect(() => {
     const busyTimer = setInterval(async () => {
       try {
         const cur = await api("/api/current");
-        busyText = cur ? `运行中: ${cur.app}/${cur.task}` : "空闲";
+        const next = cur ? `运行中: ${cur.app}/${cur.task}` : "空闲";
+        if (next !== lastBusy) { busyText = next; lastBusy = next; }
       } catch { /* 静默 */ }
     }, 5000);
     return () => clearInterval(busyTimer);
@@ -617,7 +621,6 @@
   $effect(() => {
     let changed = false;
     const next = edges.map(e => {
-      // 颜色：seq 边走 class 银色样式，不打类型色
       let style = e.style;
       if (e.kind !== "seq") {
         const origId = isTunnelEdge(e) ? String(e.id).slice(4, -2) : e.id;
@@ -628,7 +631,7 @@
         const out = orig?.sourceHandle ? outs.find(o => o.id === orig.sourceHandle) : outs[0];
         const color = TYPE_COLORS[out?.type] ?? "#8a97a8";
         const want = `stroke: ${color}; --ec: ${color};`;
-        if (e.style !== want) style = want;
+        if (style !== want) style = want;
       }
       const touching = selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target) || !!e.selected;
       const animated = touching;
@@ -816,7 +819,6 @@
       <SvelteFlow
         bind:nodes bind:edges
         nodeTypes={components}
-        edgeTypes={edgeTypes}
         onnodeclick={onNodeClick}
         onpaneclick={clearRunStatus}
         onconnect={onConnect}

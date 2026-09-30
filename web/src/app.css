@@ -23,7 +23,7 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode.selected { border-color: var(--accent); }
 .devnode.error, .devnode.error.selected { border-color: var(--err);
   box-shadow: 0 0 0 1.5px var(--err), 0 2px 10px rgba(229, 72, 72, .35); }
-.devnode { width: 320px; } /* 卡片定宽 = 20×点间距（16） */
+/* .devnode { width: 320px; } 二分：临时禁用定宽 */
 .devnode .head { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px 8px 0 0; font-weight: 600; color: #0b1220; }
 .devnode .head .htitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .devnode .head .del { display: none; border: none; background: rgba(0,0,0,.25); color: inherit;

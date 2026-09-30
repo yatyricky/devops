@@ -10,6 +10,7 @@
    */
   import { BaseEdge, EdgeReconnectAnchor, getBezierPath, Position } from "@xyflow/svelte";
 
+  window.__te = (window.__te ?? 0) + 1; // 探针
   let { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition,
         markerEnd, style, selected = false } = $props();
 

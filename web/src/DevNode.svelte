@@ -27,9 +27,12 @@
   // ResizeObserver 不触发 → 内部 handleBounds 不重测 → 指向新 handle 的边不渲染、
   // 也不发起新连接。必须在 handle 集变化后显式告知 Svelte Flow 重测。
   // 依赖必须基于【动态解析后】的 inputs/outputs（struct.split 的 meta.outputs 恒为空）。
+  // 句柄集签名：只有端口集真正变化才重测（effect 只依赖 sig 字符串，打断
+  // 「derived 重算 → rAF 重测 → xyflow 内部更新 → bind 写回」的反馈环——
+  // 该环在大图上表现为每数秒一轮全量重渲染的巨卡）
+  const handleSig = $derived(JSON.stringify([inputs.map(i => i.id), outputs.map(o => o.id)]));
   $effect(() => {
-    const sig = JSON.stringify([inputs.map(i => i.id), outputs.map(o => o.id)]);
-    if (!id || !sig) return;
+    if (!id || !handleSig) return;
     // 等新 Handle DOM 挂载完成后再重测（rAF 对齐渲染帧）
     requestAnimationFrame(() => updateNodeInternals(id));
   });
@@ -287,6 +290,9 @@
   </div>
   {#if meta?.desc && descOpen}<div class="ndesc">{meta.desc}</div>{/if}
     <div class="body nowheel">
+    {#if window.__bisect6}
+      <div class="kv in">inputs 渲染已二分禁用</div>
+    {:else}
     {#each inputs as inp (inp.id)}
       {#if pairTo(inp)}
         <!-- to 端口已合并进 from 行渲染 -->
@@ -330,6 +336,7 @@
       </div>
       {/if}
     {/each}
+    {/if}
     {#if meta?.selectorInputs}
       <!-- 选择器：从已接入输入中选择一路作为输出 -->
       <div class="kv in">
@@ -357,6 +364,9 @@
       <Handle id="__seqOut" type="source" position={Position.Right} style="background:#8a97a8" />
     </div>
 
+    {#if window.__bisect7}
+      <div class="kv in">widgets 渲染已二分禁用</div>
+    {:else}
     {#if meta?.sshAliasesPicker}
       <label class="wrow nodrag">
         <span class="wlab">SSH 别名（~/.ssh/config）{aliasWired ? "· 已选择输入" : ""}</span>
@@ -383,7 +393,11 @@
         {#if sshErr}<span class="errline">⚠ {sshErr}</span>{/if}
       </label>
     {/if}
+    {/if}
 
+    {#if window.__bisect8}
+      <div class="kv in">widgets 已二分禁用</div>
+    {:else}
     {#if meta?.widgets?.length}
       <div class="sep"></div>
       {#each meta.widgets as w (w.key)}
@@ -500,6 +514,7 @@
           {/if}
         </label>
       {/each}
+    {/if}
     {/if}
 
 

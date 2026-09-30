@@ -240,3 +240,11 @@
 3. **struct 严格类型**：rules.js 新 structShape（键排序 canonical）/isStructType；canConnect struct 家族规则（纯 struct 收任意 struct；带形状要求形状串全等——键集+逐键类型同、顺序无关；无形状源拒绝带形状输入）；struct.make 输出类型带形状（dynamicOutputs "structMake"）。displayType 收敛显示（带形状显示为 struct）。
 - **回归**：verify 53→56 全绿（struct 形状矩阵 / select.one 端口推导 / ssh.session 输入）；构建零警告；3199 实例实测 ssh.session（双端口渲染、指纹 widget 移除、连线后下拉 disabled=显示所选、刷新别名未命中报错「别名 "AAA" 不在 ~/.ssh/config 中」）。
 - **待人工验证**：selector 的画布连线锁定流程——CUA 自动化可拖重连锚点但无法建立新建连线（事件路径不同），连线后锁定/改写逻辑（onConnect 6 行）与既有 seq class 改写同模式，已由 verify 的端口推导断言覆盖数据层。
+
+## BUG-2026-09-30-08 网页打开巨卡（每 ~4.7s 全量重渲染 + 2.3s 主线程巨块 + 源码文本泄漏）
+
+- **现象**：打开（尤其 kids-ledger-prod 大图）后整页巨卡，主线程被 ~2.3s 巨块反复占满，DOM 每秒数千次变更；画布根容器下渲染出 ~2500 字符的 App 源码文本（onnodedragstart=function…）。
+- **根因①（渲染反馈环）**：DevNode 的 updateNodeInternals effect 无条件下发 rAF 重测，而其依赖 inputs/outputs derived（三功能轮起带 env 依赖全图）每次图变化都返回新数组——「derived 重算 → effect 重跑 → rAF 重测 → xyflow 内部更新 → bind 写回 → derived 再重算」无限反馈环；46 卡大图每轮全量重渲染 ~2.3s。修复：句柄集签名提升为 $derived（handleSig），effect 只依赖签名字符串（值稳定不触发），打断反馈环。
+- **根因②（模板损坏，源码文本泄漏）**：本轮二分时把 HTML 注释 `<!-- edgeTypes 二分：临时移除 -->` 误插进 `<SvelteFlow>` 组件标签的属性区——Svelte 将注释与其后属性行当文本子节点渲染（~2510 字符源码泄漏到画布）。修复：删除该注释。
+- **教训**：①组件标签属性区禁止插入 HTML 注释（Svelte 会当子内容渲染）；②「渲染循环」类问题用采样器（主线程 gap + mutation 计数）+ 占位组件二分法定位，比代码审读快。
+- **回归**：干净加载 kids-ledger-prod（48 节点/80 边/2 组）：采样 40+/5s、maxGap 127ms、mut=0、无源码泄漏、无报错；选中节点动画正常。
