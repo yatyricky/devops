@@ -2,7 +2,7 @@
   import { getContext, setContext } from "svelte";
   import { SvelteFlow, Background, Controls, MiniMap } from "@xyflow/svelte";
   import { api } from "./api.js";
-  import { canConnect, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, isTunnelEdge, TYPE_COLORS, nodeTitle, portLabel, basenameNoExt, dirOf } from "./types.js";
+  import { canConnect, displayType, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, isTunnelEdge, TYPE_COLORS, nodeTitle, portLabel, basenameNoExt, dirOf } from "./types.js";
   import { makeInfer } from "./lib/infer.js";
   import { GROUP_COLORS, GROUP_COLLAPSED_W, groupAABB, groupBoxOf, crossEdges, collapsedHeight, makeGroupNode } from "./lib/groups.js";
   import { toDocument } from "./lib/docIO.js";
@@ -108,7 +108,7 @@
       if (!n) return "";
       const meta = ui.nodeTypesMap[n.type];
       const head = nodeTitle(meta, n.data);
-      const port = (side === "in" ? effectiveInputs(meta, n.data) : effectiveOutputs(meta, n.data, { edges, nodes, id: nid }))
+      const port = (side === "in" ? effectiveInputs(meta, n.data, { edges, nodes, id: nid }) : effectiveOutputs(meta, n.data, { edges, nodes, id: nid }))
         .find(p => p.id === hid);
       if (!port) return head;
       return `${head}: ${portLabel(port)}${side === "in" && port.required ? "*" : ""}`;
@@ -124,15 +124,17 @@
       if (!n) return [];
       return effectiveInputs(typeMap[n.data?.__type ?? n.type], n.data, { edges, nodes, id: nodeId });
     },
-    /** selector 下拉选项：每条入边 → { id: 专用口id, label: 源节点标题 } */
+    /** selector 下拉选项：每条入边 → { id: 专用口id, label: 源节点标题 }；同口去重（keyed each 的 key 必须唯一） */
     selectorOptions(nodeId) {
+      const seen = new Set();
       return edges
         .filter(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === nodeId)
         .map(e => {
           const s = nodes.find(n => n.id === e.source);
           const m = s && typeMap[s.data?.__type ?? s.type];
           return { id: e.targetHandle, label: nodeTitle(m, s?.data) };
-        });
+        })
+        .filter(o => o.id && !seen.has(o.id) && seen.add(o.id));
     },
     /** 编辑期输出推断：path.resolve → 拼接推断值；string.join → 分隔符拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
     inferOutput(nodeId) {
@@ -288,7 +290,8 @@
     if (!node) return;
     const nextData = { ...node.data, [key]: value };
     const meta = typeMap[node.type];
-    const valid = new Set(effectiveInputs(meta, nextData).map(i => i.id));
+    // 图上下文必传：selector 专用口（in-<src>）按已接入边推导，缺 env 会把专用口连线整批误删
+    const valid = new Set(effectiveInputs(meta, nextData, { edges, nodes, id: nodeId }).map(i => i.id));
     const kept = edges.filter(e => e.target !== node.id || valid.has(e.targetHandle));
     nodes = nodes.map(n => (n.id === nodeId ? { ...n, data: nextData } : n));
     if (kept.length !== edges.length) edges = kept;
@@ -438,7 +441,7 @@
       ? effectiveOutputs(sMeta, src.data, { edges, nodes, id: src.id })
       : (sMeta.outputs ?? []);
     const o = (p.sourceHandle ? outs.find(x => x.id === p.sourceHandle) : outs[0]) ?? outs[0];
-    const inps = effectiveInputs(tMeta, tgt.data);
+    const inps = effectiveInputs(tMeta, tgt.data, { edges, nodes, id: tgt.id }); // selector 专用口按已接入边推导
     const i = p.targetHandle ? inps.find(x => x.id === p.targetHandle) : inps[0];
     if (!o || !i) return "插槽不存在（节点配置可能已变化）";
     if (!canConnect(o.type, i.type)) return `类型不兼容：${o.type}（${src.id}.${o.id}）→ ${i.type}（${tgt.id}.${i.id}）`;
@@ -481,7 +484,44 @@
         onData(p.target, "lit", next);
       }
     }
+    normalizeSelectorWires();
     markCritical();
+  }
+  /**
+   * selector 连线归一：选择器的入边恒落专用口 in-<源id>（rules.js selectorInputs 按已接入边
+   * 推导每源一个端口；开放口 "in" 只承接拖拽落点）。落点无论是开放口还是既有专用口，统一改写为
+   * 本边源节点自己的口；同源多边去重（单口设计，第二条信息无处安放）。目标未锁型时以首边源出口
+   * 类型上锁（此后开放口变锁型，仅同型可接入）。onConnect 与 onReconnect 都要走——重连的
+   * 落点同样是开放口。
+   */
+  function normalizeSelectorWires() {
+    let touched = false;
+    const seen = new Set();
+    const next = [];
+    for (const e of edges) {
+      if (e.kind === "seq" || isTunnelEdge(e)) { next.push(e); continue; }
+      const t = nodes.find(n => n.id === e.target);
+      const meta = t && typeMap[t.data?.__type ?? t.type];
+      if (!meta?.selectorInputs) { next.push(e); continue; }
+      const want = `in-${e.source}`;
+      if (seen.has(want)) { touched = true; continue; } // 同源第二条边丢弃（单口设计，第二条信息无处安放）
+      seen.add(want);
+      if (e.targetHandle !== want) { touched = true; next.push({ ...e, targetHandle: want }); }
+      else next.push(e);
+    }
+    if (!touched) return;
+    edges = next;
+    for (const t of nodes) {
+      const meta = typeMap[t.data?.__type ?? t.type];
+      if (!meta?.selectorInputs || t.data?.lockType !== undefined) continue;
+      const e = edges.find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === t.id);
+      if (!e) continue;
+      const s = nodes.find(n => n.id === e.source);
+      const sMeta = s && typeMap[s.data?.__type ?? s.type];
+      const outs = sMeta ? effectiveOutputs(sMeta, s.data, { edges, nodes, id: s.id }) : [];
+      const o = e.sourceHandle ? outs.find(x => x.id === e.sourceHandle) : outs[0];
+      onData(t.id, "lockType", o?.type ?? "any");
+    }
   }
   /** 拖空白/非法 handle：库不触发 onreconnect，边原样保留（还原语义）。 */
   /** 边重连最终校验：返回 falsy = 拒绝（边保持原样）。顺序边不可重连；新四元组过连线裁决（排除自身）。 */
@@ -490,8 +530,8 @@
     if (connectionRejectReason({ source: reconnected.source, sourceHandle: reconnected.sourceHandle, target: reconnected.target, targetHandle: reconnected.targetHandle, selfId: old.id }) !== null) return undefined;
     return reconnected;
   }
-  /** 重连成功：标脏（装饰 effect 自动跟随新端点校正类型色/zIndex/动画） */
-  function onReconnect() { markCritical(); }
+  /** 重连成功：标脏（装饰 effect 自动跟随新端点校正类型色/zIndex/动画）；selector 落点归一 */
+  function onReconnect() { normalizeSelectorWires(); markCritical(); }
   /** @param {{ nodes: any[], edges: any[] }} p xyflow 内置删除键（DEL/Backspace）触发；收起态隧道段边不可删 */  function onBeforeDelete({ nodes: delNodes, edges: delEdges }) {
     if (delNodes.length && !confirm(`确认删除 ${delNodes.length} 个节点（${delNodes.map(n => n.id).join("、")}）？`)) return false;
     if (!confirmTaskRemoval(delNodes.map(n => n.id))) return false;
@@ -628,7 +668,7 @@
         const meta = src && typeMap[src.data?.__type ?? src.type];
         const outs = meta ? effectiveOutputs(meta, src.data, { edges, nodes, id: orig.source }) : [];
         const out = orig?.sourceHandle ? outs.find(o => o.id === orig.sourceHandle) : outs[0];
-        const color = TYPE_COLORS[out?.type] ?? "#8a97a8";
+        const color = TYPE_COLORS[displayType(out?.type)] ?? "#8a97a8"; // 带形状 struct 收敛为 struct 取色
         const want = `stroke: ${color}; --ec: ${color};`;
         if (style !== want) style = want;
       }
@@ -712,11 +752,12 @@
       const meta = n && typeMap[n.data?.__type ?? n.type];
       if (!meta) continue;
       let want = undefined;
-      if (meta.refsPicker) want = String(infer().resolvePortValue(id, "repoDir") ?? "");
-      else if (meta.scriptsPicker) want = String(infer().resolvePortValue(id, "path") ?? "").trim();
-      else if (meta.sshAliasesPicker) want = String(infer().resolvePortValue(id, "alias") ?? n.data?.alias ?? "");
-      if (want === undefined) continue; // 输入来自运行时节点，列表新鲜度无从校验（刷新即按当时输入取）
-      if (ui.pickerFresh[id] !== want) stale.push(id);
+      if (meta.refsPicker) want = infer().resolvePortValue(id, "repoDir");
+      else if (meta.scriptsPicker) want = infer().resolvePortValue(id, "path");
+      else if (meta.sshAliasesPicker) { const a = infer().resolvePortValue(id, "alias") ?? n.data?.alias; if (a !== undefined) want = String(a); }
+      if (want === undefined) continue; // 输入来自运行时节点（或 ssh 双空），列表新鲜度无从校验（刷新即按当时输入取）
+      const expect = meta.scriptsPicker ? String(want).trim() : String(want); // scripts 刷新侧记的是 trim 后路径
+      if (ui.pickerFresh[id] !== expect) stale.push(id);
     }
     if (stale.length) {
       showToast(`实时列表未刷新（${stale.join("、")}），先点卡片「刷新」或顶栏「刷新列表」再运行`);

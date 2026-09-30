@@ -256,3 +256,12 @@
 - **修复**：恢复①②③；删 Placeholder.svelte 与三处 bisect 开关；补回被误删的注释（seq 边不打类型色）。保留 a7ab9cb 真修复不动（handleSig 反馈环修复 / busyText 轮询去重 / style!==want）。
 - **教训**：二分排查结束后、提交前，必须 `git diff` 全量过一遍并 grep `二分\|bisect\|临时` 清零——「占位/禁用」类开关的残留不报错、不崩，只会静默回退功能，等用户发现时已隔着多个提交。
 - **回归**：verify 56 绿；构建零警告；3010 + 临时 wf 实测——卡片 computed width=320（视觉 1.39× 为窗格缩放，全元素同比）、GroupBox 正常渲染（板=AABB+pad、ghead 32 基准、组名在）、点选边双端重连锚点出现（updaters=2）、inputs/widgets/seq 行渲染正常、画布无「二分禁用」文案；测试 wf 已删、注册已 forget。
+
+## BUG-2026-09-30-10 里程碑2 评审 P1 五项修复（review-milestone-2.md）
+
+1. **selector 锁型状态机补全（P1-1/2）**：onConnect/onReconnect 接入 `normalizeSelectorWires()`——选择器入边恒归一为专用口 `in-<源id>`（落点无论是开放口还是既有专用口；同源多边去重，单口设计第二条丢弃），目标未锁型时以首边源出口类型写入 `data.lockType`。此前 lockType 只有解锁清除、从未上锁，节点永远没有输出口。下拉选项同口去重（keyed each key 唯一性）。
+2. **effectiveInputs 补图上下文四处（P1-3）**：onData 动态口清理 / connectionRejectReason / hover 端口标题（前端三处）+ validateWorkflow `getInputs(tgt, doc)`（引擎侧）——selector 专用口按已接入边推导，缺 env 会「编辑即丢线 / 保存被拒」。rules.js selectorInputs wired 分支同时收紧为只认 `in-` 前缀（幻影端口在校验处显式暴露，评审 P3 顺手收）。
+3. **防漂移门禁逃生分支修复（P1-4）**：refs/scripts 分支去掉 `?? ""` 归一——undefined（输入来自运行时节点）直接 continue 跳过新鲜度校验；此前归一成空串后 `want === undefined` 永不可达，刷新必失败的节点被永久卡死无法运行。ssh 别名分支保留 widget 回退（可刷新，语义不同）。
+4. **边装饰 displayType（P1-5）**：类型色查表改 `TYPE_COLORS[displayType(out?.type)]`——struct.make 带形状出口（`struct:{...}`）不再回落灰。
+- **回归**：verify 56→57 绿（新增 validateWorkflow 带图：专用口合法 + 非 in- 口名拒绝）；构建零警告；GUI 实测（临时 wf，已删）：拖拽连线落点改写 in-consta、lockType=string、输出口出现、异型源被拒（toast 类型不兼容）、自动保存过校验且磁盘往返、输出连线+选路 pick、删输入边→解锁+下游死边断开。
+- **教训**：①提交信息声称的代码可能不存在——评审时以 grep 代码为准而非 commit message（P1-1 的「onConnect 6 行」从未落地）；②引擎改动必须重启 3010 再 GUI 实测（本次自动保存被旧引擎拒绝暴露了这一点，也顺带验证了保存原子性——失败不落盘）。

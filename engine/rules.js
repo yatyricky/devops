@@ -122,11 +122,13 @@ export function effectiveInputs(meta, data, env = {}) {
         all = [...all, ...fieldPorts];
     }
     if (meta?.selectorInputs) {
-        // 选择器：开放口 in（首个连线锁定类型）+ 每条已接入边一个专用口 in-<源节点id>
+        // 选择器：开放口 in（首个连线锁定类型）+ 每条已接入边一个专用口 in-<源节点id>；
+        // 只认 in- 前缀（GUI 连线归一保证），其余 handle 不成口——幻影端口在校验处显式暴露
         const lockType = data?.lockType ?? "any";
         const open = [{ id: "in", type: lockType, required: false, dynamic: true }];
         const wired = (env?.edges ?? [])
-            .filter(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === env?.id && e.targetHandle !== "in")
+            .filter(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === env?.id
+                && typeof e.targetHandle === "string" && e.targetHandle.startsWith("in-"))
             .map(e => ({ id: e.targetHandle, type: lockType, required: false, dynamic: true }));
         all = [...all, ...open, ...wired];
     }

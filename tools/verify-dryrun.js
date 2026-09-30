@@ -1065,6 +1065,22 @@ await test("select.one: 未锁定开放口 any；首连锁定后专用口按入�
     assert.strictEqual(bare[0].type, "any");
 });
 
+await test("select.one: validateWorkflow 带图校验——专用口 handle 合法、非 selector 口名拒绝", () => {
+    const base = {
+        nodes: [
+            { id: "s", type: "select.one", position: [0, 0], data: { lockType: "string" } },
+            { id: "a", type: "string.const", position: [0, 0], data: {} },
+        ],
+        edges: [{ id: "e1", source: "a", sourceHandle: "value", target: "s", targetHandle: "in-a" }],
+        tasks: {},
+    };
+    assert.deepStrictEqual(validateWorkflow(structuredClone(base)), [], "专用口 in-<src> 按入边推导为合法口");
+    const bogus = structuredClone(base);
+    bogus.edges[0].targetHandle = "bogus";
+    const problems = validateWorkflow(bogus);
+    assert.ok(problems.some(p => p.includes("targetHandle 不存在")), "既非开放口也非专用口 → 拒绝");
+});
+
 await test("ssh.session: alias/fingerprint 可选输入存在（required=false）", () => {
     const inputs = getInputs({ type: "ssh.session", data: {} }).filter(i => ["alias", "fingerprint"].includes(i.id));
     assert.deepStrictEqual(inputs.map(i => i.id).sort(), ["alias", "fingerprint"]);

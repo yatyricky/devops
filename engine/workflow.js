@@ -132,7 +132,7 @@ export function validateWorkflow(doc) {
         const src = nodeById.get(e.source), tgt = nodeById.get(e.target);
         try {
             const outs = getOutputs(src, doc);
-            const inps = getInputs(tgt);
+            const inps = getInputs(tgt, doc); // selector 专用口按已接入边推导，缺图会被误判 handle 不存在
             const out = e.sourceHandle ? outs.find(o => o.id === e.sourceHandle) : outs[0];
             const inp = e.targetHandle ? inps.find(i => i.id === e.targetHandle) : inps[0];
             if (!out) { problems.push(`边 ${e.id ?? "?"} 的 sourceHandle 不存在: ${e.source}.${e.sourceHandle}`); continue; }
