@@ -20,7 +20,12 @@ export function genId(prefix = "n") {
 
 /** 端口 label 纯文本（DevNode 卡片 title 提示与 GroupBox 收起条 tunnelLabel 共用同一格式）。 */
 export function portLabel(p) {
-  return `${p.id} (${p.type}${p.dynamic ? "⭑" : ""})`;
+  return `${p.id} (${displayType(p.type)}${p.dynamic ? "⭑" : ""})`;
+}
+
+/** 显示用类型名：带形状的 struct 显示为 struct（内部比较仍用全串）。 */
+export function displayType(t) {
+  return String(t ?? "").startsWith("struct:") ? "struct" : (t ?? "");
 }
 
 /** 节点标题 `<类型 title>[ - 便笺]`（DevNode 头部与 tunnelLabel 共用）。 */

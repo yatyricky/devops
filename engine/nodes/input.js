@@ -28,7 +28,8 @@ export default [
         fieldInputs: true,
         desc: "定义带类型的字段集合：每行 key + 类型 + 值；每个字段自动生成同名输入口（连线后手填控件隐藏，删线恢复手填）。输出 struct——哪个字段被哪个节点用了，连线一目了然。",
         inputs: [],
-        outputs: [{ id: "struct", type: "struct" }],
+        outputs: [],
+        dynamicOutputs: "structMake",
         widgets: [{ key: "fields", label: "字段（key / 类型 / 值）", kind: "struct", serializable: true, default: [] }],
         async run(ctx, node, inputs) {
             const fields = node.data.fields ?? [];

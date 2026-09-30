@@ -10,14 +10,40 @@
 export const SOCKET_TYPES = ["struct", "ssh", "string", "number", "boolean", "any"];
 
 /**
- * 源类型能否接入目标输入：同型可连；任何类型可入 any 输入；any 输出不可入具体类型输入；
- * 未知/拼错类型一律拒绝。
+ * struct 形状类型：由字段集推导的规范类型串（键排序，与声明顺序无关）。
+ * 空字段 = 纯 "struct"（接受任意 struct）。例：{age:number,name:string} → "struct:{age:number,name:string}"。
+ * @param {any[]} fields
+ */
+export function structShape(fields) {
+    const fs = (fields ?? [])
+        .filter(f => f.key)
+        .map(f => `${f.key}:${f.type ?? "string"}`)
+        .sort();
+    return fs.length ? `struct:{${fs.join(",")}}` : "struct";
+}
+
+/** 是否 struct 家族类型（纯 struct 或带形状的 struct:{...}）。 */
+export function isStructType(t) {
+    return t === "struct" || String(t ?? "").startsWith("struct:");
+}
+
+/**
+ * 源类型能否接入目标输入。
+ * 规则：未知类型拒绝；同型可连；any 输入兜底；
+ * struct 家族：纯 struct 输入接受任意 struct（含带形状）；带形状的输入要求形状串完全一致
+ * （键集合与逐键类型相同——与字段声明顺序无关）；无形状源无法证明匹配带形状输入。
  * @param {string} fromType
  * @param {string} toType
  */
 export function canConnect(fromType, toType) {
-    if (!SOCKET_TYPES.includes(fromType) || !SOCKET_TYPES.includes(toType)) return false;
+    if (!SOCKET_TYPES.includes(fromType) && !isStructType(fromType)) return false;
+    if (!SOCKET_TYPES.includes(toType) && !isStructType(toType)) return false;
     if (fromType === toType) return true;
+    if (isStructType(fromType) && isStructType(toType)) {
+        if (toType === "struct") return true;      // 带形状的 struct 可进纯 struct 输入
+        if (fromType === "struct") return false;   // 无形状源无法证明匹配带形状输入
+        return fromType === toType;
+    }
     return toType === "any";
 }
 
@@ -47,11 +73,13 @@ export function isTunnelEdge(e) {
  *   pairInputs（stage.copy）：每行双端口 pN.from / pN.to；
  *   tplVars（template.render）：模板路径可推导 → 各 {{VAR}} string 口；不可推导 → 降级一个 struct 口；
  *   fieldInputs（struct.make）：data.fields 每字段 → 同名同型输入口（连线覆盖手填）；
+ *   selectorInputs（select.one）：开放口 in（类型 = lockType ?? any）+ 每条已接入边一个专用口 in-<源id>；
  *   dynamicInputs（文本占位符）：{{name}} → string 口；{{obj.key}} → any 口。
  * @param {any} meta 节点类型定义（注册表条目或 /api/node-types 元数据，二者字段同构）
  * @param {any} data 节点 data
+ * @param {{edges?: any[], nodes?: any[], id?: string}} [env] selectorInputs 推导已接入边需要图
  */
-export function effectiveInputs(meta, data) {
+export function effectiveInputs(meta, data, env = {}) {
     const declared = (meta?.inputs ?? []).map(i => ({ ...i, dynamic: false }));
     /** @type {any[]} */
     let all = declared;
@@ -93,6 +121,15 @@ export function effectiveInputs(meta, data) {
             .map(f => ({ id: f.key, type: f.type ?? "string", required: false, dynamic: true, fromField: true }));
         all = [...all, ...fieldPorts];
     }
+    if (meta?.selectorInputs) {
+        // 选择器：开放口 in（首个连线锁定类型）+ 每条已接入边一个专用口 in-<源节点id>
+        const lockType = data?.lockType ?? "any";
+        const open = [{ id: "in", type: lockType, required: false, dynamic: true }];
+        const wired = (env?.edges ?? [])
+            .filter(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === env?.id && e.targetHandle !== "in")
+            .map(e => ({ id: e.targetHandle, type: lockType, required: false, dynamic: true }));
+        all = [...all, ...open, ...wired];
+    }
     if (!meta?.dynamicInputs) return all;
     const text = String(data?.[meta.dynamicInputs.source] ?? "");
     /** @type {Map<string,string>} id → 类型 */
@@ -109,16 +146,24 @@ export function effectiveInputs(meta, data) {
 /**
  * 节点有效输出 = 声明输出，或按 dynamicOutputs 规则解析。
  * structSplit：回溯入边上游 struct.make 的字段定义按序输出；上游不是 struct.make 或未接线 → []。
+ * selectorOut：已锁定（data.lockType）→ 单出口 value（锁型）；未锁定 → []。
+ * structMake：按 data.fields 输出带形状的 struct 类型串（structShape）。
  * @param {any} meta
  * @param {any} data
  * @param {{edges?: any[], nodes?: any[], id?: string}} [env] structSplit 回溯上游需要（nodes 的类型键为 type）
  */
 export function effectiveOutputs(meta, data, env = {}) {
     if (meta?.dynamicOutputs === "structSplit") {
-        const e = (env.edges ?? []).find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === env.id);
+        const e = (env.edges ?? []).find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === env?.id);
         const src = (env.nodes ?? []).find(n => n.id === e?.source);
         if (src?.type !== "struct.make") return [];
         return (src.data?.fields ?? []).filter(f => f.key).map(f => ({ id: f.key, type: f.type ?? "string" }));
+    }
+    if (meta?.dynamicOutputs === "structMake") {
+        return [{ id: "struct", type: structShape(data?.fields) }];
+    }
+    if (meta?.dynamicOutputs === "selectorOut") {
+        return data?.lockType ? [{ id: "value", type: data.lockType }] : [];
     }
     return meta?.outputs ?? [];
 }

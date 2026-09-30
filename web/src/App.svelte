@@ -118,6 +118,22 @@
         path: p, configDir: currentPath ? dirOf(currentPath) : "", repoDir: docRepoDir,
       }) });
     },
+    /** 某节点的有效输入口列表（selector 等动态口需要全图上下文） */
+    resolveInputs(nodeId) {
+      const n = nodes.find(x => x.id === nodeId);
+      if (!n) return [];
+      return effectiveInputs(typeMap[n.data?.__type ?? n.type], n.data, { edges, nodes, id: nodeId });
+    },
+    /** selector 下拉选项：每条入边 → { id: 专用口id, label: 源节点标题 } */
+    selectorOptions(nodeId) {
+      return edges
+        .filter(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === nodeId)
+        .map(e => {
+          const s = nodes.find(n => n.id === e.source);
+          const m = s && typeMap[s.data?.__type ?? s.type];
+          return { id: e.targetHandle, label: nodeTitle(m, s?.data) };
+        });
+    },
     /** 编辑期输出推断：path.resolve → 拼接推断值；string.join → 分隔符拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
     inferOutput(nodeId) {
       const n = nodes.find(x => x.id === nodeId);
@@ -627,6 +643,14 @@
   // ── 动态出口：源节点的有效出口不含某边的 sourceHandle 时，该边自动消失 ────
   // 例：struct.split 的上游字段删除 → 对应出口上的连线随之断开。出口列表未知（[] 由规则明确给出）也删。
   $effect(() => {
+    // selector 解锁：全部输入边被删 → 无法推导类型，清 lockType（outputs 变 []，下游边由死边清理断开）
+    for (const n of nodes) {
+      const meta = typeMap[n.data?.__type ?? n.type];
+      if (meta?.selectorInputs && n.data?.lockType !== undefined) {
+        const hasIn = edges.some(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === n.id);
+        if (!hasIn) onData(n.id, "lockType", undefined);
+      }
+    }
     const dead = edges.filter(e => {
       if (e.kind === "seq" || isTunnelEdge(e)) return false; // tnl- 是派生段边（伪句柄），删除会与隧道 effect 无限乒乓
       const src = nodes.find(n => n.id === e.source);
@@ -688,7 +712,7 @@
       let want = undefined;
       if (meta.refsPicker) want = String(infer().resolvePortValue(id, "repoDir") ?? "");
       else if (meta.scriptsPicker) want = String(infer().resolvePortValue(id, "path") ?? "").trim();
-      else if (meta.sshAliasesPicker) want = String(n.data?.alias ?? "");
+      else if (meta.sshAliasesPicker) want = String(infer().resolvePortValue(id, "alias") ?? n.data?.alias ?? "");
       if (want === undefined) continue; // 输入来自运行时节点，列表新鲜度无从校验（刷新即按当时输入取）
       if (ui.pickerFresh[id] !== want) stale.push(id);
     }

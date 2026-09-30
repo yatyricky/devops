@@ -72,22 +72,26 @@ export default [
         category: "连接",
         color: "#ff9e64",
         sshAliasesPicker: true,
-        inputs: [],
-        outputs: [{ id: "ssh", type: "ssh" }],
-        widgets: [
-            { key: "fingerprint", label: "指纹（选填，SHA256 base64/hex，锁定主机）", kind: "string", serializable: true, default: "" },
+        inputs: [
+            { id: "alias", type: "string", required: false },
+            { id: "fingerprint", type: "string", required: false },
         ],
-        async run(ctx, node) {
-            const r = resolveAlias(node.data.alias);
-            const fpLocked = !!node.data.fingerprint;
+        outputs: [{ id: "ssh", type: "ssh" }],
+        widgets: [],
+        async run(ctx, node, inputs) {
+            // alias/fingerprint：连线优先，其次 widget/手填
+            const alias = String(inputs.alias ?? node.data.alias ?? "").trim();
+            const fingerprint = String(inputs.fingerprint ?? node.data.fingerprint ?? "").trim();
+            const r = resolveAlias(alias);
+            const fpLocked = !!fingerprint;
             if (ctx.dryRun) {
-                ctx.log(`[dry-run] SSH ${node.data.alias} → ${r.user}@${r.host}:${r.port}${r.identityFile ? `（私钥 ${r.identityFile}）` : ""}（${r.fromConfig ? "来自 ssh config" : "未在 config 中找到，按主机名直连"}；指纹${fpLocked ? "已锁定" : "未锁定，将警告"}）`);
+                ctx.log(`[dry-run] SSH ${alias} → ${r.user}@${r.host}:${r.port}${r.identityFile ? `（私钥 ${r.identityFile}）` : ""}（${r.fromConfig ? "来自 ssh config" : "未在 config 中找到，按主机名直连"}；指纹${fpLocked ? "已锁定" : "未锁定，将警告"}）`);
                 return { ssh: { dryRun: true } };
             }
             ctx.log(`[ssh] 连接 ${node.data.alias} → ${r.user}@${r.host}:${r.port}...`);
             let ssh;
             try {
-                ssh = await sshConnect(r.host, r.user, node.data.fingerprint, {
+                ssh = await sshConnect(r.host, r.user, fingerprint, {
                     log: ctx.log,
                     keyFile: r.identityFile,
                     port: r.port,

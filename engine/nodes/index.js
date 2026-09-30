@@ -14,12 +14,14 @@ export const NODE_TYPES = Object.fromEntries(
 
 /**
  * 某节点实例的有效输入列表 = 声明输入 + 动态输入（规则见 rules.js effectiveInputs，
- * 与前端共用同一实现）。@param {any} node
+ * 与前端共用同一实现）。selectorInputs 按已接入边推导专用口，需要图上下文。
+ * @param {any} node
+ * @param {any} [graph] { nodes, edges }
  */
-export function getInputs(node) {
+export function getInputs(node, graph) {
     const def = NODE_TYPES[node.type];
     if (!def) throw new Error(`未知节点类型: ${node.type}`);
-    return effectiveInputs(def, node.data);
+    return effectiveInputs(def, node.data, { edges: graph?.edges, nodes: graph?.nodes, id: node.id });
 }
 
 /**
@@ -57,6 +59,7 @@ export function nodeTypesMeta() {
         ...(d.outputValueKey ? { outputValueKey: d.outputValueKey } : {}),
         ...(d.dynamicInputs ? { dynamicInputs: d.dynamicInputs } : {}),
         ...(d.fieldInputs ? { fieldInputs: true } : {}),
+        ...(d.selectorInputs ? { selectorInputs: true } : {}),
         ...(d.dynamicOutputs ? { dynamicOutputs: d.dynamicOutputs } : {}),
     }));
 }

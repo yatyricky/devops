@@ -1,27 +1,27 @@
 <script>
   import { getContext } from "svelte";
   import { Handle, Position, useUpdateNodeInternals } from "@xyflow/svelte";
-  import { TYPE_COLORS, effectiveInputs, effectiveOutputs, nodeTitle, portLabel } from "./types.js";
+  import { TYPE_COLORS, effectiveInputs, effectiveOutputs, nodeTitle, portLabel, displayType } from "./types.js";
   import { expandHomeLocal } from "./lib/infer.js";
   import { api } from "./api.js";
   import { ui } from "./store.svelte.js";
 
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
-  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveOutputs, resolveTplVars, inferOutput } = getContext("devnode-actions");
+  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveInputs, resolveOutputs, selectorOptions, resolveTplVars, inferOutput } = getContext("devnode-actions");
   const updateNodeInternals = useUpdateNodeInternals();
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
   let hl = $derived(ui.pathHighlight[id]);
-  let inputs = $derived(effectiveInputs(meta, data));
+  // ── 动态出口：structSplit 回溯上游字段定义（effectiveOutputs 同规则，经 context 由 App 提供图上下文） ────
+  let outputs = $derived(resolveOutputs?.(id) ?? (meta?.outputs ?? []));
+  // ── selector：有效输入口（开放口 in + 每条已接入边一个专用口），经 context 由 App 提供图上下文 ────
+  let inputs = $derived(meta?.selectorInputs ? (resolveInputs?.(id) ?? []) : effectiveInputs(meta, data));
   let color = $derived(meta?.color ?? "#8a97a8");
   let onPath = $derived(hl === true);
   // ── 任务运行状态（卡片外框）：集外半透明灰；running 跑马灯 / ok 绿框 / failed 红框 ────
   let runSt = $derived(ui.nodeRunStatus?.[id]);
   let offTask = $derived(ui.runTaskNodes != null && !ui.runTaskNodes.has(id));
-
-  // ── 动态出口：structSplit 回溯上游字段定义（effectiveOutputs 同规则，经 context 由 App 提供图上下文） ────
-  let outputs = $derived(resolveOutputs?.(id) ?? (meta?.outputs ?? []));
 
 // 动态插槽（structSplit 出口 / {{}} 动态输入）增删 handle 时节点外框尺寸不变，
   // ResizeObserver 不触发 → 内部 handleBounds 不重测 → 指向新 handle 的边不渲染、
@@ -190,13 +190,21 @@
   let sshErr = $state("");
   let sshRefreshing = $state(false);
   async function refreshSshAliases() {
+    // 别名取值：alias 输入口（连线/手填）优先，回退 widget 手选
+    const aliasWired = isWiredAsTarget?.(id, "alias");
+    const aliasFromInput = aliasWired ? String(resolveInput?.(id, "alias") ?? "").trim() : "";
+    const alias = aliasFromInput || String(get("alias") ?? "");
     sshRefreshing = true; sshErr = "";
     try {
-      const r = await api("/api/ssh/aliases", { method: "POST", body: JSON.stringify({ alias: get("alias") ?? "" }) });
+      const r = await api("/api/ssh/aliases", { method: "POST", body: JSON.stringify({ alias }) });
       sshAliases = r.aliases ?? [];
       sshResolved = r.resolved ?? null;
       sshErr = r.resolved?.error ?? "";
-      ui.pickerFresh[id] = String(get("alias") ?? "");
+      // 需求：输入驱动的别名若不在本地 config → 刷新即报错（不许静默直连）
+      if (!sshErr && aliasFromInput && sshResolved && sshResolved.fromConfig === false) {
+        sshErr = `别名 "${aliasFromInput}" 不在 ~/.ssh/config 中（刷新后未命中）`;
+      }
+      ui.pickerFresh[id] = aliasFromInput || alias;
     } catch (e) {
       sshErr = e.message;
     } finally {
@@ -228,6 +236,7 @@
   // ── 卡片错误：整卡红框描边 ────
   let cardError = $derived.by(() => {
     if (meta?.refsPicker && refsErr) return refsErr;
+    if (meta?.sshAliasesPicker && sshErr) return sshErr;
     return "";
   });
 
@@ -240,6 +249,9 @@
     if (ui.descAllTick === 0) return;
     descOpen = ui.descAllOpen;
   });
+  // ── ssh.session：alias 输入口已连线（widget 下拉禁用显示所选） ────
+  let aliasWired = $derived(isWiredAsTarget?.(id, "alias") ?? false);
+  let aliasFromInput = $derived(aliasWired ? String(resolveInput?.(id, "alias") ?? "").trim() : "");
 
   // ── struct 字段行：值控件按类型变化；字段口连线后隐藏手填 ────
   const numOk = v => String(v ?? "").trim() !== "" && Number.isFinite(Number(v));
@@ -274,15 +286,15 @@
     <button class="del nodrag" title="删除节点" onclick={() => ondelete?.(id)}>{@render trash(11)}</button>
   </div>
   {#if meta?.desc && descOpen}<div class="ndesc">{meta.desc}</div>{/if}
-  <div class="body nowheel">
+    <div class="body nowheel">
     {#each inputs as inp (inp.id)}
       {#if pairTo(inp)}
         <!-- to 端口已合并进 from 行渲染 -->
       {:else}
       {@const toPeer = pairToOf(inp)}
       <div class="kv in {toPeer ? "pairrow" : ""}" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}（可连线或直接填值）` : undefined}>
-        <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[inp.type]}; {toPeer ? "top:30%" : ""}" />
-        <span class="lbl" title="{portLabel(inp)}{inp.required ? " · 必填：连线或直接填值" : ""}">{inp.id}<span style="color:{TYPE_COLORS[inp.type]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
+        <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[displayType(inp.type)]}; {toPeer ? "top:30%" : ""}" />
+        <span class="lbl" title="{portLabel(inp)}{inp.required ? " · 必填：连线或直接填值" : ""}">{inp.id}<span style="color:{TYPE_COLORS[displayType(inp.type)]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
         {#if !inp.fromField && (inp.type === "string" || inp.type === "number" || inp.type === "boolean")}
           {@const liveVal = ui.runNodeInputs?.[id]?.[inp.id]}
           {#if isWiredAsTarget?.(id, inp.id) && liveVal !== undefined && liveVal !== null && liveVal !== ""}
@@ -318,12 +330,24 @@
       </div>
       {/if}
     {/each}
+    {#if meta?.selectorInputs}
+      <!-- 选择器：从已接入输入中选择一路作为输出 -->
+      <div class="kv in">
+        <span class="lbl">选择输入</span>
+        <select class="inlit nodrag" value={get("pick") ?? ""} onchange={e => set("pick", e.target.value)}>
+          <option value="" disabled hidden>— 选择输入 —</option>
+          {#each selectorOptions?.(id) ?? [] as o (o.id)}
+            <option value={o.id}>{o.label}</option>
+          {/each}
+        </select>
+      </div>
+    {/if}
     {#if outputs.length}
       <div class="sep"></div>
       {#each outputs as out (out.id)}
         <div class="kv out">
-          <span class="lbl">{out.id}<span style="color:{TYPE_COLORS[out.type]}"> ({out.type})</span></span>
-          <Handle id={out.id} type="source" position={Position.Right} style="background:{TYPE_COLORS[out.type]}" />
+          <span class="lbl">{out.id}<span style="color:{TYPE_COLORS[displayType(out.type)]}"> ({out.type})</span></span>
+          <Handle id={out.id} type="source" position={Position.Right} style="background:{TYPE_COLORS[displayType(out.type)]}" />
         </div>
       {/each}
     {/if}
@@ -335,15 +359,22 @@
 
     {#if meta?.sshAliasesPicker}
       <label class="wrow nodrag">
-        <span class="wlab">SSH 别名（~/.ssh/config）</span>
+        <span class="wlab">SSH 别名（~/.ssh/config）{aliasWired ? "· 已选择输入" : ""}</span>
         <span class="trow">
-          <select value={get("alias") ?? ""} onchange={e => { set("alias", e.target.value); refreshSshAliases(); }}>
-            {#if !(get("alias") ?? "")}<option value="" disabled hidden>— 选择别名 —</option>{/if}
-            {#if (get("alias") ?? "") && !sshAliases.includes(get("alias"))}
-              <option value={get("alias")}>{get("alias")}（config 未命中，保留）</option>
-            {/if}
-            {#each sshAliases as a (a)}<option value={a}>{a}</option>{/each}
-          </select>
+          {#if aliasWired}
+            <!-- 别名由输入口提供：下拉禁用并回显所选别名 -->
+            <select disabled title="别名来自连线输入：{aliasFromInput}">
+              <option>{aliasFromInput || "（输入未提供值）"}</option>
+            </select>
+          {:else}
+            <select value={get("alias") ?? ""} onchange={e => { set("alias", e.target.value); refreshSshAliases(); }}>
+              {#if !(get("alias") ?? "")}<option value="" disabled hidden>— 选择别名 —</option>{/if}
+              {#if (get("alias") ?? "") && !sshAliases.includes(get("alias"))}
+                <option value={get("alias")}>{get("alias")}（config 未命中，保留）</option>
+              {/if}
+              {#each sshAliases as a (a)}<option value={a}>{a}</option>{/each}
+            </select>
+          {/if}
           <button class="mini" disabled={sshRefreshing} onclick={refreshSshAliases}>{sshRefreshing ? "…" : "刷新"}</button>
         </span>
         {#if sshResolved && !sshResolved.error}

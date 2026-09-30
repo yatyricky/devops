@@ -153,5 +153,22 @@ export default [
             for (const line of String(text).split("\n")) ctx.log(`  ${ctx.mask(line)}`);
             ctx.log(`──────────────────`);
         },
+    },    {
+        type: "select.one",
+        title: "Selector",
+        category: "工具",
+        color: "#56b6c2",
+        selectorInputs: true,
+        dynamicOutputs: "selectorOut",
+        desc: "多路选择器：接入任意数量同类型输入，下拉选择其中一路作为输出。首个连线锁定类型（此后仅同型可接入）；断开全部输入后类型重置、下游连线自动断开。",
+        inputs: [],
+        outputs: [],
+        widgets: [],
+        async run(ctx, node, inputs) {
+            const pick = node.data?.pick;
+            if (!pick) throw new Error("selector：未在下拉中选择输入");
+            if (!(pick in inputs)) throw new Error(`selector：所选输入 ${pick} 未连线（连线变化后请重新选择）`);
+            return { value: inputs[pick] };
+        },
     },
 ];

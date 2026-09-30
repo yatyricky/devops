@@ -232,3 +232,11 @@
 - **现象**：组名控件 `flex:1`（上一轮"控件右对齐"引入）使组名按钮撑满整条标题条——按钮的 click 是打开重命名编辑，用户点/拖标题条任意位置都进编辑态，板没有可拖拽面（无法拖拽 group）。
 - **修复**：组名去 `flex:1`，宽=文字宽度、靠左；控件簇（色板/折叠）用 `margin-left:auto` 保持靠右；中间留白 = 拖拽面（mousedown 冒泡到 wrapper 触发 xyflow 拖拽，不触发重命名）。编辑名仍点组名进入。
 - **回归**：临时 wf 实测——组名按钮宽 42（=文字），标题条留白区拖拽板 position 随动且 16 网格吸附，留白点击不进重命名。
+
+## FEAT-2026-09-30-01 三项新功能：ssh.session 输入化 / selector 选择器 / struct 严格类型（非 bug，功能记录）
+
+1. **ssh.session 输入化**：新增可选输入 alias/fingerprint（string）；指纹 widget 移除（端口行手填承接）；run 取值连线优先。GUI：未连线 = 原流程（刷新/下拉选别名）；连线 = 下拉 disabled 显示所选；刷新后别名不在 config → sshErr 报错（卡片红框）。运行门禁的别名新鲜键改用有效别名值（连线值优先）。
+2. **selector 节点（select.one，工具类）**：接入任意数量同类型输入，下拉选一路作为输出。rules.js effectiveInputs 新 selectorInputs 分支（开放口 in 类型=lockType ?? any + 每条入边专用口 in-<源id>）；effectiveOutputs 新 "selectorOut"（lockType ? value 出口 : 无）。首连线经 onConnect 改写专用口并锁 lockType=源出口类型；全部入边删除 → 解锁 effect 清 lockType → 下游边由死边清理断开。engine getInputs(node, graph?) 透传图（declaredType 同步改签名），workflow.js 三处调用传 doc。
+3. **struct 严格类型**：rules.js 新 structShape（键排序 canonical）/isStructType；canConnect struct 家族规则（纯 struct 收任意 struct；带形状要求形状串全等——键集+逐键类型同、顺序无关；无形状源拒绝带形状输入）；struct.make 输出类型带形状（dynamicOutputs "structMake"）。displayType 收敛显示（带形状显示为 struct）。
+- **回归**：verify 53→56 全绿（struct 形状矩阵 / select.one 端口推导 / ssh.session 输入）；构建零警告；3199 实例实测 ssh.session（双端口渲染、指纹 widget 移除、连线后下拉 disabled=显示所选、刷新别名未命中报错「别名 "AAA" 不在 ~/.ssh/config 中」）。
+- **待人工验证**：selector 的画布连线锁定流程——CUA 自动化可拖重连锚点但无法建立新建连线（事件路径不同），连线后锁定/改写逻辑（onConnect 6 行）与既有 seq class 改写同模式，已由 verify 的端口推导断言覆盖数据层。

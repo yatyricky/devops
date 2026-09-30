@@ -370,10 +370,10 @@ const structMake = { id: "m", type: "struct.make", position: [0, 0], data: { fie
     { key: "PORT", type: "number", value: "3000" },
 ] } };
 
-await test("注册表: struct.make fieldInputs 动态输入与 struct 输出", () => {
+await test("注册表: struct.make fieldInputs 动态输入与 struct 输出（输出带形状类型）", () => {
     const inputs = getInputs(structMake);
     assert.deepStrictEqual(inputs.map(i => `${i.id}:${i.type}:${i.required ? "必填" : "可选"}`), ["SERVER_TYPE:string:可选", "PORT:number:可选"]);
-    assert.deepStrictEqual(getOutputs(structMake), [{ id: "struct", type: "struct" }]);
+    assert.deepStrictEqual(getOutputs(structMake), [{ id: "struct", type: "struct:{PORT:number,SERVER_TYPE:string}" }]);
     assert.ok(NODE_TYPES["struct.make"].fieldInputs, "fieldInputs 标志");
 });
 
@@ -1030,6 +1030,45 @@ await test("sshconfig: OpenSSH 首块生效（User/Port 首值优先；HostName 
         assert.ok((m.get("gamma").unsupported ?? []).some(u => /proxyjump/i.test(u)), "不支持指令被记录");
         assert.deepStrictEqual(listAliases(fp), ["alpha", "beta", "gamma"], "别名按出现顺序");
     } finally { fs.unlinkSync(fp); }
+});
+
+// ── struct 形状类型 + select.one 端口推导 + ssh.session 输入 ────
+await test("struct 形状: 顺序无关同型 / 类型不同异型 / 键集不同异型 / canConnect 矩阵", async () => {
+    const { structShape, canConnect } = await import("../engine/rules.js");
+    const A = structShape([{ key: "age", type: "number" }, { key: "name", type: "string" }]);
+    const A2 = structShape([{ key: "name", type: "string" }, { key: "age", type: "number" }]);
+    const B = structShape([{ key: "name", type: "string" }, { key: "age", type: "string" }]);
+    const C = structShape([{ key: "name", type: "string" }]);
+    assert.strictEqual(A, "struct:{age:number,name:string}");
+    assert.strictEqual(A, A2, "顺序无关 → 同型");
+    assert.notStrictEqual(A, B, "逐键类型不同 → 异型");
+    assert.notStrictEqual(A, C, "键集不同 → 异型");
+    assert.strictEqual(canConnect(A, "struct"), true, "带形状可进纯 struct 输入");
+    assert.strictEqual(canConnect("struct", A), false, "无形状源不可进带形状输入");
+    assert.strictEqual(canConnect(A, B), false, "异型不可连");
+    assert.strictEqual(canConnect(A, A), true, "同型可连");
+});
+
+await test("select.one: 未锁定开放口 any；首连锁定后专用口按入边推导、开放口变锁型", () => {
+    const doc = {
+        nodes: [
+            { id: "s", type: "select.one", position: [0, 0], data: { lockType: "string" } },
+            { id: "a", type: "string.const", position: [0, 0], data: {} },
+        ],
+        edges: [{ id: "e1", source: "a", sourceHandle: "value", target: "s", targetHandle: "in-a" }],
+    };
+    const ports = getInputs(doc.nodes[0], doc);
+    assert.deepStrictEqual(ports.map(p => p.id).sort(), ["in", "in-a"], "开放口 + 专用口并存");
+    assert.ok(ports.every(p => p.type === "string"), "锁定后全部口为 string");
+    const bare = getInputs({ id: "s2", type: "select.one", data: {} }, { nodes: [], edges: [] });
+    assert.deepStrictEqual(bare.map(p => p.id), ["in"]);
+    assert.strictEqual(bare[0].type, "any");
+});
+
+await test("ssh.session: alias/fingerprint 可选输入存在（required=false）", () => {
+    const inputs = getInputs({ type: "ssh.session", data: {} }).filter(i => ["alias", "fingerprint"].includes(i.id));
+    assert.deepStrictEqual(inputs.map(i => i.id).sort(), ["alias", "fingerprint"]);
+    assert.ok(inputs.every(i => !i.required), "均为可选");
 });
 
 console.log(`\nOK: ${passed} 项断言全部通过`);

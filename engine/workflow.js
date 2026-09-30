@@ -231,10 +231,10 @@ export async function executeTask(ctx, doc, taskName) {
             if (e.kind === "seq" || !e.sourceHandle) continue;
             const srcNode = nodeById.get(e.source);
             const outDef = getOutputs(srcNode, doc).find(o => o.id === e.sourceHandle);
-            inputValues[e.targetHandle] = coerce(executed.get(e.source)?.[e.sourceHandle], declaredType(node, e.targetHandle) ?? outDef?.type ?? "any");
+            inputValues[e.targetHandle] = coerce(executed.get(e.source)?.[e.sourceHandle], declaredType(node, doc, e.targetHandle) ?? outDef?.type ?? "any");
         }
         // 端口字面量兜底：未连线的 string/number/boolean 输入用 data.lit 的值（连线优先）
-        for (const inp of getInputs(node)) {
+        for (const inp of getInputs(node, doc)) {
             if (inp.fromField || !(["string", "number", "boolean"].includes(inp.type))) continue;
             if (inputValues[inp.id] === undefined && node.data?.lit?.[inp.id] !== undefined) {
                 inputValues[inp.id] = coerce(node.data.lit[inp.id], inp.type);
@@ -268,10 +268,11 @@ export async function executeTask(ctx, doc, taskName) {
 
 /**
  * @param {any} node
+ * @param {any} doc
  * @param {string} handleId
  */
-function declaredType(node, handleId) {
-    for (const i of getInputs(node)) {
+function declaredType(node, doc, handleId) {
+    for (const i of getInputs(node, doc)) {
         if (i.id === handleId) return i.type;
     }
     return undefined;
