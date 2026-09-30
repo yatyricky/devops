@@ -192,3 +192,15 @@
 - **修复（按用户决策重做节点）**：remote.deps 原地替换为 `pnpm.install`（title 仍「安装生产依赖」）——删 manager 枚举（只做 pnpm）与 sudo 控件，恒以登录用户执行 `cd <path> && pnpm install --prod --frozen-lockfile`（frozen 语义：严格按 lockfile 装，与 package.json 不一致即失败）；控件只剩 loginShell（nvm PATH）。
 - **回归**：verify 新增断言（注册表形状；dry-run = `cd '<path>' && pnpm install --prod --frozen-lockfile` 且不含 sudo；remote.deps 不存在）。52/52 通过。真实链路由用户重跑验证。
 - **状态**：已实施。
+
+## QoL-2026-09-30-01 视觉与 QoL 升级八项（用户需求，非 bug）
+
+1. Group 展开态去左右加宽：GROUP_PAD_X(150) 移除，统一 GROUP_PAD(14)——展开态已无隧道接口。
+2. 边与插槽同色：新「边装饰 effect」按源出口类型写 edge.style（stroke + --ec 自定义属性），tnl- 段边随原边同色；与 animated 判定合并为一个 effect，只替换翻转的边（保引用）。注意：xyflow svelte 的 edge.style 须为**字符串**（对象不落到 DOM）。
+3. 边加粗：`.svelte-flow__edge-path { stroke-width: 2 }`（默认 1）。
+4. 选中节点抬升其连线：SvelteFlow `zIndexMode="manual"` + 装饰 effect 写 edge.zIndex=1000（相连/自身选中时）。原生 elevateEdgesOnSelect 无效——getElevatedEdgeZIndex 的抬升量取 sourceNode.internals.z，普通节点 z=0 抬不动，故走 manual 自管。
+5. string 插槽色 → #61afef（One Dark 蓝，与 number/boolean/ssh 同家族）。
+6. 顺序边银色虚线：`.seq` stroke #b3bcc8 / 1.6px / dasharray 4 3 / opacity .6（原 --warn 橙）。
+7. 选中边光晕：`.selected` stroke-width 2.6 + drop-shadow(0 0 5px var(--ec))（光晕=边自身颜色；seq 定义 --ec 银色）。
+8. 吸附与背景点阵对齐：实锤 Background 默认 gap=20 vs 吸附 [16,16]——`<Background gap={16} />`；点阵锚定流坐标原点，小白点与吸附点重合；另确认本版 snapGrid 单独传入即生效（snapToGrid: !!snapGrid）。顺带：视口平移不再点亮保存星号。
+- **回归**：verify 53 项全绿；临时 wf 实测——string 边 #61afef/2px、seq 银虚线、选中节点相连边（含 seq）animated+zIndex 1000 压过普通节点（z 0）、选中边光晕 drop-shadow(--ec)、吸附拖节点 position=-304/64 均为 16 倍数、组合展开态板宽 640=成员跨距 612+28。测试环境注意：live 服务器已配 token（kl online），浏览器回归改用 3199 一次性 token 实例（DEVOPS_PORT/DEVOPS_TOKEN 环境变量起第二实例），未触碰用户配置。

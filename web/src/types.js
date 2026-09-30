@@ -7,7 +7,7 @@
 export { canConnect, SOCKET_TYPES, effectiveInputs, effectiveOutputs, validateTaskSelection, isTunnelEdge } from "devops-console/engine/rules.js";
 
 export const TYPE_COLORS = {
-  struct: "#4da3ff", ssh: "#ff9e64", string: "#c8d3f0",
+  struct: "#4da3ff", ssh: "#ff9e64", string: "#61afef",
   number: "#e5c07b", boolean: "#c678dd", any: "#8a97a8",
 };
 

@@ -4,8 +4,8 @@
  */
 import { groupBarHeight, isTunnelEdge } from "../types.js";
 
-export const GROUP_PAD = 14, GROUP_PAD_X = 150, GROUP_PAD_TOP = 42;
-/** GROUP_PAD_X 左右留白加大：给隧道接口↔组内节点的转发段边留出横向空间走曲线 */
+export const GROUP_PAD = 14, GROUP_PAD_TOP = 42;
+/** GROUP_COLORS 取 One Dark 家族，与插槽类型色规范一致 */
 export const GROUP_COLORS = ["#4da3ff", "#4cc38a", "#f5a623", "#ff6b6b", "#b18cff", "#56b6c2"];
 export const GROUP_COLLAPSED_W = 230;
 
@@ -21,8 +21,9 @@ export function groupAABB(nodes, memberIds) {
     maxX = Math.max(maxX, m.position.x + w); maxY = Math.max(maxY, m.position.y + h);
   }
   if (!found) return null;
-  return { x: minX - GROUP_PAD_X, y: minY - GROUP_PAD_TOP,
-    width: (maxX - minX) + GROUP_PAD_X * 2, height: (maxY - minY) + GROUP_PAD_TOP + GROUP_PAD };
+  // 展开态已无隧道接口，四周常规内边距即可
+  return { x: minX - GROUP_PAD, y: minY - GROUP_PAD_TOP,
+    width: (maxX - minX) + GROUP_PAD * 2, height: (maxY - minY) + GROUP_PAD_TOP + GROUP_PAD };
 }
 
 /** 按 __gid 定位 groupbox 节点——xyflow 节点 id 是 `grp-${gid}`，别按裸 id 找。 */

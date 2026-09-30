@@ -41,7 +41,12 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode .body .kv.ctl .svelte-flow__handle { width: 8px; height: 8px; border-radius: 2px; }
 .devnode .body .kv.ctl .svelte-flow__handle-left { left: -11px; }
 .devnode .body .kv.ctl .svelte-flow__handle-right { right: -11px; }
-.svelte-flow__edge.seq .svelte-flow__edge-path { stroke: var(--warn); stroke-width: 1.2; stroke-dasharray: 3 4; opacity: .55; }
+.svelte-flow__edge-path { stroke-width: 2; }
+.svelte-flow__edge.selected .svelte-flow__edge-path { stroke-width: 2.6; filter: drop-shadow(0 0 5px var(--ec, var(--accent))); }
+.svelte-flow__edge.seq { --ec: #b3bcc8; } /* seq 选中光晕也走银色 */
+.svelte-flow__edge.seq .svelte-flow__edge-path { stroke: #b3bcc8; stroke-width: 1.6; stroke-dasharray: 4 3; opacity: .6; }
+.svelte-flow__edge.animated .svelte-flow__edge-path { stroke-dasharray: 6 4; animation: edge-flow .45s linear infinite; }
+@keyframes edge-flow { to { stroke-dashoffset: -10; } }
 
 /* 端口字面量行内控件（string/number/boolean 输入插槽后） */
 /* 端口字面量行内控件（string/number/boolean 输入插槽后）；wired=灰（编辑解析值），运行中=绿（实时值） */

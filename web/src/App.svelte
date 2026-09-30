@@ -2,7 +2,7 @@
   import { getContext, setContext } from "svelte";
   import { SvelteFlow, Background, Controls, MiniMap } from "@xyflow/svelte";
   import { api } from "./api.js";
-  import { canConnect, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, isTunnelEdge, nodeTitle, portLabel, basenameNoExt, dirOf } from "./types.js";
+  import { canConnect, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, isTunnelEdge, TYPE_COLORS, nodeTitle, portLabel, basenameNoExt, dirOf } from "./types.js";
   import { makeInfer } from "./lib/infer.js";
   import { GROUP_COLORS, groupAABB, groupBoxOf, crossEdges, collapsedWidth, collapsedHeight, makeGroupNode } from "./lib/groups.js";
   import { toDocument } from "./lib/docIO.js";
@@ -577,16 +577,35 @@
     }
   });
 
-  // 连线动画跟随选中：仅与选中节点相连（或被选中）的数据边播放虚线动画；顺序边恒为静态。
-  // EdgeWrapper 只响应 edge 对象引用变化——只替换 animated 需要翻转的边，未变的保引用（避免全体重渲染）。
+  // ── 边装饰 effect（类型色 + 流线动画 + 选中抬升，三合一）：
+  //    ① 数据边按【源出口类型】着色（style 字符串内联在 path 上，压过 xyflow 默认色），--ec 供选中光晕同色；
+  //       tnl- 段边按其原边取同色（两段转发线与原数据一致）。seq 边走 class 银色，不打类型色。
+  //    ② animated：与选中节点相连（或边自身被选中）的边播放流线动画——数据边与顺序边都参与。
+  //    ③ zIndex（需 SvelteFlow zIndexMode="manual"）：与选中节点相连/自身选中的边抬到 1000——
+  //       svg 层压住普通节点卡片（节点 z 0/1/2 都低于 1000）；其余回落 0。
+  //    只替换需要翻转的边对象（EdgeWrapper 按引用响应），未变的保引用避免全体重渲染。
   $effect(() => {
-    const anim = e => e.kind !== "seq" && !isTunnelEdge(e) && (selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target) || !!e.selected);
     let changed = false;
     const next = edges.map(e => {
-      const want = anim(e);
-      if (!!e.animated === want) return e;
+      // 颜色：seq 边走 class 银色样式，不打类型色
+      let style = e.style;
+      if (e.kind !== "seq") {
+        const origId = isTunnelEdge(e) ? String(e.id).slice(4, -2) : e.id;
+        const orig = isTunnelEdge(e) ? edges.find(x => x.id === origId) : e;
+        const src = orig && nodeByIdMap.get(orig.source);
+        const meta = src && typeMap[src.data?.__type ?? src.type];
+        const outs = meta ? effectiveOutputs(meta, src.data, { edges, nodes, id: orig.source }) : [];
+        const out = orig?.sourceHandle ? outs.find(o => o.id === orig.sourceHandle) : outs[0];
+        const color = TYPE_COLORS[out?.type] ?? "#8a97a8";
+        const want = `stroke: ${color}; --ec: ${color};`;
+        if (e.style !== want) style = want;
+      }
+      const touching = selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target) || !!e.selected;
+      const animated = touching;
+      const zIndex = touching ? 1000 : 0;
+      if (style === e.style && !!e.animated === animated && e.zIndex === zIndex) return e;
       changed = true;
-      return { ...e, animated: want };
+      return { ...e, style, animated, zIndex };
     });
     if (changed) edges = next;
   });
@@ -749,12 +768,13 @@
         onnodedrag={onNodeDrag}
         onnodedragstop={onNodeDragStop}
         elevateNodesOnSelect={false}
+        zIndexMode="manual"
         snapGrid={snapOn ? [16, 16] : undefined}
         fitView
         minZoom={0.15} maxZoom={2}
         connectionRadius={22}
       >
-        <Background />
+        <Background gap={16} />
         <Controls />
         <MiniMap nodeColor={n => typeMap[n.type]?.color ?? "#8a97a8"} pannable zoomable />
         <CanvasDrop ondropat={dropAddNode} />
