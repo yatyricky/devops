@@ -473,8 +473,9 @@
                   {#if isWiredAsTarget?.(id, f.key)}
                     <span class="wired" title="已连线：该字段值来自上游">🔗</span>
                   {:else if f.type === "boolean"}
-                    <!-- 三态轨道开关：undefined 空轨 / false 滑块左(暗) / true 滑块右(亮)；点击循环 -->
-                    <TriSwitch tri class="nodrag" value={f.value}
+                    <!-- 三态轨道开关：undefined 空轨（仅初始态）/ false 滑块左(暗) / true 滑块右(亮)；
+                         点击 undefined→true→false→true…，进入布尔域后不再出现 undefined -->
+                    <TriSwitch class="nodrag" value={f.value}
                       onchange={v => setField(w.key, i, "value", v)} />
                   {:else}
                     <input class:winvalid={f.type === "number" && !numOk(f.value)} placeholder="值" value={f.value ?? ""}

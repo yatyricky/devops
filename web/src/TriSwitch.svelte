@@ -2,12 +2,13 @@
   /**
    * 三态轨道开关（struct boolean 字段值 / boolean widget / taskbar 开关共用）。
    * 外观：value===undefined → 空轨（无滑块、暗色）；false → 暗滑块居左；true → accent 滑块居右。
-   * tri=true 点击循环 true→false→undefined→true（真三态）；默认二态 true↔false（undefined 视同 false）。
+   * 状态机：undefined（仅初始态）→ true → false → true → …——首次点击进入布尔域，
+   * 之后 true↔false 循环，永不回到 undefined。
    */
-  let { value, tri = false, onchange, class: cls = "" } = $props();
+  let { value, onchange, class: cls = "" } = $props();
   function click() {
     if (!onchange) return;
-    onchange(tri ? (value === true ? false : value === false ? undefined : true) : !(value === true));
+    onchange(value === true ? false : true);
   }
 </script>
 
