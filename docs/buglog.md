@@ -315,3 +315,4 @@
 2. **input 行同基准**：`.kv.in .inlit` 50%→**60%**；boolpair 定宽改 `width:60% + justify-end`；pairrow 30%+30% 不动（恰为 60% 基准）——全部输入行右缘对齐同一 40% 分界线。label 截断由既有 `.lbl` ellipsis + title（portLabel）承担。
 3. **删 serializable 徽章**：模板 sbadge 与 app.css `.sbadge` 规则删除；节点定义的 `serializable: true` 元数据保留（运行门禁仍消费，仅 UI 徽章消失）。
 - **回归**：verify 61 绿；构建零警告；3199 实测（临时 wf 已删、local-config 已还原、实例已杀）：logp/ssh picker/struct 编辑器 label 40% + 控件 58%（gap 占 2%）同行、kv.in lit 60%、pairrow 30%、长 label 截断且 title 全文、sbadge=0。
+   - **右区宽度/高度统一（用户五点）**：①kv.in 与 wrow 同构（gap 6 + lbl 固定 40% + inlit flex 1 1 0，废 width:60%/margin-left:auto——spacing 计入 60% 内，分界线/宽度与 widgets 完全一致）；②pairrow 同构（废 30% 定宽改 flex 均分，p1.from/to 与其它行同分界）；③stepper +/- 按钮与 input 同框（font 12/padding 2 8/line-height 1.2，等高）；④ssh/scripts picker 的 select `flex:1 1 0` 吃满刷新按钮以外余宽；⑤ssh.exec command widget text→string（textarea 改单行 input，多行命令仍支持——run 按 \n 切分，JSON 手写即可）。

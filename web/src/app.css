@@ -53,8 +53,10 @@ textarea { font: 12px/1.5 var(--mono); }
 @keyframes edge-flow { to { stroke-dashoffset: -10; } }
 
 /* 端口字面量行内控件（string/number/boolean 输入插槽后）；wired=灰（编辑解析值），运行中=绿（实时值）。
-   排版基准：控件区恒占右侧 60%，label 占左侧剩余（超长截断，title 悬停看全文）；pairrow 30%+30% 同基准 */
-.devnode .body .kv.in .inlit { width: 60%; margin-left: auto; flex: none; font-size: 11px; padding: 1px 5px; }
+   排版基准（与 wrow 同构）：label 固定左 40% + gap 6px，控件吃满右 60% 剩余宽度（spacing 含在 60% 内） */
+.devnode .body .kv.in { gap: 6px; }
+.devnode .body .kv.in .lbl { flex: 0 0 40%; }
+.devnode .body .kv.in .inlit { flex: 1 1 0; min-width: 0; font-size: 11px; padding: 1px 5px; }
 .devnode .body .kv.in .inlit:disabled { color: var(--dim); }
 .devnode .body .kv.in .inlit.live:disabled { color: var(--ok); }
 .devnode .body .boolpair { display: flex; gap: 3px; width: 60%; margin-left: auto; justify-content: flex-end; }
@@ -79,16 +81,20 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode .body .trow select { flex: none; width: auto; min-width: 0; }
 .devnode .body button.mini { padding: 1px 6px; font-size: 11px; flex: none; }
 .devnode .body button.mini { display: inline-flex; align-items: center; justify-content: center; }
+/* stepper 的 +/-：与同排 input 同框（同字号/内距/圆角），高度一致 */
+.devnode .body .trow.stepper button { font-size: 12px; padding: 2px 8px; border-radius: 4px; line-height: 1.2; }
+/* ssh/scripts picker（wrow 直子 trow）的 select：吃满 60% 里刷新按钮以外的宽度（含 spacing） */
+.devnode .body .wrow > .trow select { flex: 1 1 0; }
 .devnode .body .badges { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 3px; }
 .devnode .body .badge { font-size: 10px; padding: 0 6px; }
 .devnode .body .badge .rm { cursor: pointer; margin-left: 3px; }
 .devnode .body input.winvalid { border-color: var(--err); }
 .devnode .body .errline { display: block; color: var(--err); font-size: 11px; margin-top: 3px; }
 .devnode .body input, .devnode .body textarea { user-select: text; -webkit-user-select: text; }
-/* pair row (stage.copy): label flexes, from/to fixed 30% right-aligned */
-.devnode .body .kv.pairrow { justify-content: flex-end; gap: 4px; }
-.devnode .body .kv.pairrow .lbl { flex: 1 1 auto; min-width: 0; font-size: 10px; }
-.devnode .body .kv.pairrow input.inlit { flex: none; width: 30%; }
+/* pair row (stage.copy): 与 kv.in 同基准——label 40% + gap 6px，from/to flex 均分右区 */
+.devnode .body .kv.pairrow { gap: 6px; }
+.devnode .body .kv.pairrow .lbl { flex: 0 0 40%; min-width: 0; font-size: 10px; }
+.devnode .body .kv.pairrow input.inlit { flex: 1 1 0; }
 .devnode .body .kvline { display: block; color: var(--dim); font-size: 11px; margin-top: 3px;
   font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
