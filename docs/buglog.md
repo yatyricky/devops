@@ -280,3 +280,10 @@
 
 - **现象**：selector 输入口的 radio 被全局 `input { width: 100% }` 拉满整行宽。
 - **修复**：app.css 增 `.selradio { width/height 16px; margin-left: auto; accent-color: var(--accent) }` 覆盖；radio 点击选择输出已验证（checked 写入 data.pick）。
+
+## FEAT-2026-09-30-03 struct.split 出口支持 selector 形状链（用户报「未能正常解析出口」的排查）
+
+- **排查**：struct.make → struct.split 链实测出口解析正常（name/age）；用户场景疑似上游为 selector（锁 struct 形状）或 struct.make 字段被清空。
+- **增强**：rules effectiveOutputs structSplit 分支新增——上游 selector 且 lockType 为形状串（struct:{...}）时，解析 canonical 串还原字段作为出口（字母序）。此前该分支只认 struct.make 上游。
+- **回归**：verify 57 全绿；3199 实例实测 struct.make → struct.split 出口 name/age 正常解析。
+- **待确认**：如用户场景仍异常，请提供 Split Struct 的上游连线方式（struct.make / selector / 其他）。

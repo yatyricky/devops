@@ -173,8 +173,21 @@ export function effectiveOutputs(meta, data, env = {}) {
     if (meta?.dynamicOutputs === "structSplit") {
         const e = (env.edges ?? []).find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === env?.id);
         const src = (env.nodes ?? []).find(n => n.id === e?.source);
-        if (src?.type !== "struct.make") return [];
-        return (src.data?.fields ?? []).filter(f => f.key).map(f => ({ id: f.key, type: f.type ?? "string" }));
+        // 上游 struct.make：按字段声明序输出
+        if (src?.type === "struct.make") {
+            return (src.data?.fields ?? []).filter(f => f.key).map(f => ({ id: f.key, type: f.type ?? "string" }));
+        }
+        // 上游 selector（锁定了 struct 形状）：解析 canonical 形状串还原字段（字母序）
+        const lock = src?.data?.lockType;
+        if (typeof lock === "string" && lock.startsWith("struct:{")) {
+            return lock.slice("struct:{".length, -1)
+                .split(",").filter(Boolean)
+                .map(kv => {
+                    const i = kv.indexOf(":");
+                    return { id: kv.slice(0, i), type: kv.slice(i + 1) ?? "string" };
+                });
+        }
+        return [];
     }
     if (meta?.dynamicOutputs === "structMake") {
         // 无字段 = 无出口（无 struct 可供下游消费）
