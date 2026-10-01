@@ -52,19 +52,23 @@ textarea { font: 12px/1.5 var(--mono); }
 .svelte-flow__edge.animated .svelte-flow__edge-path { stroke-dasharray: 6 4; animation: edge-flow .45s linear infinite; }
 @keyframes edge-flow { to { stroke-dashoffset: -10; } }
 
-/* 端口字面量行内控件（string/number/boolean 输入插槽后） */
-/* 端口字面量行内控件（string/number/boolean 输入插槽后）；wired=灰（编辑解析值），运行中=绿（实时值） */
-.devnode .body .kv.in .inlit { width: 50%; margin-left: auto; flex: none; font-size: 11px; padding: 1px 5px; }
+/* 端口字面量行内控件（string/number/boolean 输入插槽后）；wired=灰（编辑解析值），运行中=绿（实时值）。
+   排版基准：控件区恒占右侧 60%，label 占左侧剩余（超长截断，title 悬停看全文）；pairrow 30%+30% 同基准 */
+.devnode .body .kv.in .inlit { width: 60%; margin-left: auto; flex: none; font-size: 11px; padding: 1px 5px; }
 .devnode .body .kv.in .inlit:disabled { color: var(--dim); }
 .devnode .body .kv.in .inlit.live:disabled { color: var(--ok); }
-.devnode .body .boolpair { display: flex; gap: 3px; margin-left: auto; flex: none; }
+.devnode .body .boolpair { display: flex; gap: 3px; width: 60%; margin-left: auto; justify-content: flex-end; }
 .devnode .body .boolpair button { font-size: 10px; padding: 0 7px; line-height: 1.5; opacity: .55; }
 .devnode .body .boolpair button.lit { border-color: var(--ok); color: var(--ok); opacity: 1; }
 
-/* 卡片内联编辑控件（原 Inspector 上卡片） */
-.devnode .body .wrow { display: block; margin-top: 6px; }
-.devnode .body .wlab { display: block; font-size: 10px; color: var(--dim); margin-bottom: 2px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 卡片内联编辑控件（原 Inspector 上卡片）。横排：label 左 40%（截断+title），控件共占右 60% */
+.devnode .body .wrow { display: flex; align-items: flex-start; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.devnode .body .wlab { display: block; flex: 0 0 40%; min-width: 0; font-size: 10px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; align-self: center; }
+.devnode .body .wrow > textarea, .devnode .body .wrow > select, .devnode .body .wrow > input,
+.devnode .body .wrow > .tblwrap, .devnode .body .wrow > .trow { flex: 1 1 0; min-width: 0; }
+.devnode .body .wrow > .tri-switch { margin-left: auto; align-self: center; }
+.devnode .body .wrow > .errline, .devnode .body .wrow > .kvline { flex-basis: 100%; }
 .devnode .body input, .devnode .body select, .devnode .body textarea { font-size: 12px; padding: 2px 6px; border-radius: 4px; }
 .devnode .body textarea { resize: vertical; line-height: 1.5; }
 .devnode .body .ckb { width: auto; }
@@ -91,10 +95,8 @@ textarea { font: 12px/1.5 var(--mono); }
 /* 连接端口用普通指针（覆盖 Svelte Flow 默认十字准星） */
 .svelte-flow__handle { cursor: default; }
 
-/* required 星标 / serializable 徽章 */
+/* required 星标（serializable 徽章已按用户要求移除） */
 .devnode .body .req { color: var(--warn); margin-left: 2px; font-weight: 700; }
-.devnode .body .sbadge { display: inline-block; margin-left: 4px; padding: 0 4px; font-size: 9px; line-height: 1.5;
-  border: 1px solid var(--ok); color: var(--ok); border-radius: 4px; vertical-align: 1px; }
 
 .devnode.onpath { outline: 2px dashed var(--warn); outline-offset: 2px; }
 

@@ -358,7 +358,7 @@
 
     {#if meta?.sshAliasesPicker}
       <label class="wrow nodrag">
-        <span class="wlab">SSH 别名（~/.ssh/config）{aliasWired ? "· 已选择输入" : ""}</span>
+        <span class="wlab" title={`SSH 别名（~/.ssh/config）${aliasWired ? "· 已选择输入" : ""}`}>SSH 别名（~/.ssh/config）{aliasWired ? "· 已选择输入" : ""}</span>
         <span class="trow">
           {#if aliasWired}
             <!-- 别名由输入口提供：下拉禁用并回显所选别名 -->
@@ -387,7 +387,7 @@
       <div class="sep"></div>
       {#each meta.widgets as w (w.key)}
         <label class="wrow nodrag">
-          <span class="wlab">{w.label}{#if w.serializable}<span class="sbadge" title="可序列化：纯文本字面量，可直接入库或携带占位符">s</span>{/if}</span>
+          <span class="wlab" title={w.label}>{w.label}</span>
           {#if w.kind === "text"}
             <textarea rows="4" value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
               oninput={e => set(w.key, e.target.value)}></textarea>
@@ -505,21 +505,21 @@
 
     {#if meta?.tplVars}
       <label class="wrow nodrag">
-        <span class="wlab">模板路径（手填或连线，变量端口自动生成）</span>
+        <span class="wlab" title="模板路径（手填或连线，变量端口自动生成）">模板路径（手填或连线，变量端口自动生成）</span>
         {#if tplErr}<span class="errline">⚠ {tplErr}</span>{/if}
       </label>
     {/if}
 
     {#if meta?.outputInfer && inferredOut}
       <label class="wrow nodrag">
-        <span class="wlab">输出（编辑期推断）</span>
+        <span class="wlab" title="输出（编辑期推断）">输出（编辑期推断）</span>
         <span class="kvline">{inferredOut}</span>
       </label>
     {/if}
 
     {#if meta?.refsPicker}
       <label class="wrow nodrag">
-        <span class="wlab">Ref（默认 HEAD）</span>
+        <span class="wlab" title="Ref（默认 HEAD）">Ref（默认 HEAD）</span>
         <span class="trow">
           <select value={get("ref") ?? "HEAD"} onchange={e => set("ref", e.target.value)}>
             <option value="HEAD">HEAD</option>

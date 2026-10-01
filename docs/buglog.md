@@ -308,3 +308,10 @@
 2. **改输入 struct shape 后 selector 派生跟随了，但边仍红**：3199 独立实例复现定位——in2 连着异型源（string）时改 in1 源 struct.make 的 shape，`selectorWireProblem`（节点级全局判定）非空导致 **selector 的全部入边一起红，包括 in1 自己的边**。in1 是类型准绳，自身永不该因此判错。修复：新增 `rules.selectorEdgeProblem(wires, targetHandle)` **per-edge 判定**——in1 边恒 null；其余口与 in1 源类型不同（或 in1 未连）→ 仅该边红。节点级 `selectorWireProblem` 保留给 validateTaskRunnable（「存在 ≠」仍是不可运行错误）。
 - **回归**：verify 60→61 绿（selectorEdgeProblem 三态断言）；构建零警告；3199 实测（临时 wf 已删、local-config 已还原、实例已杀）：异型场景 in1 边绿/in2 边红/出口边绿；实时改 shape（number→string→number）派生三处（端口/出口/下游 split）全跟随；新增 boolean 字段 data 无 value 键、开关初始空轨未设置态。
    - **状态机修正（用户指定）**：TriSwitch 点击循环由「true→false→undefined→true」改为 **undefined（仅初始态）→ true → false → true → …**——undefined 只存在于从未点击的初始态，首次点击进入布尔域后 true↔false 永久循环、不再回到未设置。tri prop 与二态行为重合，删除（视觉本就由 value===undefined 驱动）。实测连点 3 次 undefined→true→false→true，数据/DOM 同步。
+
+## QoL-2026-10-02-01 卡片排版统一：控件区右 60% / label 左 40% + 删 serializable 徽章（用户三项）
+
+1. **widgets 横排**：`.wrow` 由 block 竖排（label 上控件下）改 flex——`.wlab` 固定 40%（ellipsis 截断 + `title={w.label}` 悬停全文），控件共占右 60%（`flex: 1 1 0`；**basis 必须 0 而非 auto**——auto 用控件固有宽度，超出即被 flex-wrap 挤到第二行，实测 log.print 换行暴露）；定宽控件（tri-switch）`margin-left:auto` 右贴齐；errline/kvline `flex-basis:100%` 整行换行。手写 wrow（SSH 别名/模板路径/输出推断/Ref）补 title。
+2. **input 行同基准**：`.kv.in .inlit` 50%→**60%**；boolpair 定宽改 `width:60% + justify-end`；pairrow 30%+30% 不动（恰为 60% 基准）——全部输入行右缘对齐同一 40% 分界线。label 截断由既有 `.lbl` ellipsis + title（portLabel）承担。
+3. **删 serializable 徽章**：模板 sbadge 与 app.css `.sbadge` 规则删除；节点定义的 `serializable: true` 元数据保留（运行门禁仍消费，仅 UI 徽章消失）。
+- **回归**：verify 61 绿；构建零警告；3199 实测（临时 wf 已删、local-config 已还原、实例已杀）：logp/ssh picker/struct 编辑器 label 40% + 控件 58%（gap 占 2%）同行、kv.in lit 60%、pairrow 30%、长 label 截断且 title 全文、sbadge=0。
