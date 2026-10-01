@@ -265,9 +265,11 @@
     const k = String(newVals[key + "#k"] ?? "").trim();
     if (!k || !/^\w+$/.test(k)) return;
     const type = newVals[key + "#t"] ?? "string";
-    // boolean 字段不带 value 键 = undefined（三态开关初始未设置态；JSON 序列化自动省略该键）
-    set(key, [...(get(key) ?? []), type === "boolean" ? { key: k, type } : { key: k, type, value: "" }]);
-    newVals[key + "#k"] = ""; newVals[key + "#t"] = "string";
+    const v = newVals[key + "#v"];
+    // boolean 字段：值 undefined = 三态开关未设置态（JSON 序列化自动省略该键）；其余 undefined 归 ""
+    const field = type === "boolean" ? { key: k, type, ...(v !== undefined ? { value: v } : {}) } : { key: k, type, value: v ?? "" };
+    set(key, [...(get(key) ?? []), field]);
+    newVals[key + "#k"] = ""; newVals[key + "#t"] = "string"; newVals[key + "#v"] = undefined;
   }
 </script>
 
@@ -493,6 +495,14 @@
                   <option value="number">number</option>
                   <option value="boolean">boolean</option>
                 </select>
+                {#if (newVals[w.key + "#t"] ?? "string") === "boolean"}
+                  <!-- 新增行值控件随 type 切换（与字段行同槽同排版）：boolean = tri-switch -->
+                  <TriSwitch class="nodrag" value={newVals[w.key + "#v"]}
+                    onchange={v => newVals[w.key + "#v"] = v} />
+                {:else}
+                  <input class="fval" class:winvalid={(newVals[w.key + "#t"] ?? "string") === "number" && !numOk(newVals[w.key + "#v"])} placeholder="值"
+                    bind:value={newVals[w.key + "#v"]} />
+                {/if}
                 <button class="mini" onclick={() => fieldAdd(w.key)}>＋</button>
               </span>
             </span>
