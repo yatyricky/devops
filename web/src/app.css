@@ -78,10 +78,9 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode .body .wrow.structrow .wlab { width: 100%; }
 .devnode .body .wrow.structrow .tblwrap { width: 100%; }
 .devnode .body .wrow.structrow .trow > input:not(.fval), .devnode .body .wrow.structrow .trow > select { flex: 0 0 20%; min-width: 0; }
-.devnode .body .wrow.structrow .trow > .fval, .devnode .body .wrow.structrow .trow > .tri-switch,
+.devnode .body .wrow.structrow .trow > .fval { flex: 1 1 0; min-width: 0; }
+.devnode .body .wrow.structrow .trow > .tri-switch { flex: none; margin-left: auto; align-self: center; }
 .devnode .body .wrow.structrow .trow > button.mini:not(.danger) { margin-left: auto; }
-.devnode .body .wrow.structrow .trow > .fval { flex: none; width: 34px; }
-.devnode .body .wrow.structrow .trow > .tri-switch { flex: none; }
 .devnode .body input, .devnode .body select, .devnode .body textarea { font-size: 12px; padding: 2px 6px; border-radius: 4px; }
 .devnode .body textarea { resize: vertical; line-height: 1.5; }
 .devnode .body .ckb { width: auto; }
