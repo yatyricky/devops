@@ -301,3 +301,9 @@
 1. **selector 类型随 in1 变化（in1 永远是类型准绳）**：b88baf9 的 lockType 是持久字段（onConnect 首连线写入）——之后 in1 源出口类型变化时不同步，连线反被判错。改为**纯派生**：rules.js 新增 `selectorLockType(env, depth)` 递归推导 in1 源出口类型（env.metas 取源 meta，depth>8 防环熔断）；effectiveInputs/selectorOut/structSplit（上游 selector 形状串解析）全部走派生；删 App 三段 lockType 写/同步/清逻辑。**实测发现遗留兜底有害**：删 in1 边后残留 data.lockType 会把端口锁在旧类型、挡住新连线——修正为「有图上下文纯派生（残留忽略），无图（老 getInputs(node) 调用）才兜底遗留值」。删除 in1 边 → 端口回 any、出口消失（下游由死边清理断开）。
 2. **TriSwitch 组件化（DRY）**：三处开关统一为新组件 web/src/TriSwitch.svelte——struct boolean 字段值（tri 三态：undefined 空轨无滑块/false 暗滑块左/true accent 滑块右，循环 undefined→true→false→undefined）、boolean widget（2 态，值恒 bool）、taskbar 吸附/说明（2 态）。外观对齐吸附开关 .track（34×18）；role=switch+aria；样式 scoped（删 app.css .tri-switch 旧块与 T/F/- 文字标记；App .switch 只留布局）。**Svelte 5 陷阱**：`let { value = false } = $props()` 会把显式传入的 undefined 吞成默认值 false（undefined 态永不出现）——value 必须无默认值解构。
 - **回归**：verify 57→60 绿（select.one 派生/换源跟随/环熔断/selectorWireProblem 新签名/structSplit 上游 selector 断言）；构建零警告；3010 实测（临时 wf 已删）：in1 未连=any→接 struct 源全链跟随 struct_1 无红线；三处开关点击循环全对。
+
+## BUG-2026-10-02-01 boolean 字段默认未设置 + selector 改 shape 后 in1 边连坐红（用户报两项）
+
+1. **struct boolean 字段值默认 undefined**：fieldAdd 新增字段写死 `value: boolean ? false : ""`——新字段开关初始是 false 而非未设置态。改为 boolean 字段**不写 value 键**（undefined = 三态开关空轨；JSON 序列化自动省略）。
+2. **改输入 struct shape 后 selector 派生跟随了，但边仍红**：3199 独立实例复现定位——in2 连着异型源（string）时改 in1 源 struct.make 的 shape，`selectorWireProblem`（节点级全局判定）非空导致 **selector 的全部入边一起红，包括 in1 自己的边**。in1 是类型准绳，自身永不该因此判错。修复：新增 `rules.selectorEdgeProblem(wires, targetHandle)` **per-edge 判定**——in1 边恒 null；其余口与 in1 源类型不同（或 in1 未连）→ 仅该边红。节点级 `selectorWireProblem` 保留给 validateTaskRunnable（「存在 ≠」仍是不可运行错误）。
+- **回归**：verify 60→61 绿（selectorEdgeProblem 三态断言）；构建零警告；3199 实测（临时 wf 已删、local-config 已还原、实例已杀）：异型场景 in1 边绿/in2 边红/出口边绿；实时改 shape（number→string→number）派生三处（端口/出口/下游 split）全跟随；新增 boolean 字段 data 无 value 键、开关初始空轨未设置态。

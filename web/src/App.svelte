@@ -3,7 +3,7 @@
   import { SvelteFlow, Background, Controls, MiniMap } from "@xyflow/svelte";
   import { api } from "./api.js";
     import { canConnect, displayType, typeColorKey, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, isTunnelEdge, TYPE_COLORS, nodeTitle, portLabel, basenameNoExt, dirOf } from "./types.js";
-  import { selectorWireProblem } from "devops-console/engine/rules.js";
+  import { selectorEdgeProblem } from "devops-console/engine/rules.js";
   import { makeInfer } from "./lib/infer.js";
   import { GROUP_COLORS, GROUP_COLLAPSED_W, groupAABB, groupBoxOf, crossEdges, collapsedHeight, makeGroupNode } from "./lib/groups.js";
   import { toDocument } from "./lib/docIO.js";
@@ -642,7 +642,7 @@
         const tMeta = tgtNode && typeMap[tgtType];
         const tInps = tgtNode && !tgtUnknown ? effectiveInputs(tMeta, tgtNode.data, { edges, nodes, id: orig.target, metas: typeMap }) : [];
         const tInp = orig?.targetHandle ? tInps.find(i => i.id === orig.targetHandle) : tInps[0];
-        // selector 语义（in1 为准绳）：in1 未连而其余口有连线 / 源类型 ≠ in1 源类型 → 错误
+        // selector 语义（in1 为准绳，per-edge）：in1 边永不因此判错；其余口与 in1 源类型不同（或 in1 未连）→ 该边错误
         let selProblem = null;
         if (tMeta?.selectorInputs) {
           const wires = edges
@@ -654,7 +654,7 @@
               const o2 = x.sourceHandle ? outs2.find(o => o.id === x.sourceHandle) : outs2[0];
               return { targetHandle: x.targetHandle, srcType: o2?.type ?? "unknown" };
             });
-          selProblem = selectorWireProblem(wires);
+          selProblem = selectorEdgeProblem(wires, orig.targetHandle ?? null);
         }
         errEdge = srcUnknown || tgtUnknown || !out || !tInp ||
           (out && tInp && !canConnect(out.type, tInp.type)) || !!selProblem;

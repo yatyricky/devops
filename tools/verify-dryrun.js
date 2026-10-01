@@ -8,7 +8,7 @@ import assert from "assert";
 import path from "path";
 import url from "url";
 import { canConnect, SOCKET_TYPES } from "../engine/types.js";
-import { selectorWireProblem } from "../engine/rules.js";
+import { selectorWireProblem, selectorEdgeProblem } from "../engine/rules.js";
 import { validateWorkflow, validateTaskRunnable } from "../engine/workflow.js";
 import { NODE_TYPES, getInputs, getOutputs } from "../engine/nodes/index.js";
 import { loadWorkflows } from "../engine/registry.js";
@@ -1107,6 +1107,17 @@ await test("selectorWireProblem: in1 为准绳（in1 源类型定是非）", () 
     ])).includes("≠ string"), "异型口 → 错误（in1 源类型为准）");
     assert.strictEqual(selectorWireProblem([{ targetHandle: "in1", srcType: "string" }]), null, "仅 in1 → 无错");
     assert.ok(String(selectorWireProblem([{ targetHandle: "in2", srcType: "string" }])).includes("未连线"), "in1 未连 → 错误");
+});
+
+await test("selectorEdgeProblem: in1 边永不判错；异型口各自红", () => {
+    const wires = [
+        { targetHandle: "in1", srcType: "struct:{age:string}" },
+        { targetHandle: "in2", srcType: "string" },
+    ];
+    assert.strictEqual(selectorEdgeProblem(wires, "in1"), null, "in1 边恒绿（改 shape 后不连坐）");
+    assert.ok(String(selectorEdgeProblem(wires, "in2")).includes("≠ in1"), "异型口红");
+    assert.ok(String(selectorEdgeProblem(wires.slice(1), "in2")).includes("in1 未连线"), "in1 缺席时其余口红");
+    assert.strictEqual(selectorEdgeProblem(wires, null), null, "无 handle → 交给其它条件兜底");
 });
 
 await test("structSplit: 上游 selector（in1 接 struct.make）→ 派生形状串还原字段", () => {

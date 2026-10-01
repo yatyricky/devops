@@ -103,6 +103,24 @@ export function selectorWireProblem(wires) {
 }
 
 /**
+ * 单条 selector 入边的错误态（边装饰用，per-edge）：in1 是类型准绳——in1 自身的边永不因此判错；
+ * 其余口与 in1 源类型不同（或 in1 未连线）→ 该边错误。
+ * @param {{targetHandle: string, srcType: string}[]} wires 该 selector 节点全部数据入边
+ * @param {string | null} targetHandle 本边的 targetHandle
+ * @returns {string | null} 错误描述；null = 无错误
+ */
+export function selectorEdgeProblem(wires, targetHandle) {
+    const ws = wires ?? [];
+    if (!ws.length) return null;
+    if (targetHandle === "in1") return null;
+    const in1 = ws.find(w => w.targetHandle === "in1");
+    if (!in1) return "in1 未连线：类型未定";
+    const me = ws.find(w => w.targetHandle === targetHandle);
+    if (!me) return null; // 本边不可解由其它错误条件（!tInp）兜底
+    return me.srcType !== in1.srcType ? `类型 ≠ in1 的 ${in1.srcType}` : null;
+}
+
+/**
  * 节点有效输入 = 声明 + 动态。动态机制（按此顺序叠加，后者不覆盖前者同名口）：
  *   countInputs（path.resolve/string.join 等）：控件 key 为整数 N → prefix1..N 同型输入口；
  *   pairInputs（stage.copy）：每行双端口 pN.from / pN.to；

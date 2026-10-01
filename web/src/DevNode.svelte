@@ -265,7 +265,8 @@
     const k = String(newVals[key + "#k"] ?? "").trim();
     if (!k || !/^\w+$/.test(k)) return;
     const type = newVals[key + "#t"] ?? "string";
-    set(key, [...(get(key) ?? []), { key: k, type, value: type === "boolean" ? false : "" }]);
+    // boolean 字段不带 value 键 = undefined（三态开关初始未设置态；JSON 序列化自动省略该键）
+    set(key, [...(get(key) ?? []), type === "boolean" ? { key: k, type } : { key: k, type, value: "" }]);
     newVals[key + "#k"] = ""; newVals[key + "#t"] = "string";
   }
 </script>
