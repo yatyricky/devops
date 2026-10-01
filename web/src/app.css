@@ -152,3 +152,7 @@ textarea { font: 12px/1.5 var(--mono); }
 .tri-switch.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 30%, var(--panel2)); }
 .tri-switch:not(.on) .tri-mark { transform: translateX(-9px); }
 .tri-switch.on .tri-mark { color: var(--fg); }
+
+/* selector 单选输出：紧凑圆点（覆盖全局 input width:100%） */
+.selradio { width: 16px; height: 16px; min-width: 16px; padding: 0; margin-left: auto;
+  accent-color: var(--accent); cursor: pointer; flex: none; }

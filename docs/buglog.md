@@ -275,3 +275,8 @@
 5. **值类型色板**：number → #2dd4bf（蓝绿）、boolean → #818cf8（蓝紫）、string/struct 保持蓝系。
 - **回归**：verify 56→57 全绿（校验断言迁移 + selector/struct 新断言）；构建零警告；3199 实例实测（ssh.session 双口/selector radio 与 in1 语义/struct 三态与空字段/unknown 渲染——partial 见 FEAT 条目）。
 - **已知限制**：CUA 自动化无法建立画布新建连线（重连可以），selector 连线锁定流程的浏览器端到端验证需人工复核。
+
+## QoL-2026-09-30-06 selector radio 尺寸修正（用户反馈）
+
+- **现象**：selector 输入口的 radio 被全局 `input { width: 100% }` 拉满整行宽。
+- **修复**：app.css 增 `.selradio { width/height 16px; margin-left: auto; accent-color: var(--accent) }` 覆盖；radio 点击选择输出已验证（checked 写入 data.pick）。
