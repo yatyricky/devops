@@ -31,14 +31,20 @@ for (const raw of paths) {
         // 必须是仓库根（--show-toplevel 归一后等于自身）：误配非仓库路径时不能在其外层仓库执行 pull
         const top = git(dir, "rev-parse --show-toplevel");
         if (path.resolve(top) !== dir) throw new Error(`不是 git 仓库根（属于 ${top}）`);
+        const dirty = git(dir, "status --porcelain").length > 0;
         const branch = git(dir, "rev-parse --abbrev-ref HEAD");
+        if (dirty) console.warn(`${tag} ⚠ 本地有未提交改动（GUI 自动保存常导致），pull 可能被拒`);
         const out = git(dir, "pull --ff-only");
         const line = out.split("\n").map(s => s.trim()).filter(Boolean).pop() ?? "";
         if (/already up to date/i.test(out)) console.log(`${tag} ✓ (${branch}) already up to date`);
         else { console.log(`${tag} ✓ (${branch}) ${line}`); ok++; }
     } catch (e) {
-        const msg = String(e.stderr ?? e.message ?? e).split("\n").map(s => s.trim()).filter(Boolean).pop() ?? String(e);
-        console.warn(`${tag} ⚠ ${msg}（跳过，继续启动）`);
+        // git 的根因行（error: ...）在 Aborting 之前——去重全量打出；目录不存在等无 stderr 时回退 message
+        const seen = new Set();
+        const lines = [e.stdout, e.stderr].flatMap(s => String(s ?? "").split("\n"))
+            .map(s => s.trim())
+            .filter(l => l && l !== "Aborting" && !/^Command failed/.test(l) && !seen.has(l) && seen.add(l));
+        console.warn(`${tag} ⚠ ${lines.join(" | ") || String(e?.message ?? e)}（跳过，继续启动）`);
         warn++;
     }
 }

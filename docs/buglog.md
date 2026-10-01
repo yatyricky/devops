@@ -294,3 +294,4 @@
 2. **paths + preflight**：local-config.json 新增 `paths: []`；新建 tools/preflight.js（start.cmd 在 `node index.js` 前调 `node tools\preflight.js`）逐路径 `git pull --ff-only`（execSync timeout 30s）；任何失败（目录不存在/非仓库根/网络/冲突）打 ⚠ 警告继续，exit 恒 0——控制台可用性优先于 git 状态。
    - **实测修正**：最初用 `git rev-parse --is-inside-work-tree` 判仓库——它检测「在某工作树内」而非「目录本身是仓库根」，误配的普通子目录会对外层仓库执行 pull（危险）；改用 `--show-toplevel` 归一后必须等于目录自身。目录存在性先查（execSync 对不存在 cwd 报 spawnSync ENOENT，掩盖真实原因）。
 - **回归**：verify 57 绿；构建零警告；preflight 实测（.tmp 本地仓库 init+clone，源提交 v2 后 pull Fast-forward 生效、非仓库根/不存在目录警告跳过、空 paths 直接过）；GUI 实测（临时 wf 已删）：打开→lastOpened 落盘、API last 标记正确、刷新页面自动恢复该 wf。
+   - **排查（用户报 `⚠ Aborting` 不可读）**：devops-wfs 本地 xlgbis.json 有 GUI 自动保存写入的未提交改动，且落后 origin 2 个提交（远端最新也改了 xlgbis.json）→ pull --ff-only 拒绝覆盖未提交改动。preflight 原先错误信息 `.pop()` 只留最后一行 "Aborting"，根因行被截掉；改为去重全量打 error 行（filter "Aborting"/"Command failed" 样板），并在 pull 前检测脏树提前警告「GUI 自动保存常导致」。本地仓库复现验证。
