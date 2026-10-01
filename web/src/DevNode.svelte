@@ -386,7 +386,7 @@
     {#if meta?.widgets?.length}
       <div class="sep"></div>
       {#each meta.widgets as w (w.key)}
-        <label class="wrow nodrag">
+        <label class="wrow nodrag" class:structrow={w.kind === "struct"}>
           <span class="wlab" title={w.label}>{w.label}</span>
           {#if w.kind === "text"}
             <textarea rows="4" value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
@@ -460,6 +460,8 @@
               value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
               onchange={e => set(w.key, numOk(e.target.value) ? Number(e.target.value) : e.target.value)} />
           {:else if w.kind === "struct"}
+            <!-- 例外排版（QoL-2026-10-02-02）：label 整行左对齐；编辑区右 60%——key/type 对半、
+                 值槽（input 34px 定宽，与 tri-switch 同槽同宽）/删除按钮定宽右对齐，spacing 计入 60% -->
             <span class="tblwrap">
               {#each get(w.key) ?? [] as f, i}
                 <span class="trow">
@@ -478,7 +480,7 @@
                     <TriSwitch class="nodrag" value={f.value}
                       onchange={v => setField(w.key, i, "value", v)} />
                   {:else}
-                    <input class:winvalid={f.type === "number" && !numOk(f.value)} placeholder="值" value={f.value ?? ""}
+                    <input class="fval" class:winvalid={f.type === "number" && !numOk(f.value)} placeholder="值" value={f.value ?? ""}
                       onchange={e => setField(w.key, i, "value", e.target.value)} />
                   {/if}
                   <button class="mini danger" title="删除字段" onclick={() => set(w.key, (get(w.key) ?? []).filter((_, j) => j !== i))}>{@render trash(11)}</button>

@@ -71,6 +71,14 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode .body .wrow > .tblwrap, .devnode .body .wrow > .trow { flex: 1 1 0; min-width: 0; }
 .devnode .body .wrow > .tri-switch { margin-left: auto; align-self: center; }
 .devnode .body .wrow > .errline, .devnode .body .wrow > .kvline { flex-basis: 100%; }
+/* Make Struct 字段编辑器（例外排版）：label 整行左对齐；编辑区右 60% 右贴——
+   key/type 对半分剩余，值槽（fval=34 与 tri-switch 同槽同宽）/删除/＋定宽右对齐 */
+.devnode .body .wrow.structrow { display: block; }
+.devnode .body .wrow.structrow .wlab { width: 100%; }
+.devnode .body .wrow.structrow .tblwrap { width: 60%; margin-left: auto; }
+.devnode .body .wrow.structrow .trow > input:not(.fval), .devnode .body .wrow.structrow .trow > select { flex: 1 1 0; min-width: 0; }
+.devnode .body .wrow.structrow .trow > .fval { flex: none; width: 34px; }
+.devnode .body .wrow.structrow .trow > .tri-switch { flex: none; }
 .devnode .body input, .devnode .body select, .devnode .body textarea { font-size: 12px; padding: 2px 6px; border-radius: 4px; }
 .devnode .body textarea { resize: vertical; line-height: 1.5; }
 .devnode .body .ckb { width: auto; }
