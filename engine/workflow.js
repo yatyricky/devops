@@ -155,7 +155,7 @@ export function validateTaskRunnable(doc, taskName) {
             const problem = tarEntriesProblem(n);
             if (problem) problems.push(`节点 ${n.id}：${problem}`);
         }
-        // selector：in1 特殊语义（断开/类型变更 → 其余连线错误）
+        // selector：in1 为类型准绳（in1 未连而其余口有线 / 源类型 ≠ in1 源类型 → 错误）
         if (n.type === "select.one") {
             const wires = doc.edges
                 .filter(e => e.kind !== "seq" && e.target === n.id)
@@ -165,7 +165,7 @@ export function validateTaskRunnable(doc, taskName) {
                     const o = e.sourceHandle ? outs.find(x => x.id === e.sourceHandle) : outs[0];
                     return { targetHandle: e.targetHandle, srcType: o?.type ?? "unknown" };
                 });
-            const problem = selectorWireProblem(n.data, wires);
+            const problem = selectorWireProblem(wires);
             if (problem) problems.push(`节点 ${n.id}：${problem}`);
         }
     }

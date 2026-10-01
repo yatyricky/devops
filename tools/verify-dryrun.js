@@ -8,6 +8,7 @@ import assert from "assert";
 import path from "path";
 import url from "url";
 import { canConnect, SOCKET_TYPES } from "../engine/types.js";
+import { selectorWireProblem } from "../engine/rules.js";
 import { validateWorkflow, validateTaskRunnable } from "../engine/workflow.js";
 import { NODE_TYPES, getInputs, getOutputs } from "../engine/nodes/index.js";
 import { loadWorkflows } from "../engine/registry.js";
@@ -1052,26 +1053,83 @@ await test("struct 形状: 顺序无关同型 / 类型不同异型 / 键集不�
     assert.strictEqual(canConnect(A, A), true, "同型可连");
 });
 
-await test("select.one: 未锁定全部口 any；锁定后 in1..inN 全部为锁型", () => {
+await test("select.one: 类型派生自 in1 源出口（无 data.lockType）；未连 any；换源类型跟随", () => {
+    // in1 接 string.const → 全口 string、出口 value:string（data 无 lockType，纯派生）
     const doc = {
         nodes: [
-            { id: "s", type: "select.one", position: [0, 0], data: { lockType: "string", count: 2 } },
+            { id: "s", type: "select.one", position: [0, 0], data: { count: 2 } },
             { id: "a", type: "string.const", position: [0, 0], data: {} },
         ],
         edges: [{ id: "e1", source: "a", sourceHandle: "value", target: "s", targetHandle: "in1" }],
     };
     const ports = getInputs(doc.nodes[0], doc);
     assert.deepStrictEqual(ports.map(p => p.id), ["in1", "in2"], "count=2 → in1/in2");
-    assert.ok(ports.every(p => p.type === "string"), "锁定后全部口为 string");
+    assert.ok(ports.every(p => p.type === "string"), "in1 准绳派生：全部口为 string");
+    const outs = getOutputs(doc.nodes[0], doc);
+    assert.deepStrictEqual(outs, [{ id: "value", type: "string" }], "出口类型随 in1 派生");
+    // 换接 struct.make 源（data.lockType 残留 string 也不影响）→ 全口与出口跟随变形状 struct
+    const follow = structuredClone(doc);
+    follow.nodes.push({ id: "m", type: "struct.make", position: [0, 0], data: { fields: [{ key: "age", type: "number" }, { key: "name", type: "string" }] } });
+    follow.nodes[0].data.lockType = "string"; // 遗留残留值
+    follow.edges = [{ id: "e2", source: "m", sourceHandle: "struct", target: "s", targetHandle: "in1" }];
+    const shape = "struct:{age:number,name:string}";
+    assert.ok(getInputs(follow.nodes[0], follow).every(p => p.type === shape), "in1 换源类型跟随（struct 形状）");
+    assert.deepStrictEqual(getOutputs(follow.nodes[0], follow), [{ id: "value", type: shape }], "出口跟随变形状");
     const bare = getInputs({ id: "s2", type: "select.one", data: {} }, { nodes: [], edges: [] });
     assert.deepStrictEqual(bare.map(p => p.id), ["in1"]);
-    assert.strictEqual(bare[0].type, "any");
+    assert.strictEqual(bare[0].type, "any", "in1 未连 → any");
+});
+
+await test("select.one: 两 selector 互连环 → 派生熔断（depth>8），不炸引擎", () => {
+    const doc = {
+        nodes: [
+            { id: "sa", type: "select.one", position: [0, 0], data: { count: 1 } },
+            { id: "sb", type: "select.one", position: [0, 0], data: { count: 1 } },
+        ],
+        edges: [
+            { id: "ea", source: "sb", sourceHandle: "value", target: "sa", targetHandle: "in1" },
+            { id: "eb", source: "sa", sourceHandle: "value", target: "sb", targetHandle: "in1" },
+        ],
+    };
+    const ports = getInputs(doc.nodes[0], doc);
+    assert.strictEqual(ports[0].type, "any", "环熔断回退 any");
+    assert.deepStrictEqual(getOutputs(doc.nodes[0], doc), [], "环熔断出口为空");
+});
+
+await test("selectorWireProblem: in1 为准绳（in1 源类型定是非）", () => {
+    assert.strictEqual(selectorWireProblem([
+        { targetHandle: "in1", srcType: "string" },
+        { targetHandle: "in2", srcType: "string" },
+    ]), null, "全部与 in1 同型 → 无错");
+    assert.ok(String(selectorWireProblem([
+        { targetHandle: "in1", srcType: "string" },
+        { targetHandle: "in2", srcType: "number" },
+    ])).includes("≠ string"), "异型口 → 错误（in1 源类型为准）");
+    assert.strictEqual(selectorWireProblem([{ targetHandle: "in1", srcType: "string" }]), null, "仅 in1 → 无错");
+    assert.ok(String(selectorWireProblem([{ targetHandle: "in2", srcType: "string" }])).includes("未连线"), "in1 未连 → 错误");
+});
+
+await test("structSplit: 上游 selector（in1 接 struct.make）→ 派生形状串还原字段", () => {
+    const doc = {
+        nodes: [
+            { id: "m", type: "struct.make", position: [0, 0], data: { fields: [{ key: "age", type: "number" }, { key: "name", type: "string" }] } },
+            { id: "s", type: "select.one", position: [0, 0], data: { count: 1 } },
+            { id: "sp", type: "struct.split", position: [0, 0], data: {} },
+        ],
+        edges: [
+            { id: "e1", source: "m", sourceHandle: "struct", target: "s", targetHandle: "in1" },
+            { id: "e2", source: "s", sourceHandle: "value", target: "sp", targetHandle: "struct" },
+        ],
+    };
+    const outs = getOutputs(doc.nodes[2], doc);
+    assert.deepStrictEqual(outs.map(o => o.id), ["age", "name"], "形状串解析还原字段（字母序）");
+    assert.deepStrictEqual(outs.map(o => o.type), ["number", "string"]);
 });
 
 await test("select.one: 运行前校验拒绝不存在的口名（骨架校验不拦保存）", () => {
     const base = {
         nodes: [
-            { id: "s", type: "select.one", position: [0, 0], data: { lockType: "string", count: 2 } },
+            { id: "s", type: "select.one", position: [0, 0], data: { count: 2 } },
             { id: "a", type: "string.const", position: [0, 0], data: {} },
         ],
         edges: [{ id: "e1", source: "a", sourceHandle: "value", target: "s", targetHandle: "in1" }],

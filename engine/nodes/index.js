@@ -14,25 +14,25 @@ export const NODE_TYPES = Object.fromEntries(
 
 /**
  * 某节点实例的有效输入列表 = 声明输入 + 动态输入（规则见 rules.js effectiveInputs，
- * 与前端共用同一实现）。selectorInputs 按已接入边推导专用口，需要图上下文。
+ * 与前端共用同一实现）。selector 类型准绳按已接入边推导，需要图上下文 + metas。
  * @param {any} node
  * @param {any} [graph] { nodes, edges }
  */
 export function getInputs(node, graph) {
     const def = NODE_TYPES[node.type];
     if (!def) throw new Error(`未知节点类型: ${node.type}`);
-    return effectiveInputs(def, node.data, { edges: graph?.edges, nodes: graph?.nodes, id: node.id });
+    return effectiveInputs(def, node.data, { edges: graph?.edges, nodes: graph?.nodes, id: node.id, metas: NODE_TYPES });
 }
 
 /**
  * 节点有效输出列表 = 声明输出，或按 dynamicOutputs 规则解析（规则见 rules.js effectiveOutputs）。
  * @param {any} node
- * @param {any} [graph] { nodes, edges }（structSplit 回溯上游需要）
+ * @param {any} [graph] { nodes, edges }（structSplit/selectorOut 回溯上游需要）
  */
 export function getOutputs(node, graph) {
     const def = NODE_TYPES[node.type];
     if (!def) throw new Error(`未知节点类型: ${node.type}`);
-    return effectiveOutputs(def, node.data, { edges: graph?.edges, nodes: graph?.nodes, id: node.id });
+    return effectiveOutputs(def, node.data, { edges: graph?.edges, nodes: graph?.nodes, id: node.id, metas: NODE_TYPES });
 }
 
 /**

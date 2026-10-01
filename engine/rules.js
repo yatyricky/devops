@@ -68,21 +68,38 @@ export function isTunnelEdge(e) {
 }
 
 /**
- * selector 连线错误态（in1 特殊语义）：in1 未连线而其余口有连线 → 全部连线错误；
- * in1 已连（lockType 已定）→ 源类型 ≠ lockType 的连线错误。
- * @param {any} data 节点 data（lockType）
+ * selector 的类型准绳（in1 派生）：in1 已连线 → 递归推导源出口类型作为 lockType；
+ * 未连线/不可解/环超深 → undefined。data.lockType 是历史遗留持久字段，仅作兜底，不再写入。
+ * @param {{edges?: any[], nodes?: any[], id?: string, metas?: any, depth?: number}} env
+ * @param {number} [depth]
+ * @returns {string | undefined}
+ */
+export function selectorLockType(env, depth = 0) {
+    if (depth > 8) return undefined;
+    const e = (env?.edges ?? []).find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === env?.id && x.targetHandle === "in1");
+    if (!e) return undefined;
+    const src = (env?.nodes ?? []).find(n => n.id === e.source);
+    if (!src) return undefined;
+    const srcMeta = (env?.metas ?? {})[src.data?.__type ?? src.type];
+    if (!srcMeta) return undefined;
+    const outs = effectiveOutputs(srcMeta, src.data, { ...env, id: src.id, depth: depth + 1 });
+    return (e.sourceHandle ? outs.find(o => o.id === e.sourceHandle) : outs[0])?.type;
+}
+
+/**
+ * selector 连线错误态（in1 特殊语义，in1 为类型准绳）：in1 未连线而其余口有连线 → 全部连线错误；
+ * in1 已连 → 其余口源类型 ≠ in1 源类型的连线错误（in1 源类型变化时其余口跟随判定，in1 自身永不判错）。
  * @param {{targetHandle: string, srcType: string}[]} wires 该节点全部数据入边（handle + 源出口类型）
  * @returns {string | null} 错误描述；null = 无错误
  */
-export function selectorWireProblem(data, wires) {
+export function selectorWireProblem(wires) {
     const ws = wires ?? [];
     if (!ws.length) return null;
     const in1 = ws.find(w => w.targetHandle === "in1");
     if (!in1) return "首个输入（in1）未连线：类型未定，其余连线无效";
-    const lock = data?.lockType;
-    if (!lock) return "in1 已连线但类型未锁定";
-    const bad = ws.filter(w => w.targetHandle !== "in1" && w.srcType !== lock);
-    return bad.length ? `存在类型 ≠ ${lock} 的输入连线` : null;
+    if (!in1.srcType) return "in1 源出口类型不可解";
+    const bad = ws.filter(w => w.targetHandle !== "in1" && w.srcType !== in1.srcType);
+    return bad.length ? `存在类型 ≠ ${in1.srcType} 的输入连线` : null;
 }
 
 /**
@@ -91,11 +108,11 @@ export function selectorWireProblem(data, wires) {
  *   pairInputs（stage.copy）：每行双端口 pN.from / pN.to；
  *   tplVars（template.render）：模板路径可推导 → 各 {{VAR}} string 口；不可推导 → 降级一个 struct 口；
  *   fieldInputs（struct.make）：data.fields 每字段 → 同名同型输入口（连线覆盖手填）；
- *   selectorInputs（select.one）：开放口 in（类型 = lockType ?? any）+ 每条已接入边一个专用口 in-<源id>；
+ *   selectorInputs（select.one）：in1..inN 口（countInputs 生成），类型 = in1 源出口类型（selectorLockType 派生）；
  *   dynamicInputs（文本占位符）：{{name}} → string 口；{{obj.key}} → any 口。
  * @param {any} meta 节点类型定义（注册表条目或 /api/node-types 元数据，二者字段同构）
  * @param {any} data 节点 data
- * @param {{edges?: any[], nodes?: any[], id?: string}} [env] selectorInputs 推导已接入边需要图
+ * @param {{edges?: any[], nodes?: any[], id?: string, metas?: any}} [env] selector 派生 in1 源类型需要图 + metas
  */
 export function effectiveInputs(meta, data, env = {}) {
     const declared = (meta?.inputs ?? []).map(i => ({ ...i, dynamic: false }));
@@ -140,9 +157,10 @@ export function effectiveInputs(meta, data, env = {}) {
         all = [...all, ...fieldPorts];
     }
     if (meta?.selectorInputs) {
-        // 选择器：输入口类型由 lockType 决定（in1 首连线锁定，见 App onConnect）；未锁定 = any。
-        // 口位由 countInputs 生成（in1..inN），此处统一覆盖类型。
-        const lockType = data?.lockType ?? "any";
+        // 选择器：in1 永远是类型准绳——全部 in1..inN 口类型 = in1 源出口类型（实时派生，
+        // 上游变化即跟随）。有图上下文时纯派生（残留 data.lockType 不得挡新连线）；无图
+        // （老调用 getInputs(node)）才允许遗留 lockType 兜底；未连 in1 → any。
+        const lockType = selectorLockType(env) ?? (env?.edges ? "any" : data?.lockType) ?? "any";
         for (const p of all) {
             if (/^in\d+$/.test(p.id)) p.type = lockType;
         }
@@ -162,12 +180,14 @@ export function effectiveInputs(meta, data, env = {}) {
 
 /**
  * 节点有效输出 = 声明输出，或按 dynamicOutputs 规则解析。
- * structSplit：回溯入边上游 struct.make 的字段定义按序输出；上游不是 struct.make 或未接线 → []。
- * selectorOut：已锁定（data.lockType）→ 单出口 value（锁型）；未锁定 → []。
+ * structSplit：回溯入边上游 struct.make 的字段定义按序输出；上游 selector（in1 接 struct 形状）→ 解析
+ * 形状串还原字段（字母序）；其余/未接线 → []。
+ * selectorOut：in1 已连（类型准绳派生）→ 单出口 value（in1 源出口类型）；未连 → []。
  * structMake：按 data.fields 输出带形状的 struct 类型串（structShape）。
  * @param {any} meta
  * @param {any} data
- * @param {{edges?: any[], nodes?: any[], id?: string}} [env] structSplit 回溯上游需要（nodes 的类型键为 type）
+ * @param {{edges?: any[], nodes?: any[], id?: string, metas?: any, depth?: number}} [env] structSplit/
+ *   selectorOut 回溯上游需要（nodes 的类型键为 type；metas 供递归取源 meta；depth 防环）
  */
 export function effectiveOutputs(meta, data, env = {}) {
     if (meta?.dynamicOutputs === "structSplit") {
@@ -177,10 +197,12 @@ export function effectiveOutputs(meta, data, env = {}) {
         if (src?.type === "struct.make") {
             return (src.data?.fields ?? []).filter(f => f.key).map(f => ({ id: f.key, type: f.type ?? "string" }));
         }
-        // 上游 selector（锁定了 struct 形状）：解析 canonical 形状串还原字段（字母序）
-        const lock = src?.data?.lockType;
-        if (typeof lock === "string" && lock.startsWith("struct:{")) {
-            return lock.slice("struct:{".length, -1)
+        // 上游 selector：value 出口类型 = in1 派生 lock（可能是 struct 形状串）→ 解析 canonical 串还原字段（字母序）
+        const srcMeta = (env?.metas ?? {})[src?.data?.__type ?? src?.type];
+        const lock = srcMeta ? selectorLockType({ ...env, id: src.id }) : undefined;
+        const t = (typeof lock === "string" && lock !== "any" ? lock : env?.edges ? undefined : src?.data?.lockType);
+        if (typeof t === "string" && t.startsWith("struct:{")) {
+            return t.slice("struct:{".length, -1)
                 .split(",").filter(Boolean)
                 .map(kv => {
                     const i = kv.indexOf(":");
@@ -195,7 +217,9 @@ export function effectiveOutputs(meta, data, env = {}) {
         return [{ id: "struct", type: structShape(data?.fields) }];
     }
     if (meta?.dynamicOutputs === "selectorOut") {
-        return data?.lockType ? [{ id: "value", type: data.lockType }] : [];
+        // 有图上下文纯派生；无图（老调用）才允许遗留 lockType 兜底
+        const lock = selectorLockType(env, env?.depth ?? 0) ?? (env?.edges ? undefined : data?.lockType);
+        return lock ? [{ id: "value", type: lock }] : [];
     }
     return meta?.outputs ?? [];
 }

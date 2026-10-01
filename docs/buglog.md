@@ -295,3 +295,9 @@
    - **实测修正**：最初用 `git rev-parse --is-inside-work-tree` 判仓库——它检测「在某工作树内」而非「目录本身是仓库根」，误配的普通子目录会对外层仓库执行 pull（危险）；改用 `--show-toplevel` 归一后必须等于目录自身。目录存在性先查（execSync 对不存在 cwd 报 spawnSync ENOENT，掩盖真实原因）。
 - **回归**：verify 57 绿；构建零警告；preflight 实测（.tmp 本地仓库 init+clone，源提交 v2 后 pull Fast-forward 生效、非仓库根/不存在目录警告跳过、空 paths 直接过）；GUI 实测（临时 wf 已删）：打开→lastOpened 落盘、API last 标记正确、刷新页面自动恢复该 wf。
    - **排查（用户报 `⚠ Aborting` 不可读）**：devops-wfs 本地 xlgbis.json 有 GUI 自动保存写入的未提交改动，且落后 origin 2 个提交（远端最新也改了 xlgbis.json）→ pull --ff-only 拒绝覆盖未提交改动。preflight 原先错误信息 `.pop()` 只留最后一行 "Aborting"，根因行被截掉；改为去重全量打 error 行（filter "Aborting"/"Command failed" 样板），并在 pull 前检测脏树提前警告「GUI 自动保存常导致」。本地仓库复现验证。
+
+## BUG-2026-10-01-01 selector in1 类型准绳化 + TriSwitch 组件统一三处开关（用户报两项）
+
+1. **selector 类型随 in1 变化（in1 永远是类型准绳）**：b88baf9 的 lockType 是持久字段（onConnect 首连线写入）——之后 in1 源出口类型变化时不同步，连线反被判错。改为**纯派生**：rules.js 新增 `selectorLockType(env, depth)` 递归推导 in1 源出口类型（env.metas 取源 meta，depth>8 防环熔断）；effectiveInputs/selectorOut/structSplit（上游 selector 形状串解析）全部走派生；删 App 三段 lockType 写/同步/清逻辑。**实测发现遗留兜底有害**：删 in1 边后残留 data.lockType 会把端口锁在旧类型、挡住新连线——修正为「有图上下文纯派生（残留忽略），无图（老 getInputs(node) 调用）才兜底遗留值」。删除 in1 边 → 端口回 any、出口消失（下游由死边清理断开）。
+2. **TriSwitch 组件化（DRY）**：三处开关统一为新组件 web/src/TriSwitch.svelte——struct boolean 字段值（tri 三态：undefined 空轨无滑块/false 暗滑块左/true accent 滑块右，循环 undefined→true→false→undefined）、boolean widget（2 态，值恒 bool）、taskbar 吸附/说明（2 态）。外观对齐吸附开关 .track（34×18）；role=switch+aria；样式 scoped（删 app.css .tri-switch 旧块与 T/F/- 文字标记；App .switch 只留布局）。**Svelte 5 陷阱**：`let { value = false } = $props()` 会把显式传入的 undefined 吞成默认值 false（undefined 态永不出现）——value 必须无默认值解构。
+- **回归**：verify 57→60 绿（select.one 派生/换源跟随/环熔断/selectorWireProblem 新签名/structSplit 上游 selector 断言）；构建零警告；3010 实测（临时 wf 已删）：in1 未连=any→接 struct 源全链跟随 struct_1 无红线；三处开关点击循环全对。

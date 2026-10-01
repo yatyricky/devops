@@ -16,6 +16,7 @@
   import TypeEdge from "./TypeEdge.svelte";
   import OpenModal from "./OpenModal.svelte";
   import UnknownNode from "./UnknownNode.svelte";
+  import TriSwitch from "./TriSwitch.svelte";
   import RunModal from "./RunModal.svelte";
 
   // ── 全局状态 ────
@@ -77,7 +78,7 @@
       const n = nodes.find(x => x.id === nodeId);
       if (!n) return undefined;
       const meta = ui.nodeTypesMap[n.type];
-      return effectiveOutputs(meta, n.data, { edges, nodes, id: nodeId });
+      return effectiveOutputs(meta, n.data, { edges, nodes, id: nodeId, metas: typeMap });
     },
     /** Group 隧道：某组的跨组边（入 = 组外→组内；出 = 组内→组外），与编号 effect 同序 */
     groupEdges(gid) {
@@ -110,7 +111,7 @@
       if (!n) return "";
       const meta = ui.nodeTypesMap[n.type];
       const head = nodeTitle(meta, n.data);
-      const port = (side === "in" ? effectiveInputs(meta, n.data, { edges, nodes, id: nid }) : effectiveOutputs(meta, n.data, { edges, nodes, id: nid }))
+      const port = (side === "in" ? effectiveInputs(meta, n.data, { edges, nodes, id: nid, metas: typeMap }) : effectiveOutputs(meta, n.data, { edges, nodes, id: nid, metas: typeMap }))
         .find(p => p.id === hid);
       if (!port) return head;
       return `${head}: ${portLabel(port)}${side === "in" && port.required ? "*" : ""}`;
@@ -124,7 +125,7 @@
     resolveInputs(nodeId) {
       const n = nodes.find(x => x.id === nodeId);
       if (!n) return [];
-      return effectiveInputs(typeMap[n.data?.__type ?? n.type], n.data, { edges, nodes, id: nodeId });
+      return effectiveInputs(typeMap[n.data?.__type ?? n.type], n.data, { edges, nodes, id: nodeId, metas: typeMap });
     },
     /** 编辑期输出推断：path.resolve → 拼接推断值；string.join → 分隔符拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
     inferOutput(nodeId) {
@@ -287,7 +288,7 @@
     const nextData = { ...node.data, [key]: value };
     const meta = typeMap[node.type];
     // 图上下文必传：selector 专用口（in-<src>）按已接入边推导，缺 env 会把专用口连线整批误删
-    const valid = new Set(effectiveInputs(meta, nextData, { edges, nodes, id: nodeId }).map(i => i.id));
+    const valid = new Set(effectiveInputs(meta, nextData, { edges, nodes, id: nodeId, metas: typeMap }).map(i => i.id));
     const kept = edges.filter(e => e.target !== node.id || valid.has(e.targetHandle));
     nodes = nodes.map(n => (n.id === nodeId ? { ...n, data: nextData } : n));
     if (kept.length !== edges.length) edges = kept;
@@ -434,10 +435,10 @@
     if (!sMeta || !tMeta) return "节点类型未知";
     // 动态出口节点（struct.split）必须经 effectiveOutputs 解析，声明 outputs 为空
     const outs = sMeta.dynamicOutputs
-      ? effectiveOutputs(sMeta, src.data, { edges, nodes, id: src.id })
+      ? effectiveOutputs(sMeta, src.data, { edges, nodes, id: src.id, metas: typeMap })
       : (sMeta.outputs ?? []);
     const o = (p.sourceHandle ? outs.find(x => x.id === p.sourceHandle) : outs[0]) ?? outs[0];
-    const inps = effectiveInputs(tMeta, tgt.data, { edges, nodes, id: tgt.id }); // selector 专用口按已接入边推导
+    const inps = effectiveInputs(tMeta, tgt.data, { edges, nodes, id: tgt.id, metas: typeMap }); // selector 专用口按已接入边推导
     const i = p.targetHandle ? inps.find(x => x.id === p.targetHandle) : inps[0];
     if (!o || !i) return "插槽不存在（节点配置可能已变化）";
     if (!canConnect(o.type, i.type)) return `类型不兼容：${o.type}（${src.id}.${o.id}）→ ${i.type}（${tgt.id}.${i.id}）`;
@@ -479,15 +480,7 @@
         delete next[p.targetHandle];
         onData(p.target, "lit", next);
       }
-      // selector：in1 首连线锁定全部端口与出口类型
-      const tMeta = tNode && typeMap[tNode.data?.__type ?? tNode.type];
-      if (tMeta?.selectorInputs && p.targetHandle === "in1" && p.source) {
-        const src = nodes.find(n => n.id === p.source);
-        const sMeta = src && typeMap[src.data?.__type ?? src.type];
-        const outs = sMeta ? effectiveOutputs(sMeta, src.data, { edges, nodes, id: p.source }) : [];
-        const o = p.sourceHandle ? outs.find(x => x.id === p.sourceHandle) : outs[0];
-        if (o?.type && tNode.data?.lockType !== o.type) onData(p.target, "lockType", o.type);
-      }
+      // selector 类型无需写入：in1 永远是类型准绳（rules.js 按 in1 源出口实时派生）
     }
     markCritical();
   }
@@ -498,21 +491,8 @@
     if (connectionRejectReason({ source: reconnected.source, sourceHandle: reconnected.sourceHandle, target: reconnected.target, targetHandle: reconnected.targetHandle, selfId: old.id }) !== null) return undefined;
     return reconnected;
   }
-  /** 重连成功：标脏（装饰 effect 自动跟随新端点校正类型色/zIndex/动画）；selector in1 重连变更类型时更新 lockType */
-  function onReconnect() {
-    markCritical();
-    for (const t of nodes) {
-      const meta = typeMap[t.data?.__type ?? t.type];
-      if (!meta?.selectorInputs) continue;
-      const e1 = edges.find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === t.id && x.targetHandle === "in1");
-      if (!e1) continue;
-      const src = nodes.find(n => n.id === e1.source);
-      const sMeta = src && typeMap[src.data?.__type ?? src.type];
-      const outs = sMeta ? effectiveOutputs(sMeta, src.data, { edges, nodes, id: e1.source }) : [];
-      const o = e1.sourceHandle ? outs.find(x => x.id === e1.sourceHandle) : outs[0];
-      if (o?.type && t.data?.lockType !== o.type) onData(t.id, "lockType", o.type);
-    }
-  }
+  /** 重连成功：标脏（装饰 effect 自动跟随新端点校正类型色/zIndex/动画）；selector 类型随 in1 派生，无需同步 */
+  function onReconnect() { markCritical(); }
   /** @param {{ nodes: any[], edges: any[] }} p xyflow 内置删除键（DEL/Backspace）触发；收起态隧道段边不可删 */  function onBeforeDelete({ nodes: delNodes, edges: delEdges }) {
     if (delNodes.length && !confirm(`确认删除 ${delNodes.length} 个节点（${delNodes.map(n => n.id).join("、")}）？`)) return false;
     if (!confirmTaskRemoval(delNodes.map(n => n.id))) return false;
@@ -651,7 +631,7 @@
         const tgt = orig && nodeByIdMap.get(orig.target);
         const srcType = src?.data?.__type ?? src?.type;
         const meta = src && typeMap[srcType];
-        const outs = meta ? effectiveOutputs(meta, src.data, { edges, nodes, id: orig.source }) : [];
+        const outs = meta ? effectiveOutputs(meta, src.data, { edges, nodes, id: orig.source, metas: typeMap }) : [];
         const out = orig?.sourceHandle ? outs.find(o => o.id === orig.sourceHandle) : outs[0];
         const color = TYPE_COLORS[typeColorKey(out?.type)] ?? "#8a97a8"; // 带形状 struct 归入 struct 色键
         // 错误态：源出口/handle 无法解析、目标类型未知、目标输入口缺失或类型不兼容
@@ -660,9 +640,9 @@
         const tgtType = tgtNode?.data?.__type ?? tgtNode?.type;
         const tgtUnknown = !tgtNode || !typeMap[tgtType];
         const tMeta = tgtNode && typeMap[tgtType];
-        const tInps = tgtNode && !tgtUnknown ? effectiveInputs(tMeta, tgtNode.data) : [];
+        const tInps = tgtNode && !tgtUnknown ? effectiveInputs(tMeta, tgtNode.data, { edges, nodes, id: orig.target, metas: typeMap }) : [];
         const tInp = orig?.targetHandle ? tInps.find(i => i.id === orig.targetHandle) : tInps[0];
-        // selector 语义：in1 未连而其余口有连线 / 源类型 ≠ lockType → 错误
+        // selector 语义（in1 为准绳）：in1 未连而其余口有连线 / 源类型 ≠ in1 源类型 → 错误
         let selProblem = null;
         if (tMeta?.selectorInputs) {
           const wires = edges
@@ -670,11 +650,11 @@
             .map(x => {
               const s2 = nodeByIdMap.get(x.source);
               const m2 = s2 && typeMap[s2.data?.__type ?? s2.type];
-              const outs2 = m2 ? effectiveOutputs(m2, s2.data, { edges, nodes, id: x.source }) : [];
+              const outs2 = m2 ? effectiveOutputs(m2, s2.data, { edges, nodes, id: x.source, metas: typeMap }) : [];
               const o2 = x.sourceHandle ? outs2.find(o => o.id === x.sourceHandle) : outs2[0];
               return { targetHandle: x.targetHandle, srcType: o2?.type ?? "unknown" };
             });
-          selProblem = selectorWireProblem(tgtNode.data, wires);
+          selProblem = selectorWireProblem(wires);
         }
         errEdge = srcUnknown || tgtUnknown || !out || !tInp ||
           (out && tInp && !canConnect(out.type, tInp.type)) || !!selProblem;
@@ -696,20 +676,12 @@
   // ── 动态出口：源节点的有效出口不含某边的 sourceHandle 时，该边自动消失 ────
   // 例：struct.split 的上游字段删除 → 对应出口上的连线随之断开。出口列表未知（[] 由规则明确给出）也删。
   $effect(() => {
-    // selector 解锁：全部输入边被删 → 无法推导类型，清 lockType（outputs 变 []，下游边由死边清理断开）
-    for (const n of nodes) {
-      const meta = typeMap[n.data?.__type ?? n.type];
-      if (meta?.selectorInputs && n.data?.lockType !== undefined) {
-        const hasIn = edges.some(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === n.id);
-        if (!hasIn) onData(n.id, "lockType", undefined);
-      }
-    }
     const dead = edges.filter(e => {
       if (e.kind === "seq" || isTunnelEdge(e)) return false; // tnl- 是派生段边（伪句柄），删除会与隧道 effect 无限乒乓
       const src = nodes.find(n => n.id === e.source);
       const meta = typeMap[src?.data?.__type ?? src?.type];
       if (!src || !meta) return false;
-      const outs = effectiveOutputs(meta, src.data, { edges, nodes, id: e.source });
+      const outs = effectiveOutputs(meta, src.data, { edges, nodes, id: e.source, metas: typeMap });
       return !outs.some(o => o.id === e.sourceHandle);
     });
     if (dead.length) {
@@ -854,12 +826,10 @@
     <button title="把当前选中的多个节点编为一组" disabled={groupableIds.length < 2} onclick={groupSelected}>组合</button>
     <button title="拆散选中的分组（成员位置不动）" disabled={!selectedGroupBox} onclick={ungroupSelected}>拆分</button>
     <label class="switch" title="开启后移动节点按 16px 网格吸附（以节点左上角为基准）">
-      <input type="checkbox" bind:checked={snapOn} onchange={snapChange} />
-      <span class="track"></span>吸附
+      <TriSwitch value={snapOn} onchange={v => { snapOn = v; snapChange(); }} />吸附
     </label>
     <label class="switch" title="一键展开/收起所有节点的说明（ndesc）">
-      <input type="checkbox" checked={ui.descAllOpen} onchange={() => { ui.descAllOpen = !ui.descAllOpen; ui.descAllTick++; }} />
-      <span class="track"></span>说明
+      <TriSwitch value={ui.descAllOpen} onchange={v => { ui.descAllOpen = v; ui.descAllTick++; }} />说明
     </label>
   </div>
 
@@ -961,16 +931,8 @@
   .definer .row input { width: auto; flex: 1; }
   .mut { display: flex; gap: 6px; align-items: center; font-size: 13px; }
   .mut input { width: auto; }
-  /* 开关（吸附/说明统一）：关=灰滑块居左，开=accent 滑块居右 */
+  /* 开关（吸附/说明）：布局容器；滑块样式在 TriSwitch 组件内 */
   .switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; user-select: none; }
-  .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-  .switch .track { width: 34px; height: 18px; border-radius: 999px; background: var(--panel2);
-    border: 1px solid var(--line); position: relative; transition: background .15s, border-color .15s; flex: none; }
-  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
-    border-radius: 50%; background: var(--dim); transition: left .15s, background .15s; }
-  .switch input:checked + .track { background: color-mix(in srgb, var(--accent) 30%, var(--panel2)); border-color: var(--accent); }
-  .switch input:checked + .track::after { left: 18px; background: var(--accent); }
-  .switch input:focus-visible + .track { outline: 1px solid var(--accent); }
   .dim { color: var(--dim); font-size: 12px; }
   .mono { font-family: var(--mono); }
 </style>

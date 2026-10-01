@@ -161,7 +161,7 @@ export default [
         selectorInputs: true,
         countInputs: { key: "count", prefix: "in", min: 1, max: 16 },
         dynamicOutputs: "selectorOut",
-        desc: "多路选择器：N 路同类型输入，单选其中一路作为输出。首个连线（in1）锁定全部端口与出口类型；in1 断开或类型变更时其余连线进入错误态；未选输入或有错误时不可运行。",
+        desc: "多路选择器：N 路同类型输入，单选其中一路作为输出。in1 永远是类型准绳：全部端口与出口的类型随 in1 源出口实时变化；in1 未连线时其余连线无效，与 in1 类型不同的连线为错误态；未选输入或有错误时不可运行。",
         inputs: [],
         outputs: [],
         widgets: [{ key: "count", label: "输入个数（1-16）", kind: "stepper", min: 1, max: 16, serializable: true, default: 1 }],

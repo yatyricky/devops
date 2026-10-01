@@ -5,6 +5,7 @@
   import { expandHomeLocal } from "./lib/infer.js";
   import { api } from "./api.js";
   import { ui } from "./store.svelte.js";
+  import TriSwitch from "./TriSwitch.svelte";
 
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
@@ -390,8 +391,7 @@
             <textarea rows="4" value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
               oninput={e => set(w.key, e.target.value)}></textarea>
           {:else if w.kind === "boolean"}
-            <input type="checkbox" class="ckb" checked={get(w.key) ?? w.default}
-              onchange={e => set(w.key, e.target.checked)} />
+            <TriSwitch value={get(w.key) ?? w.default} onchange={v => set(w.key, v)} />
           {:else if w.kind === "enum"}
             <select value={get(w.key) ?? w.default} onchange={e => set(w.key, e.target.value)}>
               {#each w.options as o}<option value={o}>{o}</option>{/each}
@@ -473,13 +473,8 @@
                     <span class="wired" title="已连线：该字段值来自上游">🔗</span>
                   {:else if f.type === "boolean"}
                     <!-- 三态轨道开关：undefined 空轨 / false 滑块左(暗) / true 滑块右(亮)；点击循环 -->
-                    <button type="button" class="tri-switch nodrag" class:on={f.value === true}
-                      class:unset={f.value === undefined}
-                      title={f.value === true ? "true（点击变 false）" : f.value === false ? "false（点击变 true）" : "未设置（点击变 true）"}
-                      onclick={() => setField(w.key, i, "value", f.value === true ? false : f.value === false ? undefined : true)}>
-                      <span class="knob"></span>
-                      <span class="tri-mark">{f.value === true ? "T" : f.value === false ? "F" : "—"}</span>
-                    </button>
+                    <TriSwitch tri class="nodrag" value={f.value}
+                      onchange={v => setField(w.key, i, "value", v)} />
                   {:else}
                     <input class:winvalid={f.type === "number" && !numOk(f.value)} placeholder="值" value={f.value ?? ""}
                       onchange={e => setField(w.key, i, "value", e.target.value)} />
