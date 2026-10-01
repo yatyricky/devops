@@ -142,3 +142,13 @@ textarea { font: 12px/1.5 var(--mono); }
 .svelte-flow__controls-button:hover { background: var(--panel); border-color: var(--accent); }
 .svelte-flow__controls-button svg { fill: currentColor; }
 .svelte-flow__controls-button:disabled { pointer-events: none; }
+
+/* boolean 三态轨道开关（struct 字段值）：undefined=空轨 / false=滑块左(暗) / true=滑块右(亮) */
+.tri-switch { position: relative; display: inline-block; width: 38px; height: 18px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel2); cursor: pointer; padding: 0; vertical-align: middle; }
+.tri-switch .tri-mark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 9px; color: var(--dim); font-family: var(--mono, Consolas, monospace); pointer-events: none; }
+.tri-switch .knob { display: none; }
+.tri-switch.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 30%, var(--panel2)); }
+.tri-switch:not(.on) .tri-mark { transform: translateX(-9px); }
+.tri-switch.on .tri-mark { color: var(--fg); }

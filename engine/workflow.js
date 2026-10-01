@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { canConnect, coerce } from "./types.js";
+import { canConnect, coerce, selectorWireProblem } from "./rules.js";
 import { validateTaskSelection } from "./rules.js";
 import { NODE_TYPES, getInputs, getOutputs } from "./nodes/index.js";
 import { tarEntriesProblem } from "./nodes/build.js";
@@ -66,6 +66,7 @@ function closeOverDataEdges(doc, ids) {
 }
 
 /**
+ * 保存时骨架校验：只拦「数据损坏/结构坏」的问题（任意语义非法都可保存——不能运行由运行前严格校验拦）。
  * @param {any} doc
  * @returns {string[]}
  */
@@ -84,7 +85,7 @@ export function validateWorkflow(doc) {
         if (!n?.id) { problems.push(`节点缺少 id: ${JSON.stringify(n)?.slice(0, 60)}`); continue; }
         if (ids.has(n.id)) problems.push(`节点 id 重复: ${n.id}`);
         ids.add(n.id);
-        if (!NODE_TYPES[n.type] && n.type !== "group") problems.push(`节点 ${n.id} 类型未知: ${n.type}`);
+        // 类型未知允许保存（前端渲染红框空卡，运行前严格校验拦截）
         // group = 画布容器（纯前端视觉，引擎不执行）：合法节点类型，仅校验结构
         if (n.type === "group" && n.parentId !== undefined) problems.push(`Group 容器 ${n.id} 不支持嵌套（parentId 应为空）`);
         // 悬空 parentId：父节点不存在 → xyflow 渲染异常，早暴露
@@ -93,6 +94,46 @@ export function validateWorkflow(doc) {
         }
         if (!Array.isArray(n.position) || n.position.length !== 2) problems.push(`节点 ${n.id} 缺少 position [x,y]`);
         if (!n.data || typeof n.data !== "object") problems.push(`节点 ${n.id} 缺少 data 对象`);
+    }
+
+    // 旧版有序 path 静默规范化（含数据依赖闭包）——迁移逻辑保留
+    for (const t of Object.values(doc.tasks)) {
+        if (!Array.isArray(t.nodes) && Array.isArray(t.path)) {
+            t.nodes = closeOverDataEdges(doc, t.path);
+            delete t.path;
+        }
+    }
+
+    // 顺序边 handle 合法性：顺序语义是执行定序数据，坏了属数据损坏（保存时拦截）
+    for (const e of doc.edges) {
+        if (e.kind === "seq" && (e.sourceHandle !== "__seqOut" || e.targetHandle !== "__seqIn")) {
+            problems.push(`顺序边 ${e.id ?? "?"} 的 handle 非法（应为 __seqOut → __seqIn）`);
+        }
+    }
+    return problems;
+}
+
+/**
+ * 运行前严格校验（runner.enqueueWorkflowTask 与 CLI/GUI 汇聚点调用）：
+ * 图级严格项（类型未知/struct 字段/tar 互斥/边端点与 handle/类型兼容）+ 目标任务选点校验。
+ * @param {any} doc
+ * @param {string} taskName
+ * @returns {string[]}
+ */
+export function validateTaskRunnable(doc, taskName) {
+    /** @type {string[]} */
+    const problems = [];
+    if (!doc || typeof doc !== "object") return ["文档不是对象"];
+    if (!Array.isArray(doc.nodes) || !Array.isArray(doc.edges) || !doc.tasks || typeof doc.tasks !== "object") {
+        return ["文档结构不完整"];
+    }
+    const task = doc.tasks?.[taskName];
+    if (!task) return [`task not found: ${taskName}`];
+
+    const nodeById = new Map(doc.nodes.filter(n => n?.id).map(n => [n.id, n]));
+    for (const n of doc.nodes) {
+        if (!n?.id) continue;
+        if (!NODE_TYPES[n.type]) { problems.push(`节点 ${n.id} 类型未知: ${n.type}（无法运行）`); continue; }
         // struct.make：字段定义合法性（key 供插槽/占位符使用，须为 \w 且唯一）
         if (n.type === "struct.make" && Array.isArray(n.data.fields)) {
             const seenKeys = new Set();
@@ -114,15 +155,27 @@ export function validateWorkflow(doc) {
             const problem = tarEntriesProblem(n);
             if (problem) problems.push(`节点 ${n.id}：${problem}`);
         }
+        // selector：in1 特殊语义（断开/类型变更 → 其余连线错误）
+        if (n.type === "select.one") {
+            const wires = doc.edges
+                .filter(e => e.kind !== "seq" && e.target === n.id)
+                .map(e => {
+                    const s = nodeById.get(e.source);
+                    const outs = s ? getOutputs(s, doc) : [];
+                    const o = e.sourceHandle ? outs.find(x => x.id === e.sourceHandle) : outs[0];
+                    return { targetHandle: e.targetHandle, srcType: o?.type ?? "unknown" };
+                });
+            const problem = selectorWireProblem(n.data, wires);
+            if (problem) problems.push(`节点 ${n.id}：${problem}`);
+        }
     }
 
-    const nodeById = new Map(doc.nodes.filter(n => n?.id).map(n => [n.id, n]));
+    // 边校验：端点存在 / seq handle / handle 存在 / 类型兼容
     for (const e of doc.edges) {
-        if (!ids.has(e.source) || !ids.has(e.target)) {
+        if (!nodeById.has(e.source) || !nodeById.has(e.target)) {
             problems.push(`边 ${e.id ?? "?"} 端点不存在: ${e.source} → ${e.target}`);
             continue;
         }
-        // 顺序边：无数据类型语义，仅校验保留 handle
         if (e.kind === "seq") {
             if (e.sourceHandle !== "__seqOut" || e.targetHandle !== "__seqIn") {
                 problems.push(`顺序边 ${e.id ?? "?"} 的 handle 非法（应为 __seqOut → __seqIn）`);
@@ -144,27 +197,9 @@ export function validateWorkflow(doc) {
             problems.push(`边 ${e.id ?? "?"} 校验出错: ${err.message}`);
         }
     }
-    // 注意：元图允许同一输入接多条备选连线（不同任务各取其一）；唯一性在任务级校验。
 
-    // ── 任务：子图选点（顺序无关；旧版有序 path 静默规范化，含数据依赖闭包）────
-    for (const [name, t] of Object.entries(doc.tasks)) {
-        if (!Array.isArray(t.nodes) && Array.isArray(t.path)) {
-            t.nodes = closeOverDataEdges(doc, t.path);
-            delete t.path;
-        }
-        if (!Array.isArray(t.nodes) || !t.nodes.length) { problems.push(`任务 ${name} 缺少 nodes`); continue; }
-        for (const id of t.nodes) {
-            if (!ids.has(id)) problems.push(`任务 ${name} 引用不存在的节点: ${id}`);
-        }
-        const dups = t.nodes.filter((v, i) => t.nodes.indexOf(v) !== i);
-        if (dups.length) problems.push(`任务 ${name} 节点重复: ${[...new Set(dups)].join(", ")}`);
-        if (t.mutates === undefined) problems.push(`任务 ${name} 缺少 mutates 标记`);
-        if (t.label === undefined) problems.push(`任务 ${name} 缺少 label`);
-        if (dups.length || t.nodes.some(id => !ids.has(id))) continue;
-
-        // 任务级三校验（required 闭包 / 插槽唯一 / 无环）——与 GUI 定义任务共用 rules.js 实现
-        problems.push(...validateTaskSelection(t.nodes, doc.edges, nodeById, NODE_TYPES, { taskName: name }));
-    }
+    // 目标任务：选点校验（required 闭包 / 插槽唯一 / 无环）+ 引用完整性
+    problems.push(...validateTaskSelection(task.nodes ?? [], doc.edges, nodeById, NODE_TYPES, { taskName }));
     return problems;
 }
 

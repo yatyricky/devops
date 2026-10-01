@@ -68,6 +68,24 @@ export function isTunnelEdge(e) {
 }
 
 /**
+ * selector 连线错误态（in1 特殊语义）：in1 未连线而其余口有连线 → 全部连线错误；
+ * in1 已连（lockType 已定）→ 源类型 ≠ lockType 的连线错误。
+ * @param {any} data 节点 data（lockType）
+ * @param {{targetHandle: string, srcType: string}[]} wires 该节点全部数据入边（handle + 源出口类型）
+ * @returns {string | null} 错误描述；null = 无错误
+ */
+export function selectorWireProblem(data, wires) {
+    const ws = wires ?? [];
+    if (!ws.length) return null;
+    const in1 = ws.find(w => w.targetHandle === "in1");
+    if (!in1) return "首个输入（in1）未连线：类型未定，其余连线无效";
+    const lock = data?.lockType;
+    if (!lock) return "in1 已连线但类型未锁定";
+    const bad = ws.filter(w => w.targetHandle !== "in1" && w.srcType !== lock);
+    return bad.length ? `存在类型 ≠ ${lock} 的输入连线` : null;
+}
+
+/**
  * 节点有效输入 = 声明 + 动态。动态机制（按此顺序叠加，后者不覆盖前者同名口）：
  *   countInputs（path.resolve/string.join 等）：控件 key 为整数 N → prefix1..N 同型输入口；
  *   pairInputs（stage.copy）：每行双端口 pN.from / pN.to；
@@ -122,15 +140,12 @@ export function effectiveInputs(meta, data, env = {}) {
         all = [...all, ...fieldPorts];
     }
     if (meta?.selectorInputs) {
-        // 选择器：开放口 in（首个连线锁定类型）+ 每条已接入边一个专用口 in-<源节点id>；
-        // 只认 in- 前缀（GUI 连线归一保证），其余 handle 不成口——幻影端口在校验处显式暴露
+        // 选择器：输入口类型由 lockType 决定（in1 首连线锁定，见 App onConnect）；未锁定 = any。
+        // 口位由 countInputs 生成（in1..inN），此处统一覆盖类型。
         const lockType = data?.lockType ?? "any";
-        const open = [{ id: "in", type: lockType, required: false, dynamic: true }];
-        const wired = (env?.edges ?? [])
-            .filter(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === env?.id
-                && typeof e.targetHandle === "string" && e.targetHandle.startsWith("in-"))
-            .map(e => ({ id: e.targetHandle, type: lockType, required: false, dynamic: true }));
-        all = [...all, ...open, ...wired];
+        for (const p of all) {
+            if (/^in\d+$/.test(p.id)) p.type = lockType;
+        }
     }
     if (!meta?.dynamicInputs) return all;
     const text = String(data?.[meta.dynamicInputs.source] ?? "");
@@ -162,6 +177,8 @@ export function effectiveOutputs(meta, data, env = {}) {
         return (src.data?.fields ?? []).filter(f => f.key).map(f => ({ id: f.key, type: f.type ?? "string" }));
     }
     if (meta?.dynamicOutputs === "structMake") {
+        // 无字段 = 无出口（无 struct 可供下游消费）
+        if (!(data?.fields ?? []).some(f => f.key)) return [];
         return [{ id: "struct", type: structShape(data?.fields) }];
     }
     if (meta?.dynamicOutputs === "selectorOut") {

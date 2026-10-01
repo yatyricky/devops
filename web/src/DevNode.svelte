@@ -1,14 +1,14 @@
 <script>
   import { getContext } from "svelte";
   import { Handle, Position, useUpdateNodeInternals } from "@xyflow/svelte";
-  import { TYPE_COLORS, effectiveInputs, effectiveOutputs, nodeTitle, portLabel, displayType } from "./types.js";
+  import { TYPE_COLORS, effectiveInputs, effectiveOutputs, nodeTitle, portLabel, displayType, typeColorKey } from "./types.js";
   import { expandHomeLocal } from "./lib/infer.js";
   import { api } from "./api.js";
   import { ui } from "./store.svelte.js";
 
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
-  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveInputs, resolveOutputs, selectorOptions, resolveTplVars, inferOutput } = getContext("devnode-actions");
+  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveInputs, resolveOutputs, resolveTplVars, inferOutput } = getContext("devnode-actions");
   const updateNodeInternals = useUpdateNodeInternals();
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
@@ -296,8 +296,8 @@
       {:else}
       {@const toPeer = pairToOf(inp)}
       <div class="kv in {toPeer ? "pairrow" : ""}" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}（可连线或直接填值）` : undefined}>
-        <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[displayType(inp.type)]}; {toPeer ? "top:30%" : ""}" />
-        <span class="lbl" title="{portLabel(inp)}{inp.required ? " · 必填：连线或直接填值" : ""}">{inp.id}<span style="color:{TYPE_COLORS[displayType(inp.type)]}"> ({inp.type}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
+        <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[typeColorKey(inp.type)]}; {toPeer ? "top:30%" : ""}" />
+        <span class="lbl" title="{portLabel(inp)}{inp.required ? " · 必填：连线或直接填值" : ""}">{inp.id}<span style="color:{TYPE_COLORS[typeColorKey(inp.type)]}"> ({displayType(inp.type)}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
         {#if !inp.fromField && (inp.type === "string" || inp.type === "number" || inp.type === "boolean")}
           {@const liveVal = ui.runNodeInputs?.[id]?.[inp.id]}
           {#if isWiredAsTarget?.(id, inp.id) && liveVal !== undefined && liveVal !== null && liveVal !== ""}
@@ -330,27 +330,21 @@
               onchange={e => setLit(toPeer.id, e.target.value === "" ? undefined : e.target.value)} />
           {/if}
         {/if}
+        {#if meta?.selectorInputs && /^in\d+$/.test(inp.id)}
+          <!-- selector：radio 单选该路作为输出 -->
+          <input type="radio" class="selradio nodrag" name="selradio-{id}" title="作为输出"
+            checked={get("pick") === inp.id}
+            onchange={() => set("pick", inp.id)} />
+        {/if}
       </div>
       {/if}
     {/each}
-    {#if meta?.selectorInputs}
-      <!-- 选择器：从已接入输入中选择一路作为输出 -->
-      <div class="kv in">
-        <span class="lbl">选择输入</span>
-        <select class="inlit nodrag" value={get("pick") ?? ""} onchange={e => set("pick", e.target.value)}>
-          <option value="" disabled hidden>— 选择输入 —</option>
-          {#each selectorOptions?.(id) ?? [] as o (o.id)}
-            <option value={o.id}>{o.label}</option>
-          {/each}
-        </select>
-      </div>
-    {/if}
     {#if outputs.length}
       <div class="sep"></div>
       {#each outputs as out (out.id)}
         <div class="kv out">
-          <span class="lbl">{out.id}<span style="color:{TYPE_COLORS[displayType(out.type)]}"> ({out.type})</span></span>
-          <Handle id={out.id} type="source" position={Position.Right} style="background:{TYPE_COLORS[displayType(out.type)]}" />
+          <span class="lbl">{out.id}<span style="color:{TYPE_COLORS[typeColorKey(out.type)]}"> ({displayType(out.type)})</span></span>
+          <Handle id={out.id} type="source" position={Position.Right} style="background:{TYPE_COLORS[typeColorKey(out.type)]}" />
         </div>
       {/each}
     {/if}
@@ -478,8 +472,14 @@
                   {#if isWiredAsTarget?.(id, f.key)}
                     <span class="wired" title="已连线：该字段值来自上游">🔗</span>
                   {:else if f.type === "boolean"}
-                    <input type="checkbox" class="ckb" checked={f.value ?? false}
-                      onchange={e => setField(w.key, i, "value", e.target.checked)} />
+                    <!-- 三态轨道开关：undefined 空轨 / false 滑块左(暗) / true 滑块右(亮)；点击循环 -->
+                    <button type="button" class="tri-switch nodrag" class:on={f.value === true}
+                      class:unset={f.value === undefined}
+                      title={f.value === true ? "true（点击变 false）" : f.value === false ? "false（点击变 true）" : "未设置（点击变 true）"}
+                      onclick={() => setField(w.key, i, "value", f.value === true ? false : f.value === false ? undefined : true)}>
+                      <span class="knob"></span>
+                      <span class="tri-mark">{f.value === true ? "T" : f.value === false ? "F" : "—"}</span>
+                    </button>
                   {:else}
                     <input class:winvalid={f.type === "number" && !numOk(f.value)} placeholder="值" value={f.value ?? ""}
                       onchange={e => setField(w.key, i, "value", e.target.value)} />

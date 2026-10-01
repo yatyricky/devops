@@ -265,3 +265,13 @@
 4. **边装饰 displayType（P1-5）**：类型色查表改 `TYPE_COLORS[displayType(out?.type)]`——struct.make 带形状出口（`struct:{...}`）不再回落灰。
 - **回归**：verify 56→57 绿（新增 validateWorkflow 带图：专用口合法 + 非 in- 口名拒绝）；构建零警告；GUI 实测（临时 wf，已删）：拖拽连线落点改写 in-consta、lockType=string、输出口出现、异型源被拒（toast 类型不兼容）、自动保存过校验且磁盘往返、输出连线+选路 pick、删输入边→解锁+下游死边断开。
 - **教训**：①提交信息声称的代码可能不存在——评审时以 grep 代码为准而非 commit message（P1-1 的「onConnect 6 行」从未落地）；②引擎改动必须重启 3010 再 GUI 实测（本次自动保存被旧引擎拒绝暴露了这一点，也顺带验证了保存原子性——失败不落盘）。
+
+## FEAT-2026-09-30-02 校验拆分 + selector 重构 + struct/视觉调整（功能大改，非 bug）
+
+1. **保存/运行校验拆分**：validateWorkflow 瘦身为骨架校验（结构/引用完整性 + seq handle），任意语义非法可保存；新增 validateTaskRunnable（运行前严格校验：类型未知/struct 字段/tar 互斥/边端点与 handle/类型兼容/选点三校验），runner.enqueueWorkflowTask 顶部统一拦截（CLI/GUI 共用）。index.js save 端点自动变为骨架校验。
+2. **未知类型节点**：loadDoc 改写 type=unknown（原类型存 __origType，保存还原）；UnknownNode 红框空卡（标题=id，只读 JSON）；边错误红线（装饰 effect 按源/目标类型解析与 canConnect 判定）。
+3. **selector 重构（select.one）**：countInputs 驱动 in1..inN 固定口（stepper widget）；radio 单选输出口；in1 首连线锁定 lockType（onConnect/onReconnect 维护）；in1 断线或类型不符 → 全部连线错误红线；错误态由 rules.js selectorWireProblem 统一判定（engine 校验与前端装饰共用）。
+4. **struct 调整**：空字段无出口（rules structMake 分支）；boolean 字段值三态轨道开关（undefined 空轨/false 滑左/true 滑右，点击循环）；形状类型显示 struct_N 运行时编号（displayType Map 映射，容忍不稳定）。
+5. **值类型色板**：number → #2dd4bf（蓝绿）、boolean → #818cf8（蓝紫）、string/struct 保持蓝系。
+- **回归**：verify 56→57 全绿（校验断言迁移 + selector/struct 新断言）；构建零警告；3199 实例实测（ssh.session 双口/selector radio 与 in1 语义/struct 三态与空字段/unknown 渲染——partial 见 FEAT 条目）。
+- **已知限制**：CUA 自动化无法建立画布新建连线（重连可以），selector 连线锁定流程的浏览器端到端验证需人工复核。

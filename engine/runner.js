@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import url from "url";
 import { sshClose } from "./ssh.js";
-import { executeTask, findTaskEnv } from "./workflow.js";
+import { executeTask, findTaskEnv, validateTaskRunnable } from "./workflow.js";
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -81,6 +81,12 @@ function displayValue(key, v) {
 export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
     const task = wf.tasks?.[taskName];
     if (!task) throw new Error(`task not found: ${wf.name}/${taskName}`);
+
+    // ── 运行前严格校验：非法状态（未知类型/类型不兼容/required 缺失/环/selector 语义）禁止运行 ────
+    const runProblems = validateTaskRunnable(wf, taskName);
+    if (runProblems.length) {
+        throw new Error(`无法运行 ${taskName}（工作流存在无法运行的问题，保存时已允许）:\n  - ${runProblems.join("\n  - ")}`);
+    }
 
     // ── prod 门禁：mutates + SERVER_TYPE=prod 必须输入工作流名确认；dry-run 免门禁 ────
     const env = findTaskEnv(wf, taskName);

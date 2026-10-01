@@ -159,11 +159,12 @@ export default [
         category: "工具",
         color: "#56b6c2",
         selectorInputs: true,
+        countInputs: { key: "count", prefix: "in", min: 1, max: 16 },
         dynamicOutputs: "selectorOut",
-        desc: "多路选择器：接入任意数量同类型输入，下拉选择其中一路作为输出。首个连线锁定类型（此后仅同型可接入）；断开全部输入后类型重置、下游连线自动断开。",
+        desc: "多路选择器：N 路同类型输入，单选其中一路作为输出。首个连线（in1）锁定全部端口与出口类型；in1 断开或类型变更时其余连线进入错误态；未选输入或有错误时不可运行。",
         inputs: [],
         outputs: [],
-        widgets: [],
+        widgets: [{ key: "count", label: "输入个数（1-16）", kind: "stepper", min: 1, max: 16, serializable: true, default: 1 }],
         async run(ctx, node, inputs) {
             const pick = node.data?.pick;
             if (!pick) throw new Error("selector：未在下拉中选择输入");

@@ -8,7 +8,7 @@ import assert from "assert";
 import path from "path";
 import url from "url";
 import { canConnect, SOCKET_TYPES } from "../engine/types.js";
-import { validateWorkflow } from "../engine/workflow.js";
+import { validateWorkflow, validateTaskRunnable } from "../engine/workflow.js";
 import { NODE_TYPES, getInputs, getOutputs } from "../engine/nodes/index.js";
 import { loadWorkflows } from "../engine/registry.js";
 import { enqueueWorkflowTask, getRun, maskLine, ROOT } from "../engine/runner.js";
@@ -49,20 +49,20 @@ await test("注册表: 动态插槽由 {{name}}/{{obj.key}} 生成", () => {
 });
 
 // ── 图校验 ────
-await test("图校验: 类型不兼容的边被拒", () => {
-    const problems = validateWorkflow({
+await test("运行前校验: 类型不兼容的边被拒（保存时允许，渲染红线）", () => {
+    const problems = validateTaskRunnable({
         name: "t", nodes: [
             { id: "a", type: "ssh.session", position: [0, 0], data: { alias: "x" } },
             { id: "b", type: "cmd.exec", position: [0, 0], data: { commands: "echo hi" } },
         ],
         edges: [{ id: "e", source: "a", sourceHandle: "ssh", target: "b", targetHandle: "cwd" }],
-        tasks: {},
-    });
+        tasks: { t: { label: "t", mutates: false, nodes: ["a", "b"] } },
+    }, "t");
     assert.ok(problems.some(p => p.includes("类型不兼容")), problems.join("; "));
 });
 
-await test("图校验: 未知类型/悬空任务节点被拒；元图允许多条备选连线进同一输入", () => {
-    const problems = validateWorkflow({
+await test("运行前校验: 未知类型被拒；悬空任务节点由选点校验报错；保存时仅骨架校验", () => {
+    const doc = {
         name: "t", nodes: [
             { id: "a1", type: "string.const", position: [0, 0], data: { value: "x" } },
             { id: "a2", type: "string.const", position: [0, 0], data: { value: "y" } },
@@ -74,10 +74,13 @@ await test("图校验: 未知类型/悬空任务节点被拒；元图允许多�
             { id: "e2", source: "a2", sourceHandle: "value", target: "b", targetHandle: "value" },
         ],
         tasks: { x: { label: "x", mutates: false, nodes: ["ghost"] } },
-    });
-    assert.ok(problems.some(p => p.includes("类型未知")), "未知类型");
-    assert.ok(problems.some(p => p.includes("不存在的节点")), "悬空任务节点");
-    assert.ok(!problems.some(p => p.includes("多条连线")), "元图允许多条备选连线（唯一性在任务级校验）");
+    };
+    const saveProblems = validateWorkflow(structuredClone(doc));
+    assert.ok(!saveProblems.some(p => p.includes("类型未知")), "保存时允许未知类型（渲染红框空卡）");
+    const runProblems = validateTaskRunnable(doc, "x");
+    assert.ok(runProblems.some(p => p.includes("类型未知")), "运行前拒绝未知类型", runProblems.join("; "));
+    assert.ok(runProblems.some(p => p.includes("不存在的节点")), "悬空任务节点");
+    assert.ok(!runProblems.some(p => p.includes("多条连线")), "元图允许多条备选连线（唯一性在任务级校验）");
 });
 
 // ── 任务子图语义（选点 → 1 个或多个 DAG）────
@@ -121,7 +124,7 @@ const chainDoc = {
     tasks: {},
 };
 const task = (/** @type {any} */ doc, /** @type {string[]} */ nodes) =>
-    validateWorkflow({ ...structuredClone(doc), tasks: { t: { label: "t", mutates: false, nodes } } });
+    validateTaskRunnable({ ...structuredClone(doc), tasks: { t: { label: "t", mutates: false, nodes } } }, "t");
 
 await test("任务选点 case1 fan-out: 选 3 报闭包错；选 123 / 选 12 合法", () => {
     assert.match(task(fanDoc, ["3"]).join("; "), /必填输入 value 依赖节点 1，未选入/);
@@ -149,12 +152,12 @@ await test("任务选点: 可选入边源未选 → 合法（该输入视作未�
     };
     assert.deepStrictEqual(task(optDoc, ["g"]), [], "非 required 入边的源可不选");
 });
-await test("任务选点: required 未画线 vs 画线但源未选，两种错误可区分", () => {
-    const noWire = validateWorkflow({
+await test("运行前校验: required 未画线 vs 画线但源未选，两种错误可区分", () => {
+    const noWire = validateTaskRunnable({
         ...structuredClone(dblDoc),
         edges: [],
         tasks: { t: { label: "t", mutates: false, nodes: ["2"] } },
-    });
+    }, "t");
     assert.match(noWire.join("; "), /必填输入 value 未连线/);
     assert.doesNotMatch(noWire.join("; "), /未选入/);
     const closed = task(dblDoc, ["2", "3"]);
@@ -189,7 +192,7 @@ await test("任务选点: seq 环被拒", () => {
         ],
         tasks: { t: { label: "t", mutates: false, nodes: ["s", "a", "b", "c"] } },
     };
-    assert.match(validateWorkflow(cycDoc).join("; "), /存在环依赖/);
+    assert.match(validateTaskRunnable(cycDoc, "t").join("; "), /存在环依赖/);
 });
 await test("legacy path: 加载时静默规范化为 nodes 并补数据依赖闭包", () => {
     const doc = structuredClone(fanDoc);
@@ -419,8 +422,8 @@ await test("struct 执行: 连线字段覆盖手填值 + number 类型矫正", a
     assert.ok(lines.some(l => String(l).trim() === "5"), "number 字段经析构器输出后可取用", text);
 });
 
-await test("图校验: struct.make 字段 key 非法/重复/类型枚举被拒", () => {
-    const problems = validateWorkflow({
+await test("运行前校验: struct.make 字段 key 非法/重复/类型枚举被拒（保存时允许）", () => {
+    const problems = validateTaskRunnable({
         name: "t", nodes: [
             { id: "m", type: "struct.make", position: [0, 0], data: { fields: [
                 { key: "ok", type: "string", value: "" },
@@ -430,8 +433,8 @@ await test("图校验: struct.make 字段 key 非法/重复/类型枚举被拒",
             ] } },
         ],
         edges: [],
-        tasks: {},
-    });
+        tasks: { t: { label: "t", mutates: false, nodes: ["m"] } },
+    }, "t");
     assert.match(problems.join("; "), /字段 key 重复/);
     assert.match(problems.join("; "), /字段 key 非法/);
     assert.match(problems.join("; "), /类型非法/);
@@ -588,12 +591,12 @@ await test("tar.pack: 单输出 archive；白/黑/全三模式；双配置 valid
         tgz = out.match(/\[tar\] (\S+\.tgz)/)[1];
         entries = await listArchive(path.join(ROOT, ".tmp", tgz));
         assert.ok(entries.some(e => e.includes("root.txt")) && entries.some(e => e.includes("a.txt")) && !entries.some(e => e.includes("skip")), "黑名单排除路径段");
-        // 双配置：validate 与 run 两处报错
+        // 双配置：validate（运行前）与 run 两处报错
         const both = { entries: ["keep"], excludes: ["skip"] };
-        const vErr = validateWorkflow({
+        const vErr = validateTaskRunnable({
             name: "tp2", nodes: [{ id: "t", type: "tar.pack", position: [0, 0], data: both }], edges: [],
             tasks: { t: { label: "t", mutates: false, nodes: ["t"] } },
-        });
+        }, "t");
         assert.match(vErr.join("; "), /只能二选一/);
         await assert.rejects(() => runPack(both), /只能二选一/);
     } finally {
@@ -635,22 +638,22 @@ await test("注册表: ssh.close 输入 ssh、无输出无控件；sshClose 幂�
 });
 
 // ── 端口字面量（data.lit）────
-await test("字面量: 必填输入可由 data.lit 满足（无连线）", () => {
-    const problems = validateWorkflow({
+await test("运行前校验: required 可由 data.lit 满足；无 lit 无线报错", () => {
+    const problems = validateTaskRunnable({
         name: "lit", nodes: [
             { id: "lg", type: "log.print", position: [0, 0], data: {} },
         ],
         edges: [],
         tasks: { t: { label: "t", mutates: false, nodes: ["lg"] } },
-    });
+    }, "t");
     assert.ok(problems.some(p => p.includes("未连线且未填值")), "无 lit 无线应报错", problems.join("; "));
-    const ok = validateWorkflow({
+    const ok = validateTaskRunnable({
         name: "lit2", nodes: [
             { id: "lg", type: "log.print", position: [0, 0], data: { lit: { value: "hello" } } },
         ],
         edges: [],
         tasks: { t: { label: "t", mutates: false, nodes: ["lg"] } },
-    });
+    }, "t");
     assert.deepStrictEqual(ok, [], "lit 满足必填");
 });
 
@@ -1049,36 +1052,36 @@ await test("struct 形状: 顺序无关同型 / 类型不同异型 / 键集不�
     assert.strictEqual(canConnect(A, A), true, "同型可连");
 });
 
-await test("select.one: 未锁定开放口 any；首连锁定后专用口按入边推导、开放口变锁型", () => {
+await test("select.one: 未锁定全部口 any；锁定后 in1..inN 全部为锁型", () => {
     const doc = {
         nodes: [
-            { id: "s", type: "select.one", position: [0, 0], data: { lockType: "string" } },
+            { id: "s", type: "select.one", position: [0, 0], data: { lockType: "string", count: 2 } },
             { id: "a", type: "string.const", position: [0, 0], data: {} },
         ],
-        edges: [{ id: "e1", source: "a", sourceHandle: "value", target: "s", targetHandle: "in-a" }],
+        edges: [{ id: "e1", source: "a", sourceHandle: "value", target: "s", targetHandle: "in1" }],
     };
     const ports = getInputs(doc.nodes[0], doc);
-    assert.deepStrictEqual(ports.map(p => p.id).sort(), ["in", "in-a"], "开放口 + 专用口并存");
+    assert.deepStrictEqual(ports.map(p => p.id), ["in1", "in2"], "count=2 → in1/in2");
     assert.ok(ports.every(p => p.type === "string"), "锁定后全部口为 string");
     const bare = getInputs({ id: "s2", type: "select.one", data: {} }, { nodes: [], edges: [] });
-    assert.deepStrictEqual(bare.map(p => p.id), ["in"]);
+    assert.deepStrictEqual(bare.map(p => p.id), ["in1"]);
     assert.strictEqual(bare[0].type, "any");
 });
 
-await test("select.one: validateWorkflow 带图校验——专用口 handle 合法、非 selector 口名拒绝", () => {
+await test("select.one: 运行前校验拒绝不存在的口名（骨架校验不拦保存）", () => {
     const base = {
         nodes: [
-            { id: "s", type: "select.one", position: [0, 0], data: { lockType: "string" } },
+            { id: "s", type: "select.one", position: [0, 0], data: { lockType: "string", count: 2 } },
             { id: "a", type: "string.const", position: [0, 0], data: {} },
         ],
-        edges: [{ id: "e1", source: "a", sourceHandle: "value", target: "s", targetHandle: "in-a" }],
-        tasks: {},
+        edges: [{ id: "e1", source: "a", sourceHandle: "value", target: "s", targetHandle: "in1" }],
+        tasks: { t: { label: "t", mutates: false, nodes: ["a", "s"] } },
     };
-    assert.deepStrictEqual(validateWorkflow(structuredClone(base)), [], "专用口 in-<src> 按入边推导为合法口");
+    assert.deepStrictEqual(validateWorkflow(structuredClone(base)), [], "骨架校验不拦 selector 连线");
     const bogus = structuredClone(base);
     bogus.edges[0].targetHandle = "bogus";
-    const problems = validateWorkflow(bogus);
-    assert.ok(problems.some(p => p.includes("targetHandle 不存在")), "既非开放口也非专用口 → 拒绝");
+    const problems = validateTaskRunnable(bogus, "t");
+    assert.ok(problems.some(p => p.includes("targetHandle 不存在")), "不存在的口 → 运行前拒绝");
 });
 
 await test("ssh.session: alias/fingerprint 可选输入存在（required=false）", () => {

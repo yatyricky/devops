@@ -8,7 +8,7 @@ export { canConnect, SOCKET_TYPES, effectiveInputs, effectiveOutputs, validateTa
 
 export const TYPE_COLORS = {
   struct: "#4da3ff", ssh: "#ff9e64", string: "#61afef",
-  number: "#e5c07b", boolean: "#c678dd", any: "#8a97a8",
+  number: "#2dd4bf", boolean: "#818cf8", any: "#8a97a8",
 };
 
 let seq = 0;
@@ -23,9 +23,21 @@ export function portLabel(p) {
   return `${p.id} (${displayType(p.type)}${p.dynamic ? "⭑" : ""})`;
 }
 
-/** 显示用类型名：带形状的 struct 显示为 struct（内部比较仍用全串）。 */
+/** 色键：带形状的 struct 归入 struct 取色（显示名另由 displayType 编号）。 */
+export function typeColorKey(t) {
+  const s = String(t ?? "");
+  return s.startsWith("struct:") ? "struct" : (t ?? "");
+}
+
+/** 显示用类型名：带形状的 struct 显示为运行时编号 struct_N（纯区分用，映射随启动变化，容忍不稳定）。 */
+const structShapeLabels = new Map();
+let structShapeSeq = 0;
 export function displayType(t) {
-  return String(t ?? "").startsWith("struct:") ? "struct" : (t ?? "");
+  const s = String(t ?? "");
+  if (!s.startsWith("struct:")) return t ?? "";
+  const shape = s.slice("struct:".length);
+  if (!structShapeLabels.has(shape)) structShapeLabels.set(shape, `struct_${++structShapeSeq}`);
+  return structShapeLabels.get(shape);
 }
 
 /** 节点标题 `<类型 title>[ - 便笺]`（DevNode 头部与 tunnelLabel 共用）。 */

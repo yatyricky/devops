@@ -2,7 +2,8 @@
   import { getContext, setContext } from "svelte";
   import { SvelteFlow, Background, Controls, MiniMap } from "@xyflow/svelte";
   import { api } from "./api.js";
-  import { canConnect, displayType, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, isTunnelEdge, TYPE_COLORS, nodeTitle, portLabel, basenameNoExt, dirOf } from "./types.js";
+    import { canConnect, displayType, typeColorKey, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, isTunnelEdge, TYPE_COLORS, nodeTitle, portLabel, basenameNoExt, dirOf } from "./types.js";
+  import { selectorWireProblem } from "devops-console/engine/rules.js";
   import { makeInfer } from "./lib/infer.js";
   import { GROUP_COLORS, GROUP_COLLAPSED_W, groupAABB, groupBoxOf, crossEdges, collapsedHeight, makeGroupNode } from "./lib/groups.js";
   import { toDocument } from "./lib/docIO.js";
@@ -14,6 +15,7 @@
   import LogDrawer from "./LogDrawer.svelte";
   import TypeEdge from "./TypeEdge.svelte";
   import OpenModal from "./OpenModal.svelte";
+  import UnknownNode from "./UnknownNode.svelte";
   import RunModal from "./RunModal.svelte";
 
   // ── 全局状态 ────
@@ -38,7 +40,7 @@
   let logRef = $state(null);
 
   const typeMap = $derived(ui.nodeTypesMap);
-  const components = $derived({ ...Object.fromEntries(Object.keys(typeMap).map(t => [t, DevNode])), groupbox: GroupBox });
+  const components = $derived({ ...Object.fromEntries(Object.keys(typeMap).map(t => [t, DevNode])), groupbox: GroupBox, unknown: UnknownNode });
   /** 全部数据边用自定义边（选中时带重连锚点） */
   const edgeTypes = { default: TypeEdge };
   let currentEntry = $derived(wfList.find(w => w.path === currentPath));
@@ -124,18 +126,6 @@
       if (!n) return [];
       return effectiveInputs(typeMap[n.data?.__type ?? n.type], n.data, { edges, nodes, id: nodeId });
     },
-    /** selector 下拉选项：每条入边 → { id: 专用口id, label: 源节点标题 }；同口去重（keyed each 的 key 必须唯一） */
-    selectorOptions(nodeId) {
-      const seen = new Set();
-      return edges
-        .filter(e => e.kind !== "seq" && !isTunnelEdge(e) && e.target === nodeId)
-        .map(e => {
-          const s = nodes.find(n => n.id === e.source);
-          const m = s && typeMap[s.data?.__type ?? s.type];
-          return { id: e.targetHandle, label: nodeTitle(m, s?.data) };
-        })
-        .filter(o => o.id && !seen.has(o.id) && seen.add(o.id));
-    },
     /** 编辑期输出推断：path.resolve → 拼接推断值；string.join → 分隔符拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
     inferOutput(nodeId) {
       const n = nodes.find(x => x.id === nodeId);
@@ -199,12 +189,17 @@
     docRepoDir = doc.repoDir ?? "";
     // 收起组的成员加载即 hidden（与 oncollapse 的联动态一致）
     const collapsedMembers = new Set((doc.groups ?? []).filter(g => g.collapsed).flatMap(g => g.nodes ?? []));
-    nodes = (doc.nodes ?? []).map(n => ({
-      id: n.id, type: n.type,
-      position: { x: n.position[0], y: n.position[1] },
-      data: { ...n.data, __type: n.type },
-      ...(collapsedMembers.has(n.id) ? { hidden: true } : {}),
-    }));
+    // 未知类型节点改写为 unknown 渲染（红框空卡）；原类型存 __origType，保存时还原
+    const known = new Set(Object.keys(ui.nodeTypesMap));
+    nodes = (doc.nodes ?? []).map(n => {
+      const unknown = !known.has(n.type);
+      return {
+        id: n.id, type: unknown ? "unknown" : n.type,
+        position: { x: n.position[0], y: n.position[1] },
+        data: { ...n.data, __type: n.type, ...(unknown ? { __origType: n.type } : {}) },
+        ...(collapsedMembers.has(n.id) ? { hidden: true } : {}),
+      };
+    });
     // 存量数据修复：历史版本会在连线时产生同四元组重复边（库自动加边 + 旧代码手动加边），这里去重
     const seen = new Set();
     edges = (doc.edges ?? []).filter(e => {
@@ -483,45 +478,17 @@
         delete next[p.targetHandle];
         onData(p.target, "lit", next);
       }
+      // selector：in1 首连线锁定全部端口与出口类型
+      const tMeta = tNode && typeMap[tNode.data?.__type ?? tNode.type];
+      if (tMeta?.selectorInputs && p.targetHandle === "in1" && p.source) {
+        const src = nodes.find(n => n.id === p.source);
+        const sMeta = src && typeMap[src.data?.__type ?? src.type];
+        const outs = sMeta ? effectiveOutputs(sMeta, src.data, { edges, nodes, id: p.source }) : [];
+        const o = p.sourceHandle ? outs.find(x => x.id === p.sourceHandle) : outs[0];
+        if (o?.type && tNode.data?.lockType !== o.type) onData(p.target, "lockType", o.type);
+      }
     }
-    normalizeSelectorWires();
     markCritical();
-  }
-  /**
-   * selector 连线归一：选择器的入边恒落专用口 in-<源id>（rules.js selectorInputs 按已接入边
-   * 推导每源一个端口；开放口 "in" 只承接拖拽落点）。落点无论是开放口还是既有专用口，统一改写为
-   * 本边源节点自己的口；同源多边去重（单口设计，第二条信息无处安放）。目标未锁型时以首边源出口
-   * 类型上锁（此后开放口变锁型，仅同型可接入）。onConnect 与 onReconnect 都要走——重连的
-   * 落点同样是开放口。
-   */
-  function normalizeSelectorWires() {
-    let touched = false;
-    const seen = new Set();
-    const next = [];
-    for (const e of edges) {
-      if (e.kind === "seq" || isTunnelEdge(e)) { next.push(e); continue; }
-      const t = nodes.find(n => n.id === e.target);
-      const meta = t && typeMap[t.data?.__type ?? t.type];
-      if (!meta?.selectorInputs) { next.push(e); continue; }
-      const want = `in-${e.source}`;
-      if (seen.has(want)) { touched = true; continue; } // 同源第二条边丢弃（单口设计，第二条信息无处安放）
-      seen.add(want);
-      if (e.targetHandle !== want) { touched = true; next.push({ ...e, targetHandle: want }); }
-      else next.push(e);
-    }
-    if (!touched) return;
-    edges = next;
-    for (const t of nodes) {
-      const meta = typeMap[t.data?.__type ?? t.type];
-      if (!meta?.selectorInputs || t.data?.lockType !== undefined) continue;
-      const e = edges.find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === t.id);
-      if (!e) continue;
-      const s = nodes.find(n => n.id === e.source);
-      const sMeta = s && typeMap[s.data?.__type ?? s.type];
-      const outs = sMeta ? effectiveOutputs(sMeta, s.data, { edges, nodes, id: s.id }) : [];
-      const o = e.sourceHandle ? outs.find(x => x.id === e.sourceHandle) : outs[0];
-      onData(t.id, "lockType", o?.type ?? "any");
-    }
   }
   /** 拖空白/非法 handle：库不触发 onreconnect，边原样保留（还原语义）。 */
   /** 边重连最终校验：返回 falsy = 拒绝（边保持原样）。顺序边不可重连；新四元组过连线裁决（排除自身）。 */
@@ -530,8 +497,21 @@
     if (connectionRejectReason({ source: reconnected.source, sourceHandle: reconnected.sourceHandle, target: reconnected.target, targetHandle: reconnected.targetHandle, selfId: old.id }) !== null) return undefined;
     return reconnected;
   }
-  /** 重连成功：标脏（装饰 effect 自动跟随新端点校正类型色/zIndex/动画）；selector 落点归一 */
-  function onReconnect() { normalizeSelectorWires(); markCritical(); }
+  /** 重连成功：标脏（装饰 effect 自动跟随新端点校正类型色/zIndex/动画）；selector in1 重连变更类型时更新 lockType */
+  function onReconnect() {
+    markCritical();
+    for (const t of nodes) {
+      const meta = typeMap[t.data?.__type ?? t.type];
+      if (!meta?.selectorInputs) continue;
+      const e1 = edges.find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === t.id && x.targetHandle === "in1");
+      if (!e1) continue;
+      const src = nodes.find(n => n.id === e1.source);
+      const sMeta = src && typeMap[src.data?.__type ?? src.type];
+      const outs = sMeta ? effectiveOutputs(sMeta, src.data, { edges, nodes, id: e1.source }) : [];
+      const o = e1.sourceHandle ? outs.find(x => x.id === e1.sourceHandle) : outs[0];
+      if (o?.type && t.data?.lockType !== o.type) onData(t.id, "lockType", o.type);
+    }
+  }
   /** @param {{ nodes: any[], edges: any[] }} p xyflow 内置删除键（DEL/Backspace）触发；收起态隧道段边不可删 */  function onBeforeDelete({ nodes: delNodes, edges: delEdges }) {
     if (delNodes.length && !confirm(`确认删除 ${delNodes.length} 个节点（${delNodes.map(n => n.id).join("、")}）？`)) return false;
     if (!confirmTaskRemoval(delNodes.map(n => n.id))) return false;
@@ -649,27 +629,57 @@
     }
   });
 
-  // ── 边装饰 effect（类型色 + 流线动画 + 选中抬升，三合一）：
+  // ── 边装饰 effect（类型色 + 错误红线 + 流线动画 + 选中抬升，四合一）：
   //    ① 数据边按【源出口类型】着色（style 字符串内联在 path 上，压过 xyflow 默认色），--ec 供选中光晕同色；
   //       tnl- 段边按其原边取同色（两段转发线与原数据一致）。seq 边走 class 银色，不打类型色。
-  //    ② animated：与选中节点相连（或边自身被选中）的边播放流线动画——数据边与顺序边都参与。
-  //    ③ zIndex（需 SvelteFlow zIndexMode="manual"）：与选中节点相连/自身选中的边抬到 1000——
+  //    ② 非法边（类型不兼容/handle 缺失/源或目标类型未知）→ 错误红线（--err），与「任意可保存、非法不可运行」配套。
+  //    ③ animated：与选中节点相连（或边自身被选中）的边播放流线动画——数据边与顺序边都参与。
+  //    ④ zIndex（需 SvelteFlow zIndexMode="manual"）：与选中节点相连/自身选中的边抬到 1000——
   //       svg 层压住普通节点卡片（节点 z 0/1/2 都低于 1000）；其余回落 0。
   //    只替换需要翻转的边对象（EdgeWrapper 按引用响应），未变的保引用避免全体重渲染。
   $effect(() => {
     let changed = false;
     const next = edges.map(e => {
       let style = e.style;
+      let errEdge = false;
       if (e.kind !== "seq") {
         // 颜色：seq 边走 class 银色样式，不打类型色
         const origId = isTunnelEdge(e) ? String(e.id).slice(4, -2) : e.id;
         const orig = isTunnelEdge(e) ? edges.find(x => x.id === origId) : e;
         const src = orig && nodeByIdMap.get(orig.source);
-        const meta = src && typeMap[src.data?.__type ?? src.type];
+        const tgt = orig && nodeByIdMap.get(orig.target);
+        const srcType = src?.data?.__type ?? src?.type;
+        const meta = src && typeMap[srcType];
         const outs = meta ? effectiveOutputs(meta, src.data, { edges, nodes, id: orig.source }) : [];
         const out = orig?.sourceHandle ? outs.find(o => o.id === orig.sourceHandle) : outs[0];
-        const color = TYPE_COLORS[displayType(out?.type)] ?? "#8a97a8"; // 带形状 struct 收敛为 struct 取色
-        const want = `stroke: ${color}; --ec: ${color};`;
+        const color = TYPE_COLORS[typeColorKey(out?.type)] ?? "#8a97a8"; // 带形状 struct 归入 struct 色键
+        // 错误态：源出口/handle 无法解析、目标类型未知、目标输入口缺失或类型不兼容
+        const srcUnknown = !src || !meta;
+        const tgtNode = tgt && nodeByIdMap.get(orig.target);
+        const tgtType = tgtNode?.data?.__type ?? tgtNode?.type;
+        const tgtUnknown = !tgtNode || !typeMap[tgtType];
+        const tMeta = tgtNode && typeMap[tgtType];
+        const tInps = tgtNode && !tgtUnknown ? effectiveInputs(tMeta, tgtNode.data) : [];
+        const tInp = orig?.targetHandle ? tInps.find(i => i.id === orig.targetHandle) : tInps[0];
+        // selector 语义：in1 未连而其余口有连线 / 源类型 ≠ lockType → 错误
+        let selProblem = null;
+        if (tMeta?.selectorInputs) {
+          const wires = edges
+            .filter(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === orig.target)
+            .map(x => {
+              const s2 = nodeByIdMap.get(x.source);
+              const m2 = s2 && typeMap[s2.data?.__type ?? s2.type];
+              const outs2 = m2 ? effectiveOutputs(m2, s2.data, { edges, nodes, id: x.source }) : [];
+              const o2 = x.sourceHandle ? outs2.find(o => o.id === x.sourceHandle) : outs2[0];
+              return { targetHandle: x.targetHandle, srcType: o2?.type ?? "unknown" };
+            });
+          selProblem = selectorWireProblem(tgtNode.data, wires);
+        }
+        errEdge = srcUnknown || tgtUnknown || !out || !tInp ||
+          (out && tInp && !canConnect(out.type, tInp.type)) || !!selProblem;
+        const want = errEdge
+          ? `stroke: var(--err); --ec: var(--err);`
+          : `stroke: ${color}; --ec: ${color};`;
         if (style !== want) style = want;
       }
       const touching = selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target) || !!e.selected;
