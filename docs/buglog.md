@@ -287,3 +287,10 @@
 - **增强**：rules effectiveOutputs structSplit 分支新增——上游 selector 且 lockType 为形状串（struct:{...}）时，解析 canonical 串还原字段作为出口（字母序）。此前该分支只认 struct.make 上游。
 - **回归**：verify 57 全绿；3199 实例实测 struct.make → struct.split 出口 name/age 正常解析。
 - **待确认**：如用户场景仍异常，请提供 Split Struct 的上游连线方式（struct.make / selector / 其他）。
+
+## QoL-2026-10-01-01 记住上次打开的 wf + start.cmd 启动前逐路径 git pull
+
+1. **lastOpened**：此前「上次打开」只隐含在 workflows[] 列表顺序里（GUI 启动打开第一个加载成功的）——上次打开的 wf 一旦加载失败（JSON 坏/失效）就静默漂移到别的条目。改为显式记录：rememberWorkflow 恒写 `cfg.lastOpened`（`~` 格式；原实现只在新增路径时写盘，已改为每次都写）；GET /api/workflows 给对应条目加 `last: true`（现读 config，启动快照 cfg 会过期）；GUI 初始化 `find(w => w.last && w.name) ?? find(w => w.name)`，失效回退原行为。
+2. **paths + preflight**：local-config.json 新增 `paths: []`；新建 tools/preflight.js（start.cmd 在 `node index.js` 前调 `node tools\preflight.js`）逐路径 `git pull --ff-only`（execSync timeout 30s）；任何失败（目录不存在/非仓库根/网络/冲突）打 ⚠ 警告继续，exit 恒 0——控制台可用性优先于 git 状态。
+   - **实测修正**：最初用 `git rev-parse --is-inside-work-tree` 判仓库——它检测「在某工作树内」而非「目录本身是仓库根」，误配的普通子目录会对外层仓库执行 pull（危险）；改用 `--show-toplevel` 归一后必须等于目录自身。目录存在性先查（execSync 对不存在 cwd 报 spawnSync ENOENT，掩盖真实原因）。
+- **回归**：verify 57 绿；构建零警告；preflight 实测（.tmp 本地仓库 init+clone，源提交 v2 后 pull Fast-forward 生效、非仓库根/不存在目录警告跳过、空 paths 直接过）；GUI 实测（临时 wf 已删）：打开→lastOpened 落盘、API last 标记正确、刷新页面自动恢复该 wf。

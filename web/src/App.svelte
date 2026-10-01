@@ -153,7 +153,8 @@
       wfList = await api("/api/workflows");
       api("/api/home").then(r => localStorage.setItem("devops-home", r.home ?? "")).catch(() => {});
       await refreshUsage();
-      const first = wfList.find(w => w.name);
+      // 优先恢复上次打开的 wf（服务端 lastOpened 标记）；失效（加载失败/已移除）回退列表第一个
+      const first = wfList.find(w => w.last && w.name) ?? wfList.find(w => w.name);
       if (first) await selectWorkflow(first.path);
     } catch (e) { showToast(`初始化失败：${e.message}（检查服务器是否启动）`); }
   })(); });

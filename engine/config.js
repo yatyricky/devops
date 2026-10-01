@@ -44,16 +44,18 @@ function relativizeHome(fp) {
 /**
  * 记住一个工作流路径（最近打开在前）。主目录下的文件统一存成 `~/...`；
  * 去重按展开后的绝对路径比较，`~/...` 与等价绝对路径视为同一条。
+ * lastOpened 恒更新（GUI 启动优先恢复它，不依赖列表顺序）。
  * @param {string} fp
  */
 export function rememberWorkflow(fp) {
     const abs = normalizePath(fp);
     const cfg = loadUiConfig();
     const cur = cfg.workflows ?? [];
+    cfg.lastOpened = relativizeHome(fp);
     if (!cur.some(p => normalizePath(p) === abs)) {
         cfg.workflows = [relativizeHome(fp), ...cur];
-        saveLocalConfig(cfg);
     }
+    saveLocalConfig(cfg);
 }
 
 /**

@@ -57,8 +57,14 @@ try {
 
 // ── 工作流 ────
 app.get("/api/workflows", (req, res) => {
+    // last = 上次打开的 wf（local-config.lastOpened，GUI 启动优先恢复；加载失败由前端回退）。
+    // 现读 config（cfg 是启动快照，rememberWorkflow 运行时只更新磁盘）。
+    const savedLast = loadUiConfig().lastOpened;
+    const lastAbs = savedLast ? path.resolve(expandHome(savedLast)) : null;
     res.json(loadWorkflows().map(w => {
-        if (!w.doc) return { path: w.path, error: w.error };
+        const last = !!(lastAbs && w.path && path.resolve(w.path) === lastAbs);
+        const lastMark = last ? { last: true } : {};
+        if (!w.doc) return { path: w.path, error: w.error, ...lastMark };
         // 任务子图内 struct 构造器的 SERVER_TYPE 字段（GUI 徽标与 prod 门禁提示）
         let serverType = "";
         const taskNodeIds = Object.values(w.doc.tasks).flatMap(t => /** @type {any} */(t).nodes ?? /** @type {any} */(t).path ?? []);
@@ -73,6 +79,7 @@ app.get("/api/workflows", (req, res) => {
             repoDir: w.doc.repoDir,
             serverType,
             tasks: Object.entries(w.doc.tasks).map(([name, t]) => ({ name, label: /** @type {any} */(t).label, mutates: /** @type {any} */(t).mutates })),
+            ...lastMark,
         };
     }));
 });
