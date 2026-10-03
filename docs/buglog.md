@@ -342,3 +342,4 @@
 2. **原始输出展示通道**（通用，先 systemd 用）：runner `run.nodeOutputs` + ctx.markNodeOutput → SSE nodeoutputs diff 推送 → streamJob/LogDrawer hooks → `ui.runNodeOutputs` → DevNode 卡片底部「原始输出」disabled textarea（任何上报节点的卡片自动出现）。
 3. **TriSwitch 四值三态确认**：值域 true/false/undefined/null 共 4 种、UI 3 态——`class:unset={value == null}`（undefined 与 null 共享空轨；null 落盘、undefined 不落盘，显示一致），点击循环不变。
 - **回归**：verify 63→64 绿（mapIsActiveState 四态 + is-active 出口有/其他动作无）；构建零警告；3199 实测（临时 wf 已删）：is-active 卡片 active(boolean) 出口渲染、boolean 字段 null/undefined 同空轨。原始输出 textarea 的真跑回显待下次真实部署观察（is-active 真跑需 SSH 连接，本环境不连远端；通道与 nodeinputs 完全同构）。
+   - **wired 🔗 右贴（用户截图，七轮）**：字段被外部连线时行内只有 🔗+删除（无值控件），🔗 无 margin-left:auto 挤在 type 旁——加 `.structrow .trow > .wired { margin-left: auto; }` 右贴，与 fval/tri+删除的右对齐线一致。

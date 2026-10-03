@@ -130,6 +130,8 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode .ndesc { padding: 4px 10px 0; font-size: 10px; color: var(--dim); line-height: 1.5; }
 
 .devnode .body .trow .wired { flex: none; font-size: 12px; }
+/* Make Struct 字段行：字段被连线时 🔗 与删除按钮右贴（与 tri/值槽的 60% 区右对齐一致） */
+.devnode .body .wrow.structrow .trow > .wired { margin-left: auto; }
 
 /* 卡片底部：ID + 便笺按钮一行；备注 TextArea 折叠在其上方 */
 .devnode .nidrow { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 1px 10px 5px; }
