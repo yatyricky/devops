@@ -167,8 +167,11 @@ export default [
         widgets: [{ key: "count", label: "输入个数（1-16）", kind: "stepper", min: 1, max: 16, serializable: true, default: 1 }],
         async run(ctx, node, inputs) {
             const pick = node.data?.pick;
-            if (!pick) throw new Error("selector：未在下拉中选择输入");
-            if (!(pick in inputs)) throw new Error(`selector：所选输入 ${pick} 未连线（连线变化后请重新选择）`);
+            if (!pick) throw new Error("selector：未在选择器中选择输入");
+            // 键存在但值 undefined 同样算失败：源未选入任务/未连线/上游静默断链都会这样，绝不静默放行
+            if (inputs[pick] === undefined) {
+                throw new Error(`selector：所选输入 ${pick} 未提供值（源未选入任务、未连线，或上游未输出——检查任务选点与 pick 是否指向预期的路）`);
+            }
             return { value: inputs[pick] };
         },
     },

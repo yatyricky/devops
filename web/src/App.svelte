@@ -127,6 +127,16 @@
       if (!n) return [];
       return effectiveInputs(typeMap[n.data?.__type ?? n.type], n.data, { edges, nodes, id: nodeId, metas: typeMap });
     },
+    /** 某节点某输入口的连线源节点标题（selector radio 行显示，消除「选的是哪一路」的感知错位）。
+     *  同类型源（如多个 Make Struct）用便笺或首个非空字段值区分。 */
+    sourceTitleOf(nodeId, handleId) {
+      const e = edges.find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === nodeId && x.targetHandle === handleId);
+      const s = e && nodes.find(n => n.id === e.source);
+      if (!s) return null;
+      const title = nodeTitle(typeMap[s.data?.__type ?? s.type], s.data);
+      const hint = s.data?.note || (s.data?.fields ?? []).map(f => f.value).find(v => v !== undefined && v !== "") || s.id;
+      return `${title}·${hint}`;
+    },
     /** 编辑期输出推断：path.resolve → 拼接推断值；string.join → 分隔符拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
     inferOutput(nodeId) {
       const n = nodes.find(x => x.id === nodeId);

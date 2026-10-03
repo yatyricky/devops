@@ -1160,6 +1160,29 @@ await test("ssh.session: alias/fingerprint 可选输入存在（required=false�
     assert.ok(inputs.every(i => !i.required), "均为可选");
 });
 
+await test("静默错误链封堵：selector pick 无值报错 / ssh.session 连线口不回退 widget", async () => {
+    const { NODE_TYPES: NT } = await import("../engine/nodes/index.js");
+    // selector run：pick 指向的口键存在但值 undefined（源未选入任务的引擎形态）→ 必须抛错
+    const selDef = NT["select.one"];
+    const ctx = { log: () => {}, dryRun: false };
+    await assert.rejects(
+        () => selDef.run(ctx, { data: { pick: "in3" } }, { in1: { alias: "a" }, in2: { alias: "b" }, in3: undefined }),
+        /in3 未提供值/,
+        "pick 指向的口值为 undefined → 抛错（不静默放行）",
+    );
+    // ssh.session run：alias 口已连线但值 undefined → 抛错且绝不回退 data.alias 残留
+    const sshDef = NT["ssh.session"];
+    await assert.rejects(
+        () => sshDef.run({ log: () => {}, dryRun: false, registerSession: () => {} }, { data: { alias: "dogyun-hongkong" } }, { alias: undefined, fingerprint: undefined }),
+        /alias 输入口已连线但未提供值/,
+        "连线口缺值 → 报错（不回退卡片残留 alias）",
+    );
+    // 无连线（键不存在）→ 仍走 widget 兜底：dry-run 不连接，打印计划即验证取值路径
+    const logs = [];
+    await sshDef.run({ log: (m) => logs.push(m), dryRun: true }, { data: { alias: "dogyun-hongkong" } }, {});
+    assert.ok(logs.some(l => l.includes("dogyun-hongkong")), "未连线时 widget 兜底保持");
+});
+
 await test("infer: make→selector→split 链编辑期推导字段常量（连线覆盖/环熔断）", () => {
     const typeMap = Object.fromEntries(Object.entries(NODE_TYPES).map(([k, v]) => [k, { ...v }]));
     const mk = (g) => makeInfer({ ...g, typeMap });

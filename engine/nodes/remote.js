@@ -79,9 +79,20 @@ export default [
         outputs: [{ id: "ssh", type: "ssh" }],
         widgets: [],
         async run(ctx, node, inputs) {
-            // alias/fingerprint：连线优先，其次 widget/手填
-            const alias = String(inputs.alias ?? node.data.alias ?? "").trim();
-            const fingerprint = String(inputs.fingerprint ?? node.data.fingerprint ?? "").trim();
+            // alias/fingerprint：连线优先。口已连线（键存在于 inputs）但未提供值时**绝不回退
+            // widget 残留值**——那会静默连错服务器（残留往往是上一台机器的别名）；明确报错。
+            const wiredOr = (port, widgetKey) => {
+                if (port in inputs) {
+                    const v = inputs[port];
+                    if (v === undefined || String(v).trim() === "") {
+                        throw new Error(`ssh.session：${port} 输入口已连线但未提供值（检查上游 selector 的 pick 与任务选点），不回退卡片上的旧值`);
+                    }
+                    return String(v).trim();
+                }
+                return String(node.data[widgetKey] ?? "").trim();
+            };
+            const alias = wiredOr("alias", "alias");
+            const fingerprint = wiredOr("fingerprint", "fingerprint");
             const r = resolveAlias(alias);
             const fpLocked = !!fingerprint;
             if (ctx.dryRun) {

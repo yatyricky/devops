@@ -9,7 +9,7 @@
 
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
-  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveInputs, resolveOutputs, resolveTplVars, inferOutput } = getContext("devnode-actions");
+  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveInputs, resolveOutputs, sourceTitleOf, resolveTplVars, inferOutput } = getContext("devnode-actions");
   const updateNodeInternals = useUpdateNodeInternals();
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
@@ -302,6 +302,10 @@
       <div class="kv in {toPeer ? "pairrow" : ""}" title={inp.required ? `必填输入${inp.dynamic ? `：在对应控件里写 {{${inp.id}}} 生成` : ""}（可连线或直接填值）` : undefined}>
         <Handle id={inp.id} type="target" position={Position.Left} style="background:{TYPE_COLORS[typeColorKey(inp.type)]}; {toPeer ? "top:30%" : ""}" />
         <span class="lbl" title="{portLabel(inp)}{inp.required ? " · 必填：连线或直接填值" : ""}">{inp.id}<span style="color:{TYPE_COLORS[typeColorKey(inp.type)]}"> ({displayType(inp.type)}{inp.dynamic ? "⭑" : ""})</span>{#if inp.required}<span class="req" title="必填：连线或直接填值">*</span>{/if}</span>
+        {#if meta?.selectorInputs && /^in\d+$/.test(inp.id) && sourceTitleOf?.(id, inp.id)}
+          <!-- selector 输入行显示源节点标题：消除「radio 选的是哪一路」的感知错位 -->
+          <span class="srctitle" title={`该路来自：${sourceTitleOf(id, inp.id)}`}>← {sourceTitleOf(id, inp.id)}</span>
+        {/if}
         {#if !inp.fromField && (inp.type === "string" || inp.type === "number" || inp.type === "boolean")}
           {@const liveVal = ui.runNodeInputs?.[id]?.[inp.id]}
           {#if isWiredAsTarget?.(id, inp.id) && liveVal !== undefined && liveVal !== null && liveVal !== ""}

@@ -326,3 +326,11 @@
 - **实现**（仅 web/src/lib/infer.js，消费端零改动自动生效）：新增 `resolveStructFieldValue(nodeId, fieldName, depth)` struct 值域回溯——make（字段口连线优先=run 语义；手填 fields 常量非空才可解，String 化）/ select.one（data.pick 口转发，不读遗留 lockType）/ struct.split（struct 口透传）；`resolvePortValue` 对源=struct.split 特判按出口 id=字段名回溯。**顺带修**：无入边时 outputValueKey 节点（string.const）自读常量兜底（原 lit-only 导致字段口连 string.const 断链）。
 - **行为变化（有意）**：这条链接 ssh.session.alias 时，防漂移门禁从跳过变为正常比对新鲜度。
 - **回归**：verify 61→62 绿（全链推导/连线覆盖手填/未 pick/空串不可解/环熔断/ghost 字段）；构建零警告；3199 实测（临时 wf 复刻 xlgbis 链，已删）：sessionidp01.alias 预览=tencent-shanghai、ssh 下拉 disabled 回显所选别名；devops-wfs 全程只读。
+
+## BUG-2026-10-02-02 selector 选路连错服务器（log 出现 dogyun-hongkong）：静默回退链封堵 + radio 行源标题（用户报）
+
+- **用户视角**：「selector 选择的是 tencent-shanghai，log 里连的是 dogyun-hongkong」。只读核查 xlgbis.json：三路入边 in1=tencent-shanghai/in2=dogyun-hongkong/in3=dogyun-schlist；**引擎没取错**——运行时 pick 指向 in2（make9dgn2 在任务里且执行了），selector 正确取了 in2。真正的问题是**感知错位**：radio 行只有 in1/in2/in3 抽象编号，三行长得一样，看不出对应哪台机器。
+- **暴露的静默缺陷（本轮封堵）**：①selector run 的 `pick in inputs` 被「键存在值 undefined」骗过（源未选入任务时引擎仍填键）→ 改为值 undefined 即报错「所选输入 in3 未提供值（源未选入任务、未连线，或上游未输出）」；②ssh.session 的 alias/fingerprint 口已连线但未提供值时静默回退卡片残留 alias（=直接连错服务器，本次被指纹锁 Host Key MISMATCH 拦住）→ 改为连线口缺值即报错，绝不回退旧值（`"x" in inputs` 区分连线态，无连线仍走 widget 兜底）。
+- **感知层修复**：selector 输入行 radio 旁显示源节点标题（`← Make Struct·tencent-shanghai`）——同类型源用便笺或首个非空字段值区分（App context `sourceTitleOf`）。
+- **门禁确认**：validateTaskRunnable 对「pick 指向未选入源」实测拦截（`任务 链路：节点 sel 的必填输入 in2 依赖节点 make2，未选入`）。
+- **回归**：verify 62→63 绿（selector pick 无值抛错 / ssh 连线口不回退 / 无连线 widget 兜底保持）；构建零警告；3199 实测（临时 wf 已删）：radio 行源标题区分显示、内存态 dry-run 被门禁拦截；devops-wfs 全程只读。
