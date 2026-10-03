@@ -27,6 +27,18 @@ export function isStructType(t) {
     return t === "struct" || String(t ?? "").startsWith("struct:");
 }
 
+/** struct 形状串 → 字段列表 [{key,type}]（字母序，与 structShape 对应）；非形状串返回 null。 */
+export function structFieldsFromShape(t) {
+    const s = String(t ?? "");
+    if (!s.startsWith("struct:{") || !s.endsWith("}")) return null;
+    return s.slice("struct:{".length, -1)
+        .split(",").filter(Boolean)
+        .map(kv => {
+            const i = kv.indexOf(":");
+            return { key: kv.slice(0, i), type: kv.slice(i + 1) || "string" };
+        });
+}
+
 /**
  * 源类型能否接入目标输入。
  * 规则：未知类型拒绝；同型可连；any 输入兜底；

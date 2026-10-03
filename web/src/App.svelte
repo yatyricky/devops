@@ -127,6 +127,15 @@
       if (!n) return [];
       return effectiveInputs(typeMap[n.data?.__type ?? n.type], n.data, { edges, nodes, id: nodeId, metas: typeMap });
     },
+    /** dashboard 的 data 口连线源节点 id（null = 未连线） */
+    structSourceOf(nodeId) {
+      const e = edges.find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === nodeId && x.targetHandle === "data");
+      return e?.source ?? null;
+    },
+    /** struct 值域回溯：srcId 的 struct 出口提供 fieldName 字段的编辑期常量（make/selector/split 链） */
+    resolveStructField(srcId, fieldName) {
+      return infer().resolveStructFieldValue(srcId, fieldName);
+    },
     /** 编辑期输出推断：path.resolve → 拼接推断值；string.join → 分隔符拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
     inferOutput(nodeId) {
       const n = nodes.find(x => x.id === nodeId);

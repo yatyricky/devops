@@ -133,6 +133,22 @@ textarea { font: 12px/1.5 var(--mono); }
 /* Make Struct 字段行：字段被连线时 🔗 与删除按钮右贴（与 tri/值槽的 60% 区右对齐一致） */
 .devnode .body .wrow.structrow .trow > .wired { margin-left: auto; }
 
+/* Dashboard 汇总面板：40/60 同语言——字段名左 40% 截断，值右对齐 60% 区；boolean 状态徽章 */
+.devnode .body .dashbody { display: block; padding: 2px 0 4px; }
+.devnode .body .dashempty { font-size: 11px; color: var(--dim); padding: 4px 10px; }
+.devnode .body .dashrow { display: flex; align-items: center; gap: 6px; padding: 3px 10px; }
+.devnode .body .dashrow + .dashrow { border-top: 1px dashed var(--line); }
+.devnode .body .dashlab { flex: 0 0 40%; min-width: 0; font-size: 11px; color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devnode .body .dashtype { font-size: 9px; color: var(--dim); }
+.devnode .body .dashval { flex: 1; min-width: 0; text-align: right; font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devnode .body .dashval.mono { font-family: var(--mono); }
+.devnode .body .dashbadge { margin-left: auto; flex: none; font-size: 10px; padding: 0 8px;
+  border-radius: 999px; line-height: 1.6; border: 1px solid var(--line); color: var(--dim); }
+.devnode .body .dashbadge.on { border-color: var(--ok); color: var(--ok); }
+.devnode .body .dashbadge.off { border-color: var(--err); color: var(--err); }
+
 /* 卡片底部：ID + 便笺按钮一行；备注 TextArea 折叠在其上方 */
 .devnode .nidrow { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 1px 10px 5px; }
 .devnode .nid { font: italic 9px/1.4 var(--mono); color: var(--dim); opacity: .7;

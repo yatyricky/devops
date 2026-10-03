@@ -60,6 +60,7 @@ export function nodeTypesMeta() {
         ...(d.dynamicInputs ? { dynamicInputs: d.dynamicInputs } : {}),
         ...(d.fieldInputs ? { fieldInputs: true } : {}),
         ...(d.selectorInputs ? { selectorInputs: true } : {}),
+        ...(d.dashboardShow ? { dashboardShow: true } : {}),
         ...(d.dynamicOutputs ? { dynamicOutputs: d.dynamicOutputs } : {}),
     }));
 }

@@ -1,7 +1,7 @@
 <script>
   import { getContext } from "svelte";
   import { Handle, Position, useUpdateNodeInternals } from "@xyflow/svelte";
-  import { TYPE_COLORS, effectiveInputs, effectiveOutputs, nodeTitle, portLabel, displayType, typeColorKey } from "./types.js";
+  import { TYPE_COLORS, effectiveInputs, effectiveOutputs, nodeTitle, portLabel, displayType, typeColorKey, structFieldsFromShape } from "./types.js";
   import { expandHomeLocal } from "./lib/infer.js";
   import { api } from "./api.js";
   import { ui } from "./store.svelte.js";
@@ -9,7 +9,7 @@
 
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
-  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveInputs, resolveOutputs, resolveTplVars, inferOutput } = getContext("devnode-actions");
+  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveInputs, resolveOutputs, resolveStructField, structSourceOf, resolveTplVars, inferOutput } = getContext("devnode-actions");
   const updateNodeInternals = useUpdateNodeInternals();
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
@@ -18,6 +18,23 @@
   let outputs = $derived(resolveOutputs?.(id) ?? (meta?.outputs ?? []));
   // ── selector：有效输入口（开放口 in + 每条已接入边一个专用口），经 context 由 App 提供图上下文 ────
   let inputs = $derived(meta?.selectorInputs ? (resolveInputs?.(id) ?? []) : effectiveInputs(meta, data));
+  // ── dashboard 汇总面板：字段列表派生（源为 split → 出口即字段；make/selector → 形状串解析） ────
+  let dashFields = $derived.by(() => {
+    if (!meta?.dashboardShow) return [];
+    const srcId = structSourceOf?.(id);
+    if (!srcId) return [];
+    const outs = resolveOutputs?.(srcId) ?? [];
+    // 源是 struct.split（或字段出口形态）：出口列表本身即字段列表
+    if (outs.length && outs.every(o => ["string", "number", "boolean"].includes(o.type))) {
+      return outs.map(o => ({ key: o.id, type: o.type }));
+    }
+    // 源出口为形状串（struct.make / select.one）：解析
+    for (const o of outs) {
+      const fs = structFieldsFromShape(o?.type);
+      if (fs) return fs;
+    }
+    return [];
+  });
   let color = $derived(meta?.color ?? "#8a97a8");
   let onPath = $derived(hl === true);
   // ── 任务运行状态（卡片外框）：集外半透明灰；running 跑马灯 / ok 绿框 / failed 红框 ────
@@ -385,6 +402,32 @@
       </label>
     {/if}
 
+    {#if meta?.dashboardShow}
+      <!-- 汇总面板：字段名即标签（左 40%），值右对齐（60% 区）；boolean 状态徽章 / number mono / string 文本。
+           值优先级：运行中实时（runNodeInputs.data JSON）→ 编辑期推导（struct 值域回溯）→ — -->
+      <div class="sep"></div>
+      <div class="dashbody nowheel">
+        {#if !dashFields.length}
+          <div class="dashempty">连接 struct 提供数据</div>
+        {:else}
+          {@const runObj = (() => { const raw = ui.runNodeInputs?.[id]?.data; if (raw === undefined) return null; try { const o = JSON.parse(raw); return typeof o === "object" && o !== null ? o : null; } catch { return null; } })()}
+          {#each dashFields as f (f.key)}
+            {@const liveVal = runObj ? runObj[f.key] : undefined}
+            {@const editVal = runObj ? undefined : resolveStructField?.(structSourceOf?.(id), f.key)}
+            {@const shown = liveVal !== undefined && liveVal !== null ? liveVal : editVal}
+            <div class="dashrow" title={f.key}>
+              <span class="dashlab">{f.key}<span class="dashtype"> {f.type}</span></span>
+              {#if f.type === "boolean"}
+                {@const b = shown === true ? true : shown === false ? false : null}
+                <span class="dashbadge {b === true ? "on" : b === false ? "off" : "none"}">{b === true ? "true" : b === false ? "false" : "—"}</span>
+              {:else}
+                <span class="dashval" class:mono={f.type === "number"}>{shown === undefined || shown === null || shown === "" ? "—" : String(shown)}</span>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </div>
+    {/if}
     {#if meta?.widgets?.length}
       <div class="sep"></div>
       {#each meta.widgets as w (w.key)}

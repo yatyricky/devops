@@ -174,5 +174,18 @@ export default [
             }
             return { value: inputs[pick] };
         },
+    },    {
+        type: "dashboard.show",
+        title: "Dashboard",
+        category: "工具",
+        color: "#56b6c2",
+        dashboardShow: true,
+        desc: "汇总面板：把 struct 的字段渲染成只读列表——字段名即标签，类型决定样式（boolean 状态徽章 / number / string）。编辑期显示可推导的常量值，运行中实时更新。未连线时显示占位提示。",
+        inputs: [{ id: "data", type: "struct", required: false }],
+        outputs: [],
+        widgets: [],
+        async run(ctx, node, inputs) {
+            // 展示节点无副作用：数据经 runNodeInputs 通道供 GUI 实时显示
+        },
     },
 ];

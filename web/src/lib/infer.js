@@ -64,7 +64,8 @@ export function makeInfer(g) {
       if (w) return resolvePortValue(w.source, w.sourceHandle, depth + 1);
       const f = (src.data?.fields ?? []).find(f => f.key === fieldName);
       if (!f) return undefined;
-      return f.value === undefined || f.value === "" ? undefined : String(f.value);
+      // 返回原始类型值（boolean/number 保留，显示层各自 String 化）；undefined/空串视为不可解
+      return f.value === undefined || f.value === "" ? undefined : f.value;
     }
     if (src.type === "select.one") {
       const pick = src.data?.pick;
@@ -119,5 +120,5 @@ export function makeInfer(g) {
     return segs.join(delimiter);
   }
 
-  return { resolvePortValue, inferPathResolve, inferStringJoin };
+  return { resolvePortValue, resolveStructFieldValue, inferPathResolve, inferStringJoin };
 }

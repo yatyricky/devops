@@ -343,3 +343,12 @@
 3. **TriSwitch 四值三态确认**：值域 true/false/undefined/null 共 4 种、UI 3 态——`class:unset={value == null}`（undefined 与 null 共享空轨；null 落盘、undefined 不落盘，显示一致），点击循环不变。
 - **回归**：verify 63→64 绿（mapIsActiveState 四态 + is-active 出口有/其他动作无）；构建零警告；3199 实测（临时 wf 已删）：is-active 卡片 active(boolean) 出口渲染、boolean 字段 null/undefined 同空轨。原始输出 textarea 的真跑回显待下次真实部署观察（is-active 真跑需 SSH 连接，本环境不连远端；通道与 nodeinputs 完全同构）。
    - **wired 🔗 右贴（用户截图，七轮）**：字段被外部连线时行内只有 🔗+删除（无值控件），🔗 无 margin-left:auto 挤在 type 旁——加 `.structrow .trow > .wired { margin-left: auto; }` 右贴，与 fval/tri+删除的右对齐线一致。
+
+## FEAT-2026-10-02-03 dashboard.show 汇总面板节点（讨论定案：struct 单口 / 字段名即标签 / boolean 状态徽章）
+
+- **节点**（engine/nodes/util.js，工具类）：data 口（struct 可选）——字段名即标签、类型决定样式、值走既有推导链；零 widget 配置；run 无副作用（数据展示走 runNodeInputs 通道）。
+- **字段列表派生**：rules.js 新导出 `structFieldsFromShape`（形状串→字段列表）；DevNode dashboardShow 块——源为 struct.split 时出口即字段列表，make/selector 源经形状串出口解析。
+- **渲染**（40/60 同语言）：字段名左 40%（截断+title）+ 类型小字、值右对齐 60% 区；boolean 状态徽章（true 绿/false 红/未设置灰 —）、number mono、string 文本；行间虚线分隔；未连线显示占位「连接 struct 提供数据」。
+- **值优先级**：运行中 `JSON.parse(runNodeInputs.data)`（displayValue 已脱敏，SECRET 键 ***）→ 编辑期 `resolveStructFieldValue`（infer.js 导出）→ —。**修**：make 分支去掉 String 化（保留 boolean/number 原始类型，否则 dashboard 徽章判定失效——首测 boolean 全显示 — 定位到此处）；string 消费方（ssh 预览/门禁）自行 String 化不受影响。
+- **meta 白名单**：nodeTypesMeta 透传 dashboardShow 标记。
+- **回归**：verify 64→65 绿（dashboard 注册形状 + structFieldsFromShape 解析/非形状串 null）；构建零警告；3199 实测（临时 wf 已删）：经 selector 链的面板四字段渲染（alias=tencent-shanghai / port=3020 mono / healthy 徽章绿 true / blob 徽章灰 —）、未连线占位显示。

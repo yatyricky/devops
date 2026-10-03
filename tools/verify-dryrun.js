@@ -1174,6 +1174,17 @@ await test("systemd.run: is-active 输出 boolean（mapIsActiveState 四态 + dy
     assert.deepStrictEqual(outsRestart, [], "其他动作无出口");
 });
 
+await test("dashboard.show: 注册形状 + structFieldsFromShape 解析", async () => {
+    const dash = getInputs({ type: "dashboard.show", data: {} });
+    assert.deepStrictEqual(dash.map(p => ({ id: p.id, type: p.type, required: p.required })),
+        [{ id: "data", type: "struct", required: false }], "data 口 struct 可选");
+    const { structFieldsFromShape } = await import("../engine/rules.js");
+    assert.deepStrictEqual(structFieldsFromShape("struct:{alias:string,blob:boolean}"),
+        [{ key: "alias", type: "string" }, { key: "blob", type: "boolean" }], "形状串解析");
+    assert.strictEqual(structFieldsFromShape("struct"), null, "纯 struct 非形状串 → null");
+    assert.strictEqual(structFieldsFromShape("string"), null, "非 struct → null");
+});
+
 await test("静默错误链封堵：selector pick 无值报错 / ssh.session 连线口不回退 widget", async () => {
     const { NODE_TYPES: NT } = await import("../engine/nodes/index.js");
     // selector run：pick 指向的口键存在但值 undefined（源未选入任务的引擎形态）→ 必须抛错
