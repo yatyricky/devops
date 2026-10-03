@@ -18,9 +18,26 @@
   let outputs = $derived(resolveOutputs?.(id) ?? (meta?.outputs ?? []));
   // ── selector：有效输入口（开放口 in + 每条已接入边一个专用口），经 context 由 App 提供图上下文 ────
   let inputs = $derived(meta?.selectorInputs ? (resolveInputs?.(id) ?? []) : effectiveInputs(meta, data));
-  // ── dashboard 汇总面板：字段列表派生（源为 split → 出口即字段；make/selector → 形状串解析） ────
+  // ── dashboard 汇总面板：字段列表派生 ────
+  // 优先级：① 运行时形状（源上报过完整 JSON——struct.fromjson 等，primitive 值的键即字段）；
+  //         ② 编辑期形状（源为 split → 出口即字段；make/selector → 形状串解析）
+  let dashSrcRaw = $derived.by(() => {
+    if (!meta?.dashboardShow) return undefined;
+    const srcId = structSourceOf?.(id);
+    return srcId ? ui.runNodeOutputs?.[srcId] : undefined;
+  });
   let dashFields = $derived.by(() => {
     if (!meta?.dashboardShow) return [];
+    if (dashSrcRaw !== undefined) {
+      try {
+        const o = JSON.parse(dashSrcRaw);
+        if (typeof o === "object" && o !== null && !Array.isArray(o)) {
+          return Object.entries(o)
+            .filter(([, v]) => v === null || ["boolean", "number", "string"].includes(typeof v))
+            .map(([k, v]) => ({ key: k, type: v === null ? "string" : typeof v }));
+        }
+      } catch { /* 非 JSON 上报 → 走编辑期 */ }
+    }
     const srcId = structSourceOf?.(id);
     if (!srcId) return [];
     const outs = resolveOutputs?.(srcId) ?? [];
@@ -34,6 +51,19 @@
       if (fs) return fs;
     }
     return [];
+  });
+  // 面板值对象：优先源上报 JSON（无截断），回退自身收到的输入（脱敏 + 300 截断）
+  let dashRunObj = $derived.by(() => {
+    if (!meta?.dashboardShow) return null;
+    if (dashSrcRaw !== undefined) {
+      try {
+        const o = JSON.parse(dashSrcRaw);
+        if (typeof o === "object" && o !== null && !Array.isArray(o)) return o;
+      } catch { /* 走输入侧 */ }
+    }
+    const raw = ui.runNodeInputs?.[id]?.data;
+    if (raw === undefined) return null;
+    try { const o = JSON.parse(raw); return typeof o === "object" && o !== null ? o : null; } catch { return null; }
   });
   let color = $derived(meta?.color ?? "#8a97a8");
   let onPath = $derived(hl === true);
@@ -408,12 +438,11 @@
       <div class="sep"></div>
       <div class="dashbody nowheel">
         {#if !dashFields.length}
-          <div class="dashempty">连接 struct 提供数据</div>
+          <div class="dashempty">{structSourceOf?.(id) ? "运行一次后显示字段（运行时形状）" : "连接 struct 提供数据"}</div>
         {:else}
-          {@const runObj = (() => { const raw = ui.runNodeInputs?.[id]?.data; if (raw === undefined) return null; try { const o = JSON.parse(raw); return typeof o === "object" && o !== null ? o : null; } catch { return null; } })()}
           {#each dashFields as f (f.key)}
-            {@const liveVal = runObj ? runObj[f.key] : undefined}
-            {@const editVal = runObj ? undefined : resolveStructField?.(structSourceOf?.(id), f.key)}
+            {@const liveVal = dashRunObj ? dashRunObj[f.key] : undefined}
+            {@const editVal = dashRunObj ? undefined : resolveStructField?.(structSourceOf?.(id), f.key)}
             {@const shown = liveVal !== undefined && liveVal !== null ? liveVal : editVal}
             <div class="dashrow" title={f.key}>
               <span class="dashlab">{f.key}</span>

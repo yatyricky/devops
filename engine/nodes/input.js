@@ -70,4 +70,31 @@ export default [
             return { ...obj };
         },
     },
+    {
+        type: "struct.fromjson",
+        title: "Struct From JSON",
+        category: "输入",
+        color: "#c8d3f0",
+        desc: "解析一段 JSON 文本为 struct（运行时形状：字段名运行时才知道，下游 dashboard 运行后按字段渲染）。常与 ssh.exec 连用——远端命令输出 JSON（printf/grep/awk 组装、或 sed 把 python-repr 转成 JSON），本节点解析后供 dashboard/selector 消费。顶层必须是对象，解析失败任务报错。",
+        inputs: [{ id: "json", type: "string", required: true }],
+        outputs: [{ id: "struct", type: "struct" }],
+        widgets: [],
+        async run(ctx, node, inputs) {
+            const raw = String(inputs.json ?? "").trim();
+            if (!raw) throw new Error("struct.fromjson 未提供 JSON 输入");
+            let obj;
+            try {
+                obj = JSON.parse(raw);
+            } catch (e) {
+                throw new Error(`struct.fromjson 解析失败: ${e.message}（原文前 120 字符: ${raw.slice(0, 120)}）`);
+            }
+            if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
+                throw new Error("struct.fromjson：JSON 顶层必须是对象");
+            }
+            // 完整无截断上报（dashboard 运行时形状派生从 runNodeOutputs 取；兼任卡片原始输出展示）
+            ctx.markNodeOutput?.(node.id, JSON.stringify(obj));
+            ctx.log(`[struct.fromjson] ${Object.keys(obj).join(", ")}`);
+            return { struct: obj };
+        },
+    },
 ];

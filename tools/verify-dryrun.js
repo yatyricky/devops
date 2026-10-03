@@ -1185,6 +1185,19 @@ await test("dashboard.show: 注册形状 + structFieldsFromShape 解析", async 
     assert.strictEqual(structFieldsFromShape("string"), null, "非 struct → null");
 });
 
+await test("struct.fromjson: run 解析/上报/非法输入", async () => {
+    const def = NODE_TYPES["struct.fromjson"];
+    assert.ok(def, "节点已注册");
+    const reported = [];
+    const ctx = { log: () => {}, dryRun: false, markNodeOutput: (id, t) => reported.push(t) };
+    const r = await def.run(ctx, { data: {} }, { json: '{"security_updates":3,"listeners":"pass"}' });
+    assert.deepStrictEqual(r, { struct: { security_updates: 3, listeners: "pass" } }, "解析为 struct");
+    assert.deepStrictEqual(reported, ['{"security_updates":3,"listeners":"pass"}'], "完整 JSON 上报");
+    await assert.rejects(() => def.run(ctx, { data: {} }, { json: "{oops" }), /解析失败/, "非法 JSON 报错");
+    await assert.rejects(() => def.run(ctx, { data: {} }, { json: "[1,2]" }), /顶层必须是对象/, "数组顶层报错");
+    await assert.rejects(() => def.run(ctx, { data: {} }, { json: "" }), /未提供 JSON/, "空输入报错");
+});
+
 await test("静默错误链封堵：selector pick 无值报错 / ssh.session 连线口不回退 widget", async () => {
     const { NODE_TYPES: NT } = await import("../engine/nodes/index.js");
     // selector run：pick 指向的口键存在但值 undefined（源未选入任务的引擎形态）→ 必须抛错

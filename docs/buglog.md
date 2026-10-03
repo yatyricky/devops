@@ -352,3 +352,12 @@
 - **值优先级**：运行中 `JSON.parse(runNodeInputs.data)`（displayValue 已脱敏，SECRET 键 ***）→ 编辑期 `resolveStructFieldValue`（infer.js 导出）→ —。**修**：make 分支去掉 String 化（保留 boolean/number 原始类型，否则 dashboard 徽章判定失效——首测 boolean 全显示 — 定位到此处）；string 消费方（ssh 预览/门禁）自行 String 化不受影响。
 - **meta 白名单**：nodeTypesMeta 透传 dashboardShow 标记。
 - **回归**：verify 64→65 绿（dashboard 注册形状 + structFieldsFromShape 解析/非形状串 null）；构建零警告；3199 实测（临时 wf 已删）：经 selector 链的面板四字段渲染（alias=tencent-shanghai / port=3020 mono / healthy 徽章绿 true / blob 徽章灰 —）、未连线占位显示。
+
+## FEAT-2026-10-02-04 struct.fromjson 节点 + dashboard 运行时形状派生 + 审计采集器演示 wf（f2b/审计方案落地）
+
+- **背景**：f2b 状态与 LS 审计（ops_common.js --audit 的 18 条 findings）讨论定案——按**源命令**分组做采集器（bash+grep+awk 吐规范化 JSON），不做每检查一个 node（同源 finding 最多 4 条共享一条命令）；python-in-shell 弃用（引号地狱），f2b 的 python-repr 用 `sed "s/'/\"/g"` 一行转 JSON。
+- **struct.fromjson**（engine/nodes/input.js，输入类）：json(string 必填) → struct(纯)；run 解析失败报错带原文前 120 字符、顶层必须对象、完整 JSON 经 markNodeOutput 上报。untested 清单收编。
+- **dashboard 运行时形状派生**：dashFields 优先从源上报的 JSON（runNodeOutputs，无截断）取 primitive 键为字段（null→string），回退编辑期派生（split 出口/形状串）；值对象 dashRunObj 同优先级（源 JSON → runNodeInputs.data）；占位文案分「未连线」与「已连线未运行（运行时形状）」两种。
+- **演示 wf**：`.tmp/audit-demo.json`（21 节点/20 边）——ssh.session + 6 采集器（sshd 四 verdict / 防火墙+暴露面 / nginx 三项 / frp+deploy 权限（{{toml}}/{{deploydir}} 动态输入）/ 证书天数 / 补丁+僵尸）→ 6 × fromjson → 6 × dashboard（便笺命名）；task audit-demo 全选。全部采集器纯 printf/grep/awk 单行（无 python），verdict 用 pass/warn/fail 字符串。
+- **坑**：生成 wf 的 node -e 里 printf `%s\n` 的 \n 被 bash 命令替换变真实换行——采集器命令被拆行（ssh.exec 按行切分会断管道），改 grep 直出/管道 awk 后置规避；另有 local-config lastOpened 忘备份先删的失误，已按已知值恢复。
+- **回归**：verify 65→66 绿（fromjson 解析/上报/非法 JSON/数组顶层/空输入）；构建零警告；3199 渲染检查（wf 打开 21/20 节点边、fromjson 出口 struct(struct)、dashboard 运行时形状占位）；真跑采集器需 SSH 远端（本环境不连），由用户在部署环境执行。
