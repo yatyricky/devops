@@ -56,8 +56,6 @@ textarea { font: 12px/1.5 var(--mono); }
    排版基准（与 wrow 同构）：label 固定左 40% + gap 6px，控件吃满右 60% 剩余宽度（spacing 含在 60% 内） */
 .devnode .body .kv.in { gap: 6px; }
 .devnode .body .kv.in .lbl { flex: 0 0 40%; }
-/* selector 输入行的源节点标题（radio 选路感知） */
-.devnode .body .srctitle { font-size: 10px; color: var(--warn); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .devnode .body .kv.in .inlit { flex: 1 1 0; min-width: 0; font-size: 11px; padding: 1px 5px; }
 .devnode .body .kv.in .inlit:disabled { color: var(--dim); }
 .devnode .body .kv.in .inlit.live:disabled { color: var(--ok); }

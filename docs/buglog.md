@@ -334,3 +334,4 @@
 - **感知层修复**：selector 输入行 radio 旁显示源节点标题（`← Make Struct·tencent-shanghai`）——同类型源用便笺或首个非空字段值区分（App context `sourceTitleOf`）。
 - **门禁确认**：validateTaskRunnable 对「pick 指向未选入源」实测拦截（`任务 链路：节点 sel 的必填输入 in2 依赖节点 make2，未选入`）。
 - **回归**：verify 62→63 绿（selector pick 无值抛错 / ssh 连线口不回退 / 无连线 widget 兜底保持）；构建零警告；3199 实测（临时 wf 已删）：radio 行源标题区分显示、内存态 dry-run 被门禁拦截；devops-wfs 全程只读。
+   - **二轮修正（用户复跑同 log，ssh config 只读比对定谳）**：上轮「引擎没取错」结论对，但「GUI 感知错位」不是本轮主因——**日志行在撒谎**：真跑日志打印 `node.data.alias`（卡片残留 dogyun-hongkong）而非解析后的 alias，而 `ubuntu@xinlonggroup.cn + tc_lite` 证明实际连的就是 tencent-shanghai（pick=in1 正确、链路已正常）。该日志行即里程碑 2 评审 P3（一直未修），本轮终修为打印解析值。HOST KEY MISMATCH 是独立真实问题：卡片 fingerprint=16lQou… 是 dogyun 的，连 tencent 主机被正确拦截——待用户取 tencent 指纹更新（ssh-keyscan | ssh-keygen -lf）或把 fingerprint 也改为连线。**srctitle 撤销**：radio 行源标题（Make Struct·xxx）用户明确不要（未获同意的添加），四处全删。

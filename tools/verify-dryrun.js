@@ -1181,6 +1181,10 @@ await test("静默错误链封堵：selector pick 无值报错 / ssh.session 连
     const logs = [];
     await sshDef.run({ log: (m) => logs.push(m), dryRun: true }, { data: { alias: "dogyun-hongkong" } }, {});
     assert.ok(logs.some(l => l.includes("dogyun-hongkong")), "未连线时 widget 兜底保持");
+    // 连线态：dry-run 日志打印解析后的 alias（非卡片残留 node.data.alias）
+    const logs2 = [];
+    await sshDef.run({ log: (m) => logs2.push(m), dryRun: true }, { data: { alias: "dogyun-hongkong" } }, { alias: "tencent-shanghai" });
+    assert.ok(logs2.some(l => l.includes("SSH tencent-shanghai →")), "连线态打印解析别名（日志不再用残留 widget 值）");
 });
 
 await test("infer: make→selector→split 链编辑期推导字段常量（连线覆盖/环熔断）", () => {

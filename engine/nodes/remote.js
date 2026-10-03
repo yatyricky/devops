@@ -99,7 +99,7 @@ export default [
                 ctx.log(`[dry-run] SSH ${alias} → ${r.user}@${r.host}:${r.port}${r.identityFile ? `（私钥 ${r.identityFile}）` : ""}（${r.fromConfig ? "来自 ssh config" : "未在 config 中找到，按主机名直连"}；指纹${fpLocked ? "已锁定" : "未锁定，将警告"}）`);
                 return { ssh: { dryRun: true } };
             }
-            ctx.log(`[ssh] 连接 ${node.data.alias} → ${r.user}@${r.host}:${r.port}...`);
+            ctx.log(`[ssh] 连接 ${alias} → ${r.user}@${r.host}:${r.port}...`);
             let ssh;
             try {
                 ssh = await sshConnect(r.host, r.user, fingerprint, {
