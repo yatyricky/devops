@@ -543,6 +543,13 @@
       </label>
     {/if}
   </div>
+  {#if ui.runNodeOutputs?.[id] !== undefined}
+    <!-- 节点主动上报的原始输出（如 systemd is-active 的状态词）：最近一次运行的只读回显 -->
+    <div class="outrow nodrag nowheel">
+      <span class="wlab" title="原始输出（最近一次运行）">原始输出</span>
+      <textarea class="rawout" disabled rows={Math.min(4, ui.runNodeOutputs[id].split("\n").length)}>{ui.runNodeOutputs[id]}</textarea>
+    </div>
+  {/if}
   <div class="nidrow">
     <span class="nid nodrag" title="节点 id">{id}</span>
     <button class="notebtn nodrag" class:hasnote={!!noteText} title="备注" onclick={() => (noteOpen = !noteOpen)}>便笺</button>

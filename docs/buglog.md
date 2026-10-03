@@ -335,3 +335,10 @@
 - **门禁确认**：validateTaskRunnable 对「pick 指向未选入源」实测拦截（`任务 链路：节点 sel 的必填输入 in2 依赖节点 make2，未选入`）。
 - **回归**：verify 62→63 绿（selector pick 无值抛错 / ssh 连线口不回退 / 无连线 widget 兜底保持）；构建零警告；3199 实测（临时 wf 已删）：radio 行源标题区分显示、内存态 dry-run 被门禁拦截；devops-wfs 全程只读。
    - **二轮修正（用户复跑同 log，ssh config 只读比对定谳）**：上轮「引擎没取错」结论对，但「GUI 感知错位」不是本轮主因——**日志行在撒谎**：真跑日志打印 `node.data.alias`（卡片残留 dogyun-hongkong）而非解析后的 alias，而 `ubuntu@xinlonggroup.cn + tc_lite` 证明实际连的就是 tencent-shanghai（pick=in1 正确、链路已正常）。该日志行即里程碑 2 评审 P3（一直未修），本轮终修为打印解析值。HOST KEY MISMATCH 是独立真实问题：卡片 fingerprint=16lQou… 是 dogyun 的，连 tencent 主机被正确拦截——待用户取 tencent 指纹更新（ssh-keyscan | ssh-keygen -lf）或把 fingerprint 也改为连线。**srctitle 撤销**：radio 行源标题（Make Struct·xxx）用户明确不要（未获同意的添加），四处全删。
+
+## FEAT-2026-10-02-02 systemd is-active 输出 boolean + 卡片原始输出展示 + TriSwitch 四值三态（用户需求/确认）
+
+1. **systemd.run is-active 输出**：`dynamicOutputs: "systemdActive"`——action=is-active 时出口 [active:boolean]（active→true/failed→false/其余状态→null，`mapIsActiveState` 纯函数导出），切动作出口自动消失（死边清理联动）。run 捕获 is-active 的原始 stdout（非零退出码保持不抛错），经新 ctx 钩子 `markNodeOutput(nodeId, text)` 上报，返回 `{ active }`。
+2. **原始输出展示通道**（通用，先 systemd 用）：runner `run.nodeOutputs` + ctx.markNodeOutput → SSE nodeoutputs diff 推送 → streamJob/LogDrawer hooks → `ui.runNodeOutputs` → DevNode 卡片底部「原始输出」disabled textarea（任何上报节点的卡片自动出现）。
+3. **TriSwitch 四值三态确认**：值域 true/false/undefined/null 共 4 种、UI 3 态——`class:unset={value == null}`（undefined 与 null 共享空轨；null 落盘、undefined 不落盘，显示一致），点击循环不变。
+- **回归**：verify 63→64 绿（mapIsActiveState 四态 + is-active 出口有/其他动作无）；构建零警告；3199 实测（临时 wf 已删）：is-active 卡片 active(boolean) 出口渲染、boolean 字段 null/undefined 同空轨。原始输出 textarea 的真跑回显待下次真实部署观察（is-active 真跑需 SSH 连接，本环境不连远端；通道与 nodeinputs 完全同构）。

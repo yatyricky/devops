@@ -25,7 +25,7 @@
    * 跟踪一个任务到终态。
    * @param {string} id
    * @param {string} t
-   * @param {{ onNode?: (nodeStatus: Record<string,string> | null) => void, onNodeInputs?: (nodeInputs: Record<string, Record<string,string>> | null) => void }} [hooks] 节点状态/实时输入回调
+   * @param {{ onNode?: (nodeStatus: Record<string,string> | null) => void, onNodeInputs?: (nodeInputs: Record<string, Record<string,string>> | null) => void, onNodeOutputs?: (nodeOutputs: Record<string,string> | null) => void }} [hooks] 节点状态/实时输入/原始输出回调
    */
   export async function follow(id, t, hooks = {}) {
     curAbort?.abort();
@@ -37,6 +37,7 @@
       status: (st, err) => { status = (st === "ok" ? "成功" : st === "failed" ? "失败" : st); if (err) append(`[Failed] ${err}`); },
       node: ns => hooks.onNode?.(ns),
       nodeInputs: ni => hooks.onNodeInputs?.(ni),
+      nodeOutputs: no => hooks.onNodeOutputs?.(no),
       end: () => {},
     }, signal);
     if (status !== "失败") append("[Done] 任务结束");

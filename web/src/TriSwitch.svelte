@@ -1,9 +1,9 @@
 <script>
   /**
    * 三态轨道开关（struct boolean 字段值 / boolean widget / taskbar 开关共用）。
-   * 外观：value===undefined → 空轨（无滑块、暗色）；false → 暗滑块居左；true → accent 滑块居右。
-   * 状态机：undefined（仅初始态）→ true → false → true → …——首次点击进入布尔域，
-   * 之后 true↔false 循环，永不回到 undefined。
+   * 值域 true/false/undefined/null（undefined 与 null 共享空轨态）；外观：
+   * value == null → 空轨（无滑块、暗色）；false → 暗滑块居左；true → accent 滑块居右。
+   * 状态机：空轨（仅初始态）→ true → false → true → …——首次点击进入布尔域，之后不再回到空轨。
    */
   let { value, onchange, class: cls = "" } = $props();
   function click() {
@@ -12,7 +12,7 @@
   }
 </script>
 
-<button type="button" role="switch" class="tri-switch {cls}" class:on={value === true} class:unset={value === undefined}
+<button type="button" role="switch" class="tri-switch {cls}" class:on={value === true} class:unset={value == null}
   aria-checked={value === true}
   title={value === true ? "true（点击关闭）" : value === false ? "false（点击开启）" : "未设置（点击开启）"}
   onclick={click}><span class="knob"></span></button>

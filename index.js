@@ -265,6 +265,7 @@ app.post("/api/jobs/:id/stream", (req, res) => {
     let lastStatus = "";
     let lastNodeStatus = "";
     let lastNodeInputs = "";
+    let lastNodeOutputs = "";
     /** @type {NodeJS.Timeout | null} */
     let timer = null;
     /** @type {NodeJS.Timeout | null} */
@@ -288,6 +289,12 @@ app.post("/api/jobs/:id/stream", (req, res) => {
         if (ni !== lastNodeInputs) {
             lastNodeInputs = ni;
             send({ type: "nodeinputs", nodeInputs: run.nodeInputs ?? null });
+        }
+        // 节点原始输出快照（节点主动上报，如 systemd is-active）变化即推
+        const no = JSON.stringify(run.nodeOutputs ?? null);
+        if (no !== lastNodeOutputs) {
+            lastNodeOutputs = no;
+            send({ type: "nodeoutputs", nodeOutputs: run.nodeOutputs ?? null });
         }
         if (run.status !== lastStatus) {
             lastStatus = run.status;

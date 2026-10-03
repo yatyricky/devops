@@ -10,6 +10,8 @@ export const ui = $state({
   nodeRunStatus: null,
   /** @type {Record<string, Record<string, string>> | null} nodeId → {handle: 显示值}（运行中实时更新的实际输入值） */
   runNodeInputs: null,
+  /** @type {Record<string, string> | null} nodeId → 原始输出文本（节点主动上报，如 systemd is-active 的状态词） */
+  runNodeOutputs: null,
   /** @type {Set<string> | null} 手工维护的「未测试」节点类型清单（node-types-untested.json；null = 未加载） */
   untestedNodeTypes: null,
   /** 一键刷新信号：顶栏按钮 +1，各卡片 effect 监听后各自触发自己的下拉刷新 */

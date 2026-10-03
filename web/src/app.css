@@ -139,6 +139,10 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode .notebtn:hover { opacity: 1; }
 .devnode .notebtn.hasnote { border-color: var(--ok); color: var(--ok); opacity: 1; }
 .devnode .noterow { display: block; padding: 4px 10px 2px; border-top: 1px dashed var(--line); }
+/* 节点原始输出（节点主动上报，如 systemd is-active）：只读回显 */
+.devnode .outrow { display: block; padding: 4px 10px 2px; border-top: 1px dashed var(--line); }
+.devnode .outrow .rawout { display: block; width: 100%; font: 11px/1.5 var(--mono); color: var(--fg);
+  background: color-mix(in srgb, var(--panel2) 60%, transparent); resize: none; }
 .devnode .noterow textarea { width: 100%; font-size: 12px; resize: vertical; }
 
 /* Group 背景板层级在组外节点之上（板 z1、成员 z2）：wrapper 不拦截指针，

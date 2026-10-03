@@ -1160,6 +1160,20 @@ await test("ssh.session: alias/fingerprint 可选输入存在（required=false�
     assert.ok(inputs.every(i => !i.required), "均为可选");
 });
 
+await test("systemd.run: is-active 输出 boolean（mapIsActiveState 四态 + dynamicOutputs 随 action）", async () => {
+    const { mapIsActiveState } = await import("../engine/nodes/remote.js");
+    assert.strictEqual(mapIsActiveState("active\n"), true, "active → true");
+    assert.strictEqual(mapIsActiveState("failed"), false, "failed → false");
+    assert.strictEqual(mapIsActiveState("inactive"), null, "inactive → null");
+    assert.strictEqual(mapIsActiveState("activating"), null, "activating → null");
+    assert.strictEqual(mapIsActiveState(""), null, "空输出 → null");
+    // 出口：is-active → [active:boolean]；其他动作 → []
+    const outsActive = getOutputs({ type: "systemd.run", data: { action: "is-active" } }, { nodes: [], edges: [] });
+    assert.deepStrictEqual(outsActive, [{ id: "active", type: "boolean" }], "is-active 有 boolean 出口");
+    const outsRestart = getOutputs({ type: "systemd.run", data: { action: "restart" } }, { nodes: [], edges: [] });
+    assert.deepStrictEqual(outsRestart, [], "其他动作无出口");
+});
+
 await test("静默错误链封堵：selector pick 无值报错 / ssh.session 连线口不回退 widget", async () => {
     const { NODE_TYPES: NT } = await import("../engine/nodes/index.js");
     // selector run：pick 指向的口键存在但值 undefined（源未选入任务的引擎形态）→ 必须抛错

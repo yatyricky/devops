@@ -220,7 +220,7 @@
       nodes = [...nodes.map(n => (members.has(n.id) ? { ...n, zIndex: 2 } : n)), ...groupBoxes];
     }
     hoverTask = null; definer = null;
-    ui.runTaskNodes = null; ui.nodeRunStatus = null; ui.runNodeInputs = null;
+    ui.runTaskNodes = null; ui.nodeRunStatus = null; ui.runNodeInputs = null; ui.runNodeOutputs = null;
     ignoreDirtyUntil = Date.now() + 1000;
     ui.pickerFresh = {}; // 换工作流 = 所有实时列表视为失鲜，运行前须重新刷新
   }
@@ -722,6 +722,7 @@
     ui.nodeRunStatus = null;
     ui.runTaskNodes = null;
     ui.runNodeInputs = null;
+    ui.runNodeOutputs = null;
   }
   /** @param {{ dryRun: boolean, prodVal: string }} p RunModal 确认回调 */
   async function doRun(p) {
@@ -757,9 +758,11 @@
       ui.runTaskNodes = new Set(tasks[m.task].nodes ?? tasks[m.task].path ?? []);
       ui.nodeRunStatus = {};
       ui.runNodeInputs = {};
+      ui.runNodeOutputs = {};
       await logRef?.follow(id, `${displayName}/${m.task}${p.dryRun ? " (dry-run)" : ""}`, {
         onNode: ns => { ui.nodeRunStatus = ns ?? {}; },
         onNodeInputs: ni => { ui.runNodeInputs = ni ?? {}; },
+        onNodeOutputs: no => { ui.runNodeOutputs = no ?? {}; },
       });
     } catch (e) { showToast(e.message); }
   }

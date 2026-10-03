@@ -26,6 +26,14 @@ function buildCommand(cmd, node, opts = {}) {
     return c;
 }
 
+/** `systemctl is-active` 的 stdout → boolean：active→true、failed→false、其余状态（inactive/activating/unknown/空）→ null。 */
+export function mapIsActiveState(out) {
+    const s = String(out ?? "").trim().toLowerCase();
+    if (s === "active") return true;
+    if (s === "failed") return false;
+    return null;
+}
+
 /**
  * 远端命令执行样板：dry-run 打印计划，真执行 + 非零退出码抛错——deps/chown/symlink/nginx-reload/extract 共用。
  * @param {any} ctx
@@ -301,7 +309,7 @@ export default [
     },
     {
         type: "systemd.run",
-        desc: "systemd 动作：restart = daemon-reload + reset-failed + restart + 状态查看（切 symlink 后让新 release 生效的标准动作；服务未运行时 restart 即拉起）；enable --now 用于首次部署；status/is-active 不因服务状态非零而失败（可作只读检查）。无输出——各步 stdout 已实时进任务日志。systemctl 需要 root，恒经 sudo -n，需 NOPASSWD。",
+        desc: "systemd 动作：restart = daemon-reload + reset-failed + restart + 状态查看（切 symlink 后让新 release 生效的标准动作；服务未运行时 restart 即拉起）；enable --now 用于首次部署；status/is-active 不因服务状态非零而失败（可作只读检查）。is-active 输出 boolean：active→true、failed→false、其余状态→null，并上报原始输出（卡片内只读展示）。systemctl 需要 root，恒经 sudo -n，需 NOPASSWD。",
         title: "systemd 服务",
         category: "远端",
         color: "#c678dd",
@@ -310,6 +318,7 @@ export default [
             { id: "name", type: "string", required: true },
         ],
         outputs: [],
+        dynamicOutputs: "systemdActive",
         widgets: [
             { key: "action", label: "动作", kind: "enum", options: ["restart", "enable --now", "start", "reload", "reload-or-restart", "enable", "status", "is-active"], default: "restart" },
             { key: "useSudo", label: "sudo -n", kind: "boolean", default: true },
@@ -331,11 +340,17 @@ export default [
                 for (const s of steps) ctx.log(`[dry-run] remote$ ${buildCommand(s, node)}`);
                 return;
             }
+            let activeRaw = "";
             for (const s of steps) {
                 const r = await sshRun(inputs.ssh, buildCommand(s, node), { log: ctx.log });
+                if (action === "is-active") activeRaw = r.out;
                 if (r.code !== 0 && !s.includes("|| true") && action !== "is-active" && action !== "status") {
                     throw new Error(`systemd ${action} ${name} 失败 (code=${r.code})\n${r.err}`);
                 }
+            }
+            if (action === "is-active") {
+                ctx.markNodeOutput?.(node.id, String(activeRaw).trim());
+                return { active: mapIsActiveState(activeRaw) };
             }
         },
     },

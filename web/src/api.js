@@ -53,6 +53,7 @@ export async function streamJob(id, h, signal) {
         else if (evt.type === "status") h.status(evt.status, evt.error);
         else if (evt.type === "node") h.node?.(evt.nodeStatus);
         else if (evt.type === "nodeinputs") h.nodeInputs?.(evt.nodeInputs);
+        else if (evt.type === "nodeoutputs") h.nodeOutputs?.(evt.nodeOutputs);
         else if (evt.type === "end") { terminal = true; h.end(evt.status); }
       }
     }
@@ -72,6 +73,7 @@ export async function streamJob(id, h, signal) {
     for (; seen < (run.logLines || []).length; seen++) h.log(run.logLines[seen].msg);
     h.node?.(run.nodeStatus ?? null);
     h.nodeInputs?.(run.nodeInputs ?? null);
+    h.nodeOutputs?.(run.nodeOutputs ?? null);
     if (run.status === "ok" || run.status === "failed") {
       h.status(run.status, run.error);
       h.end(run.status);

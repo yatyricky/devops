@@ -111,6 +111,8 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
         nodeStatus: {},
         /** @type {Record<string, Record<string, string>>} nodeId → {handle: 显示值}（wired 输入实时值；脱敏后） */
         nodeInputs: {},
+        /** @type {Record<string, string>} nodeId → 原始输出文本（节点主动上报，如 systemd is-active 的状态词） */
+        nodeOutputs: {},
     };
     runs.set(id, run);
 
@@ -154,6 +156,11 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
                     out[k] = displayValue(k, v);
                 }
                 run.nodeInputs = { ...run.nodeInputs, [nodeId]: out };
+                persistSoon(run);
+            },
+            /** 节点主动上报的原始输出文本（GUI 卡片内只读展示，如 systemd is-active 的状态词）；随 run 持久化 + SSE 快照推送 */
+            markNodeOutput(nodeId, text) {
+                run.nodeOutputs = { ...run.nodeOutputs, [nodeId]: String(text ?? "") };
                 persistSoon(run);
             },
         };

@@ -239,6 +239,10 @@ export function effectiveOutputs(meta, data, env = {}) {
         const lock = selectorLockType(env, env?.depth ?? 0) ?? (env?.edges ? undefined : data?.lockType);
         return lock ? [{ id: "value", type: lock }] : [];
     }
+    if (meta?.dynamicOutputs === "systemdActive") {
+        // 仅 is-active 动作有 boolean 出口（active→true / failed→false / 其余→null）；切动作出口自动消失
+        return data?.action === "is-active" ? [{ id: "active", type: "boolean" }] : [];
+    }
     return meta?.outputs ?? [];
 }
 
