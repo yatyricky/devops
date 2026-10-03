@@ -1235,8 +1235,8 @@ await test("infer: make→selector→split 链编辑期推导字段常量（连�
     };
     const inf = mk(doc);
     assert.strictEqual(inf.resolvePortValue("sess", "alias"), "tencent-shanghai", "全链推导字段常量");
-    assert.strictEqual(inf.resolvePortValue("sess", "num"), "555", "非 string 字段 String 化");
-    assert.strictEqual(inf.resolvePortValue("sess", "flag"), "false", "boolean 字段 String 化");
+    assert.strictEqual(inf.resolvePortValue("sess", "num"), "555", "number 字段返回存储值");
+    assert.strictEqual(inf.resolvePortValue("sess", "flag"), false, "boolean 字段保留原始类型（dashboard 徽章判定依赖）");
     assert.strictEqual(inf.resolvePortValue("sess", "empty"), undefined, "空串字段视为不可解");
     assert.strictEqual(inf.resolvePortValue("sess", "ghost"), undefined, "不存在字段 → undefined");
     // 字段口被连线 → 连线覆盖手填（run 语义）：alias 字段口接 string.const

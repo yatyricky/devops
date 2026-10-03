@@ -140,7 +140,6 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode .body .dashrow + .dashrow { border-top: 1px dashed var(--line); }
 .devnode .body .dashlab { flex: 0 0 40%; min-width: 0; font-size: 11px; color: var(--fg);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.devnode .body .dashtype { font-size: 9px; color: var(--dim); }
 .devnode .body .dashval { flex: 1; min-width: 0; text-align: right; font-size: 11px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .devnode .body .dashval.mono { font-family: var(--mono); }

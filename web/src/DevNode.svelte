@@ -416,7 +416,7 @@
             {@const editVal = runObj ? undefined : resolveStructField?.(structSourceOf?.(id), f.key)}
             {@const shown = liveVal !== undefined && liveVal !== null ? liveVal : editVal}
             <div class="dashrow" title={f.key}>
-              <span class="dashlab">{f.key}<span class="dashtype"> {f.type}</span></span>
+              <span class="dashlab">{f.key}</span>
               {#if f.type === "boolean"}
                 {@const b = shown === true ? true : shown === false ? false : null}
                 <span class="dashbadge {b === true ? "on" : b === false ? "off" : "none"}">{b === true ? "true" : b === false ? "false" : "—"}</span>
