@@ -319,3 +319,10 @@
    - **Make Struct 字段编辑器例外排版（用户指定，QoL-2026-10-02-02，四轮收敛终态）**：wrow 加 `structrow` 修饰类——label 整行左对齐；tblwrap 占卡片一整行（不做 60% 缩进）；行内 **key input 与 type select 各 20%**（40% 区对半）左对齐；**值 input 不定宽**（`flex:1 1 0` 吃满 60% 区里 tri/删除以外的剩余）；tri-switch/删除按钮/＋ 定宽右贴。其余 widget 排版不变。SSH命令 textarea→input（ssh.exec kind string，刷新即见；「只读检查」remote.check 的多行 textarea 未动）。演进过程：首轮 40/60 横排 → 二轮 label 整行+编辑区右 60% 缩进（用户否）→ 三轮占整行+值槽 34px 定宽（用户否）→ 四轮值 input 弹性终态。
    - **新增行直接带值控件（用户指定，QoL-2026-10-02-02 五轮）**：＋行与字段行完全同构——type select 切换即时切换值控件（string/number=fval input、boolean=tri-switch），fieldAdd 把 newVals 里暂存的值一并带入新字段（boolean undefined=未设置态）。**坑**：＋行 fval 用 value+onchange 时 Playwright fill 只触发 input 不触发 change，点＋丢值——改 bind:value（input 事件即时写 newVals）后正常。实测三类型带值新增（string "test"/number "3"/boolean true）。
    - **＋行 tri 停在半路（用户截图，六轮）**：tri 与＋两个 margin-left:auto 在 flex 里**平分剩余空间**——＋行无 fval（flex 吃满），tri 停在中途；字段行因 fval 吃满而 tri 贴右。修：＋去掉 auto（紧跟 tri），tri 独享 auto 即右贴。实测＋行 tri 与字段行同槽（x=475/w=68）、＋紧跟右缘。
+
+## FEAT-2026-10-02-01 Make Struct → Selector → Split Struct 链的编辑期 string 值推导（用户需求，xlgbis 链只读核查）
+
+- **场景**：struct.make（字段常量）→ select.one（pick 转发）→ struct.split → 下游 string 输入口（如 ssh.session 的 alias）——此前输入口预览恒「（运行时）」，且 ssh 别名防漂移门禁对这类输入 resolvePortValue=undefined 直接跳过校验。
+- **实现**（仅 web/src/lib/infer.js，消费端零改动自动生效）：新增 `resolveStructFieldValue(nodeId, fieldName, depth)` struct 值域回溯——make（字段口连线优先=run 语义；手填 fields 常量非空才可解，String 化）/ select.one（data.pick 口转发，不读遗留 lockType）/ struct.split（struct 口透传）；`resolvePortValue` 对源=struct.split 特判按出口 id=字段名回溯。**顺带修**：无入边时 outputValueKey 节点（string.const）自读常量兜底（原 lit-only 导致字段口连 string.const 断链）。
+- **行为变化（有意）**：这条链接 ssh.session.alias 时，防漂移门禁从跳过变为正常比对新鲜度。
+- **回归**：verify 61→62 绿（全链推导/连线覆盖手填/未 pick/空串不可解/环熔断/ghost 字段）；构建零警告；3199 实测（临时 wf 复刻 xlgbis 链，已删）：sessionidp01.alias 预览=tencent-shanghai、ssh 下拉 disabled 回显所选别名；devops-wfs 全程只读。

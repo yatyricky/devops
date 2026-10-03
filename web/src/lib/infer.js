@@ -25,8 +25,9 @@ export function makeInfer(g) {
   const { nodes, edges, typeMap } = g;
 
   /**
-   * 编辑期解析某节点某输入口的当前值：连线（上游为 path.resolve/string.join 时递归推断）→
-   * 上游按 outputValueKey 取 data 字段 → 未连线回读手填 lit。不可解 → undefined。
+   * 编辑期解析某节点某输入口的当前值：连线（上游为 path.resolve/string.join 时递归推断，
+   * 上游为 struct.split 时按字段名回溯 struct 值域）→ 上游按 outputValueKey 取 data 字段 →
+   * 未连线回读手填 lit。不可解 → undefined。
    */
   function resolvePortValue(nodeId, handleId, depth = 0) {
     if (depth > 8) return undefined;
@@ -36,11 +37,48 @@ export function makeInfer(g) {
       if (!src) return undefined;
       if (src.type === "path.resolve") return inferPathResolve(src, depth + 1);
       if (src.type === "string.join") return inferStringJoin(src, depth + 1);
+      // struct.split 的出口 id 即字段名（structSplit 动态出口）——按字段名回溯 struct 值域
+      if (src.type === "struct.split") return resolveStructFieldValue(src.id, handleId, depth + 1);
       const key = typeMap[src.type]?.outputValueKey ?? handleId;
       return src.data?.[key];
     }
     const self = nodes.find(n => n.id === nodeId);
+    // 无入边：outputValueKey 节点（string.const 等）的值即自身常量；否则回读手填 lit
+    const selfKey = self && typeMap[self.type]?.outputValueKey;
+    if (selfKey !== undefined) return self?.data?.[selfKey];
     return self?.data?.lit?.[handleId];
+  }
+
+  /**
+   * struct 值域回溯：nodeId 的 struct 出口提供 fieldName 字段。与引擎 run 同语义——
+   * struct.make 字段口连线优先（连线覆盖手填），手填取 fields 常量（非空才视为可解）；
+   * select.one 按 pick 转发；struct.split 透传。仅消费编辑期常量，环由 depth 熔断。
+   */
+  function resolveStructFieldValue(nodeId, fieldName, depth = 0) {
+    if (depth > 8) return undefined;
+    const src = nodes.find(n => n.id === nodeId);
+    if (!src) return undefined;
+    const wire = h => edges.find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === nodeId && x.targetHandle === h);
+    if (src.type === "struct.make") {
+      const w = wire(fieldName);
+      if (w) return resolvePortValue(w.source, w.sourceHandle, depth + 1);
+      const f = (src.data?.fields ?? []).find(f => f.key === fieldName);
+      if (!f) return undefined;
+      return f.value === undefined || f.value === "" ? undefined : String(f.value);
+    }
+    if (src.type === "select.one") {
+      const pick = src.data?.pick;
+      if (!pick) return undefined;
+      const w = wire(pick);
+      if (!w) return undefined;
+      return resolveStructFieldValue(w.source, fieldName, depth + 1);
+    }
+    if (src.type === "struct.split") {
+      const w = wire("struct");
+      if (!w) return undefined;
+      return resolveStructFieldValue(w.source, fieldName, depth + 1);
+    }
+    return undefined;
   }
 
   /**

@@ -9,6 +9,7 @@ import path from "path";
 import url from "url";
 import { canConnect, SOCKET_TYPES } from "../engine/types.js";
 import { selectorWireProblem, selectorEdgeProblem } from "../engine/rules.js";
+import { makeInfer } from "../web/src/lib/infer.js";
 import { validateWorkflow, validateTaskRunnable } from "../engine/workflow.js";
 import { NODE_TYPES, getInputs, getOutputs } from "../engine/nodes/index.js";
 import { loadWorkflows } from "../engine/registry.js";
@@ -1157,6 +1158,49 @@ await test("ssh.session: alias/fingerprint 可选输入存在（required=false�
     const inputs = getInputs({ type: "ssh.session", data: {} }).filter(i => ["alias", "fingerprint"].includes(i.id));
     assert.deepStrictEqual(inputs.map(i => i.id).sort(), ["alias", "fingerprint"]);
     assert.ok(inputs.every(i => !i.required), "均为可选");
+});
+
+await test("infer: make→selector→split 链编辑期推导字段常量（连线覆盖/环熔断）", () => {
+    const typeMap = Object.fromEntries(Object.entries(NODE_TYPES).map(([k, v]) => [k, { ...v }]));
+    const mk = (g) => makeInfer({ ...g, typeMap });
+    // 全链：make(alias="tencent-shanghai") → selector(pick=in1) → split → 下游读 alias
+    const doc = {
+        nodes: [
+            { id: "make", type: "struct.make", data: { fields: [{ key: "alias", type: "string", value: "tencent-shanghai" }, { key: "num", type: "number", value: "555" }, { key: "flag", type: "boolean", value: false }, { key: "empty", type: "string", value: "" }] } },
+            { id: "sel", type: "select.one", data: { pick: "in1" } },
+            { id: "split", type: "struct.split", data: {} },
+            { id: "sess", type: "ssh.session", data: {} },
+        ],
+        edges: [
+            { id: "e1", source: "make", sourceHandle: "struct", target: "sel", targetHandle: "in1" },
+            { id: "e2", source: "sel", sourceHandle: "value", target: "split", targetHandle: "struct" },
+            { id: "e3", source: "split", sourceHandle: "alias", target: "sess", targetHandle: "alias" },
+            { id: "e4", source: "split", sourceHandle: "num", target: "sess", targetHandle: "num" },
+            { id: "e5", source: "split", sourceHandle: "flag", target: "sess", targetHandle: "flag" },
+            { id: "e6", source: "split", sourceHandle: "empty", target: "sess", targetHandle: "empty" },
+            { id: "e7", source: "split", sourceHandle: "ghost", target: "sess", targetHandle: "ghost" },
+        ],
+    };
+    const inf = mk(doc);
+    assert.strictEqual(inf.resolvePortValue("sess", "alias"), "tencent-shanghai", "全链推导字段常量");
+    assert.strictEqual(inf.resolvePortValue("sess", "num"), "555", "非 string 字段 String 化");
+    assert.strictEqual(inf.resolvePortValue("sess", "flag"), "false", "boolean 字段 String 化");
+    assert.strictEqual(inf.resolvePortValue("sess", "empty"), undefined, "空串字段视为不可解");
+    assert.strictEqual(inf.resolvePortValue("sess", "ghost"), undefined, "不存在字段 → undefined");
+    // 字段口被连线 → 连线覆盖手填（run 语义）：alias 字段口接 string.const
+    const wired = structuredClone(doc);
+    wired.nodes.push({ id: "c", type: "string.const", data: { value: "from-wire" } });
+    wired.edges.push({ id: "w1", source: "c", sourceHandle: "value", target: "make", targetHandle: "alias" });
+    assert.strictEqual(mk(wired).resolvePortValue("sess", "alias"), "from-wire", "字段口连线覆盖手填");
+    // selector 未 pick → 不可解
+    const nopick = structuredClone(doc);
+    nopick.nodes[1].data.pick = undefined;
+    assert.strictEqual(mk(nopick).resolvePortValue("sess", "alias"), undefined, "未 pick → 不可解");
+    // 环熔断：纯环（sel.pick 口只接自己的 value，无真实上游）→ undefined 不炸
+    const cyc = structuredClone(doc);
+    cyc.edges = cyc.edges.filter(e => !(e.source === "make" && e.target === "sel"));
+    cyc.edges.push({ id: "c1", source: "sel", sourceHandle: "value", target: "sel", targetHandle: "in1" });
+    assert.strictEqual(mk(cyc).resolvePortValue("sess", "alias"), undefined, "环熔断 → undefined");
 });
 
 console.log(`\nOK: ${passed} 项断言全部通过`);
