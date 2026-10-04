@@ -377,3 +377,11 @@
 - **Shape 行 40/60**（用户指定）：shaperow 类——key 40%、type flex 吃满定宽＋以外（60% 区），区别于 Make Struct 的 20/20/右贴。
 - **回归**：verify 66 绿（无引擎改动）；构建零警告；3199 截图实测：行号 1/2/3 对逻辑行（长行 wrap 正确）、高亮着色对齐、styleH 94px 自适应、Shape 行 132/164（40/60）；devops-wfs 全程只读。
    - **自适应高度滚动条（用户截图）**：height 用 scrollHeight 直设，但 `*{box-sizing:border-box}` 下 clientHeight = height − border（上下各 1px，实际 0.67px×2 因 zoom 舍入）→ 恒差 2px 必出滚动条——fit 加 `+2` border 补偿（实测 clientH=scrollH=131、无纵向滚动条）。
+
+## FEAT-2026-10-02-06 ssh.exec「整段脚本」模式 + audit-demo 多行排版（用户需求 + LF/CRLF 提问）
+
+- **语义发现（换行排版的前置）**：ssh.exec 原语义是**逐行独立执行**（每行各自 sudo bash -c，行失败即停）——采集器命令变量跨行共享，直接换行会丢变量。加 widget `asScript`（「整段脚本（变量跨行共享，set -e）」，默认 false 保持既有逐行语义）：开启时多行合并为一次 `sudo bash -c`，前置 `set -e` 保持失败即停；substitute 整段替换、{{name}} 动态口不受影响。
+- **LF/CRLF 提问**：现代浏览器 textarea value 规范化 LF；换行经 sq() 单引号包裹原样进 bash -c、SSH 通道按字节传 UTF-8——无截断/乱码；防御性 `\r\n?` normalize 加入。
+- **audit-demo**：6 采集器命令改多行排版（5~14 行，set -e 失败即停）+ asScript 开。
+- **坑复现**：node -e 生成多行命令时 printf `%s\n` 的 \n 被 bash 命令替换吃掉（旧坑）、JS 字符串 `\'` 与 shell 引号混战（SyntaxError）——改 Write 工具写一次性 .mjs 脚本生成（textareaEnhance 等含特殊字符内容一律如此）。
+- **回归**：verify 66 绿；构建零警告；3199 实测（截图）：6 卡多行 + 行号/高亮/自适应 + asScript 开关可见；audit-demo.json 保留 .tmp 供用户研究。

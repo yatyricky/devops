@@ -143,7 +143,7 @@ export default [
     },
     {
         type: "ssh.exec",
-        desc: "远端逐行执行命令：{{name}} 占位符自动生成输入口，值自动安全加引号；sudo 与登录 shell 可开关。sudo 开启时整行经 sudo -n bash -c 提权（复合命令 && 也整段生效）。",
+        desc: "远端执行命令：{{name}} 占位符自动生成输入口，值自动安全加引号。默认逐行执行（每行独立 bash，行失败即停）；开「整段脚本」后多行合并为一次 bash -c（前置 set -e 保持失败即停，变量跨行共享——适合带中间变量的采集脚本）。sudo 与登录 shell 可开关，sudo 开启时整段经 sudo -n bash -c 提权。",
         title: "SSH 命令",
         category: "远端",
         color: "#c678dd",
@@ -151,15 +151,26 @@ export default [
         outputs: [{ id: "out", type: "string" }],
         widgets: [
             { key: "command", label: "命令（{{name}} 生成输入插槽，值自动加引号）", kind: "text", fullrow: true, rows: 2, highlight: "shell", lineNumbers: true, autoGrow: true, default: "" },
+            { key: "asScript", label: "整段脚本（变量跨行共享，set -e）", kind: "boolean", default: false },
             { key: "useSudo", label: "sudo -n", kind: "boolean", default: true },
             { key: "loginShell", label: "登录 shell（nvm PATH）", kind: "boolean", default: true },
         ],
         dynamicInputs: { source: "command", type: "string" },
         async run(ctx, node, inputs) {
-            const raw = String(node.data.command ?? "").trim();
+            // CRLF 防御性规范化（现代浏览器 textarea 已保证 LF）
+            const raw = String(node.data.command ?? "").replace(/\r\n?/g, "\n").trim();
             if (!raw) throw new Error("ssh.exec 未配置命令");
-            const lines = raw.split("\n").map(s => s.trim()).filter(Boolean);
             let last = { code: 0, out: "", err: "" };
+            if (node.data.asScript) {
+                // 整段脚本：一次 bash -c（sq 单引号内换行字面保留），set -e 保持「失败即停」
+                const resolved = substitute("set -e\n" + raw, inputs);
+                const finalCmd = buildCommand(resolved, node, { sudoWrap: true });
+                if (ctx.dryRun) { ctx.log(`[dry-run] remote$ ${finalCmd}`); return { out: "" }; }
+                last = await sshRun(inputs.ssh, finalCmd, { log: ctx.log });
+                if (last.code !== 0) throw new Error(`remote script failed (code=${last.code}):\n${last.err}`);
+                return { out: last.out.trim() };
+            }
+            const lines = raw.split("\n").map(s => s.trim()).filter(Boolean);
             for (const line of lines) {
                 const resolved = substitute(line, inputs);
                 const finalCmd = buildCommand(resolved, node, { sudoWrap: true });
