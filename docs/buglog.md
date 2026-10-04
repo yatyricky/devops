@@ -376,3 +376,4 @@
 - **SSH命令 widget**：`kind:"text", fullrow, rows:2, highlight:"shell", lineNumbers:true, autoGrow:true`（元数据开关，其它 textarea 零改动随时可开）。
 - **Shape 行 40/60**（用户指定）：shaperow 类——key 40%、type flex 吃满定宽＋以外（60% 区），区别于 Make Struct 的 20/20/右贴。
 - **回归**：verify 66 绿（无引擎改动）；构建零警告；3199 截图实测：行号 1/2/3 对逻辑行（长行 wrap 正确）、高亮着色对齐、styleH 94px 自适应、Shape 行 132/164（40/60）；devops-wfs 全程只读。
+   - **自适应高度滚动条（用户截图）**：height 用 scrollHeight 直设，但 `*{box-sizing:border-box}` 下 clientHeight = height − border（上下各 1px，实际 0.67px×2 因 zoom 舍入）→ 恒差 2px 必出滚动条——fit 加 `+2` border 补偿（实测 clientH=scrollH=131、无纵向滚动条）。

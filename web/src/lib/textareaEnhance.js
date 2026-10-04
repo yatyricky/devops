@@ -102,7 +102,8 @@ export function enhance(node, params = {}) {
     const fit = () => {
         if (!cur.autoGrow) return;
         node.style.height = "auto";
-        node.style.height = `${Math.min(node.scrollHeight, cur.maxHeight ?? 420)}px`;
+        // +2 = 上下 border 补偿（border-box 下 clientHeight = height - border，少 2px 必出滚动条）
+        node.style.height = `${Math.min(node.scrollHeight + 2, cur.maxHeight ?? 420)}px`;
     };
 
     const applyScroll = () => {
