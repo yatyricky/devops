@@ -1185,17 +1185,35 @@ await test("dashboard.show: 注册形状 + structFieldsFromShape 解析", async 
     assert.strictEqual(structFieldsFromShape("string"), null, "非 struct → null");
 });
 
-await test("struct.fromjson: run 解析/上报/非法输入", async () => {
+await test("struct.fromjson: run 解析/上报/shape 子集校验/出口/split 回溯", async () => {
     const def = NODE_TYPES["struct.fromjson"];
     assert.ok(def, "节点已注册");
     const reported = [];
     const ctx = { log: () => {}, dryRun: false, markNodeOutput: (id, t) => reported.push(t) };
-    const r = await def.run(ctx, { data: {} }, { json: '{"security_updates":3,"listeners":"pass"}' });
-    assert.deepStrictEqual(r, { struct: { security_updates: 3, listeners: "pass" } }, "解析为 struct");
+    const node = { data: { shape: [{ key: "security_updates", type: "number" }, { key: "listeners", type: "string" }, { key: "healthy", type: "boolean" }] } };
+    // 通过：缺失字段（healthy）允许；上报完整 JSON
+    const r = await def.run(ctx, node, { json: '{"security_updates":3,"listeners":"pass"}' });
+    assert.deepStrictEqual(r, { struct: { security_updates: 3, listeners: "pass" } }, "shape 子集通过");
     assert.deepStrictEqual(reported, ['{"security_updates":3,"listeners":"pass"}'], "完整 JSON 上报");
-    await assert.rejects(() => def.run(ctx, { data: {} }, { json: "{oops" }), /解析失败/, "非法 JSON 报错");
-    await assert.rejects(() => def.run(ctx, { data: {} }, { json: "[1,2]" }), /顶层必须是对象/, "数组顶层报错");
-    await assert.rejects(() => def.run(ctx, { data: {} }, { json: "" }), /未提供 JSON/, "空输入报错");
+    // 类型不匹配 / 多余字段 / 空 shape / 非法 JSON / 数组顶层
+    await assert.rejects(() => def.run(ctx, node, { json: '{"security_updates":"3"}' }), /类型不匹配.*期望 number.*实际 string/, "类型不匹配报错");
+    await assert.rejects(() => def.run(ctx, node, { json: '{"security_updates":3,"extra":1}' }), /多余字段 "extra"/, "多余字段报错");
+    await assert.rejects(() => def.run(ctx, { data: {} }, { json: "{}" }), /未定义 shape/, "空 shape 报错");
+    await assert.rejects(() => def.run(ctx, node, { json: "{oops" }), /解析失败/, "非法 JSON 报错");
+    await assert.rejects(() => def.run(ctx, node, { json: "[1,2]" }), /顶层必须是对象/, "数组顶层报错");
+    await assert.rejects(() => def.run(ctx, node, { json: "" }), /未提供 JSON/, "空输入报错");
+    // 出口：shape → structShape（编辑期确定）；split 回溯 fromjson → 字段出口
+    const doc = {
+        nodes: [
+            { id: "fj", type: "struct.fromjson", data: { shape: [{ key: "alias", type: "string" }, { key: "num", type: "number" }] } },
+            { id: "split", type: "struct.split", data: {} },
+        ],
+        edges: [{ id: "e1", source: "fj", sourceHandle: "struct", target: "split", targetHandle: "struct" }],
+    };
+    const outs = getOutputs(doc.nodes[0], doc);
+    assert.deepStrictEqual(outs, [{ id: "struct", type: "struct:{alias:string,num:number}" }], "出口类型 = shape 形状串");
+    const splitOuts = getOutputs(doc.nodes[1], doc);
+    assert.deepStrictEqual(splitOuts, [{ id: "alias", type: "string" }, { id: "num", type: "number" }], "split 回溯 fromjson 形状串 → 字段出口");
 });
 
 await test("静默错误链封堵：selector pick 无值报错 / ssh.session 连线口不回退 widget", async () => {

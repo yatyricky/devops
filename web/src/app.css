@@ -71,6 +71,23 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode .body .wrow > .tblwrap, .devnode .body .wrow > .trow { flex: 1 1 0; min-width: 0; }
 .devnode .body .wrow > .tri-switch { margin-left: auto; align-self: center; }
 .devnode .body .wrow > .errline, .devnode .body .wrow > .kvline { flex-basis: 100%; }
+/* fullrow（SSH命令等）：label 整行、textarea 整行（另起一行，宽度 100%） */
+.devnode .body .wrow.fullrow { display: block; }
+.devnode .body .wrow.fullrow .wlab { width: 100%; }
+.devnode .body .wrow.fullrow > .cmdhl-wrap, .devnode .body .wrow.fullrow > textarea { width: 100%; }
+/* 命令高亮 overlay：pre 与 textarea 同框叠放——同字体/行高/padding/换行行为，滚动同步 */
+.devnode .body .cmdhl-wrap { position: relative; display: block; }
+.devnode .body .cmdhl-wrap textarea { position: relative; background: transparent; color: transparent;
+  caret-color: var(--fg); display: block; }
+.devnode .body .cmdhl-wrap textarea::selection { background: rgba(97, 175, 239, .35); color: transparent; }
+.devnode .body pre.cmdhl { position: absolute; inset: 0; margin: 0; pointer-events: none;
+  font: 12px/1.5 var(--mono); padding: 2px 6px; border-radius: 4px;
+  white-space: pre-wrap; word-break: break-word; overflow: hidden;
+  color: var(--fg); background: var(--panel2); border: 1px solid var(--line); }
+.devnode .body pre.cmdhl .c-var { color: #e5c07b; font-weight: 700; }
+.devnode .body pre.cmdhl .c-kw { color: #c678dd; }
+.devnode .body pre.cmdhl .c-str { color: #98c379; }
+.devnode .body pre.cmdhl .c-cmt { color: var(--dim); font-style: italic; }
 /* Make Struct 字段编辑器（例外排版）：label 整行左对齐；字段行（key-type-value-action）占卡片一整行——
    key/type 左对齐各 20%（40% 区对半）；值槽（fval=34 与 tri-switch 同槽同宽）/删除/＋ 定宽右贴，
    右侧组合计上限 60%（spacing 计入） */

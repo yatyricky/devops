@@ -361,3 +361,10 @@
 - **演示 wf**：`.tmp/audit-demo.json`（21 节点/20 边）——ssh.session + 6 采集器（sshd 四 verdict / 防火墙+暴露面 / nginx 三项 / frp+deploy 权限（{{toml}}/{{deploydir}} 动态输入）/ 证书天数 / 补丁+僵尸）→ 6 × fromjson → 6 × dashboard（便笺命名）；task audit-demo 全选。全部采集器纯 printf/grep/awk 单行（无 python），verdict 用 pass/warn/fail 字符串。
 - **坑**：生成 wf 的 node -e 里 printf `%s\n` 的 \n 被 bash 命令替换变真实换行——采集器命令被拆行（ssh.exec 按行切分会断管道），改 grep 直出/管道 awk 后置规避；另有 local-config lastOpened 忘备份先删的失误，已按已知值恢复。
 - **回归**：verify 65→66 绿（fromjson 解析/上报/非法 JSON/数组顶层/空输入）；构建零警告；3199 渲染检查（wf 打开 21/20 节点边、fromjson 出口 struct(struct)、dashboard 运行时形状占位）；真跑采集器需 SSH 远端（本环境不连），由用户在部署环境执行。
+
+## BUG-2026-10-02-03 fromjson→split 出口解析失败（用户报）→ shape 静态化重构 + SSH命令 fullrow/高亮
+
+- **根因**：fromjson 原出口为纯 struct（无形状），structSplit 只认 make/selector 两条回溯路径 → fromjson 上游时 split 出口 []（前端拒连/死边清理删边、validateTaskRunnable 报 sourceHandle 不存在——用户 case：lit '{"aa":15}' → fromjson → split 无 aa 口）。
+- **重构（用户定案：尽可能降低动态概念，像静态语言）**：fromjson 加 **shape 定义**（widget `kind:"struct" shapeOnly:true`，key/type 逐字段声明，操作同 Make Struct 但无值列——DevNode shapeOnly 模式隐藏值槽，fieldAdd shapeOnly 不带 value）；出口 `dynamicOutputs:"fromJsonShape"` = `structShape(data.shape)`（struct_N 编辑期确定）；**run 子集校验**：JSON ⊆ shape——缺失字段允许（undefined）、多余字段报「多余字段」、类型不匹配报「期望 X 实际 Y」、空 shape 报「未定义 shape」。**structSplit 第三回溯路径**：上游出口列表含形状串出口 → structFieldsFromShape 解析（通用兜底，不点名 fromjson；含 depth>8 互递归熔断；顺手把 selector 分支的解析重构为 structFieldsFromShape——首测暴露 key/id 映射错误已修）。
+- **SSH命令 widget（changes 2）**：command 改 `kind:"text" fullrow:true rows:2 highlight:"shell"`——label 整行 100% 左对齐、textarea 整行 100%（另起一行、默认 2 行、resize:vertical 宽度不可拉）；高亮 overlay：pre 层（同字体/行高/padding/pre-wrap）叠于透明文字 textarea 背后、onscroll 同步——`{{NAME}}` 琥珀加粗、命令词紫、字符串绿、注释灰斜体。
+- **回归**：verify 66 绿（fromjson shape 子集校验六态 + 出口形状串 + split 回溯 + selector 字母序旧断言）；构建零警告；3199 实测（截图）：用户 case 链路 split 出现 aa(number) 口且下游边存活、shape 编辑器无值列、SSH命令卡 fullrow/2 行/高亮对齐；devops-wfs 全程只读。

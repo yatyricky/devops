@@ -308,15 +308,47 @@
   const numOk = v => String(v ?? "").trim() !== "" && Number.isFinite(Number(v));
   /** @param {string} key @param {number} i @param {string} prop @param {any} v */
   function setField(key, i, prop, v) { set(key, (get(key) ?? []).map((x, j) => j === i ? { ...x, [prop]: v } : x)); }
-  function fieldAdd(key) {
+  function fieldAdd(key, shapeOnly = false) {
     const k = String(newVals[key + "#k"] ?? "").trim();
     if (!k || !/^\w+$/.test(k)) return;
     const type = newVals[key + "#t"] ?? "string";
-    const v = newVals[key + "#v"];
-    // boolean 字段：值 undefined = 三态开关未设置态（JSON 序列化自动省略该键）；其余 undefined 归 ""
-    const field = type === "boolean" ? { key: k, type, ...(v !== undefined ? { value: v } : {}) } : { key: k, type, value: v ?? "" };
-    set(key, [...(get(key) ?? []), field]);
-    newVals[key + "#k"] = ""; newVals[key + "#t"] = "string"; newVals[key + "#v"] = undefined;
+    if (shapeOnly) {
+      // shape 声明（Struct From JSON）：只有 key/type，无值
+      set(key, [...(get(key) ?? []), { key: k, type }]);
+    } else {
+      const v = newVals[key + "#v"];
+      // boolean 字段：值 undefined = 三态开关未设置态（JSON 序列化自动省略该键）；其余 undefined 归 ""
+      const field = type === "boolean" ? { key: k, type, ...(v !== undefined ? { value: v } : {}) } : { key: k, type, value: v ?? "" };
+      set(key, [...(get(key) ?? []), field]);
+      newVals[key + "#v"] = undefined;
+    }
+    newVals[key + "#k"] = ""; newVals[key + "#t"] = "string";
+  }
+
+  // ── 命令高亮（{{NAME}} 占位符 + shell 基础着色）：escape 后按词法包 span，pre 层与 textarea 叠加同步 ────
+  let hlEls = {};
+  function syncHlScroll(key, ta) {
+    const pre = hlEls[key];
+    if (pre) { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft; }
+  }
+  function highlightCmd(src) {
+    const esc = s => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    // 逐段扫：注释(#…) / 字符串('…' "…") / {{NAME}} / 词（命令词表强调）——其余原样
+    let out = "", i = 0;
+    const KW = /^(sudo|systemctl|bash|sh|grep|awk|sed|cat|find|stat|openssl|apt-get|apt|ufw|ss|ps|tar|curl|jq|python3|fail2ban-client|date|cut|head|tail|xargs|echo|printf|test|mkdir|chmod|chown|ln|rm|cp|mv|install)\b/;
+    while (i < src.length) {
+      const rest = src.slice(i);
+      let m;
+      if ((m = rest.match(/^#[^\n]*/))) { out += `<span class="c-cmt">${esc(m[0])}</span>`; i += m[0].length; continue; }
+      if ((m = rest.match(/^'[^'\n]*'/)) || (m = rest.match(/^"[^"\n]*"/))) { out += `<span class="c-str">${esc(m[0])}</span>`; i += m[0].length; continue; }
+      if ((m = rest.match(/^\{\{(\w+)\}\}/))) { out += `<span class="c-var">${esc(m[0])}</span>`; i += m[0].length; continue; }
+      if ((m = rest.match(/^[A-Za-z_][\w.-]*/))) {
+        out += KW.test(m[0]) ? `<span class="c-kw">${esc(m[0])}</span>` : esc(m[0]);
+        i += m[0].length; continue;
+      }
+      out += esc(src[i]); i += 1;
+    }
+    return out + "\n"; // 尾随换行：pre 与 textarea 的软换行末行对齐
   }
 </script>
 
@@ -460,11 +492,21 @@
     {#if meta?.widgets?.length}
       <div class="sep"></div>
       {#each meta.widgets as w (w.key)}
-        <label class="wrow nodrag" class:structrow={w.kind === "struct"}>
+        <label class="wrow nodrag" class:structrow={w.kind === "struct"} class:fullrow={w.fullrow}>
           <span class="wlab" title={w.label}>{w.label}</span>
           {#if w.kind === "text"}
-            <textarea rows="4" value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
-              oninput={e => set(w.key, e.target.value)}></textarea>
+            {#if w.highlight}
+              <!-- 高亮 overlay：pre 层在 textarea 背后同步渲染着色文本；textarea 文字透明、caret 可见 -->
+              <span class="cmdhl-wrap nodrag">
+                <pre class="cmdhl" bind:this={hlEls[w.key]}>{@html highlightCmd(get(w.key) ?? "")}</pre>
+                <textarea rows={w.rows ?? 4} value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
+                  oninput={e => set(w.key, e.target.value)}
+                  onscroll={e => syncHlScroll(w.key, e.target)}></textarea>
+              </span>
+            {:else}
+              <textarea rows={w.rows ?? 4} value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
+                oninput={e => set(w.key, e.target.value)}></textarea>
+            {/if}
           {:else if w.kind === "boolean"}
             <TriSwitch value={get(w.key) ?? w.default} onchange={v => set(w.key, v)} />
           {:else if w.kind === "enum"}
@@ -534,8 +576,9 @@
               value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
               onchange={e => set(w.key, numOk(e.target.value) ? Number(e.target.value) : e.target.value)} />
           {:else if w.kind === "struct"}
-            <!-- 例外排版（QoL-2026-10-02-02）：label 整行左对齐；编辑区右 60%——key/type 对半、
-                 值槽（input 34px 定宽，与 tri-switch 同槽同宽）/删除按钮定宽右对齐，spacing 计入 60% -->
+            {@const shapeOnly = !!w.shapeOnly}
+            <!-- 例外排版（QoL-2026-10-02-02）：label 整行左对齐；key/type 对半、值槽/删除右贴。
+                 shapeOnly（Struct From JSON 的 shape 声明）无值槽——行 = key/type/删除 -->
             <span class="tblwrap">
               {#each get(w.key) ?? [] as f, i}
                 <span class="trow">
@@ -546,7 +589,9 @@
                     <option value="number">number</option>
                     <option value="boolean">boolean</option>
                   </select>
-                  {#if isWiredAsTarget?.(id, f.key)}
+                  {#if shapeOnly}
+                    <!-- shape 声明无值（值来自 JSON 解析），仅校验运行时子集 -->
+                  {:else if isWiredAsTarget?.(id, f.key)}
                     <span class="wired" title="已连线：该字段值来自上游">🔗</span>
                   {:else if f.type === "boolean"}
                     <!-- 三态轨道开关：undefined 空轨（仅初始态）/ false 滑块左(暗) / true 滑块右(亮)；
@@ -567,15 +612,17 @@
                   <option value="number">number</option>
                   <option value="boolean">boolean</option>
                 </select>
-                {#if (newVals[w.key + "#t"] ?? "string") === "boolean"}
-                  <!-- 新增行值控件随 type 切换（与字段行同槽同排版）：boolean = tri-switch -->
-                  <TriSwitch class="nodrag" value={newVals[w.key + "#v"]}
-                    onchange={v => newVals[w.key + "#v"] = v} />
-                {:else}
-                  <input class="fval" class:winvalid={(newVals[w.key + "#t"] ?? "string") === "number" && !numOk(newVals[w.key + "#v"])} placeholder="值"
-                    bind:value={newVals[w.key + "#v"]} />
+                {#if !shapeOnly}
+                  {#if (newVals[w.key + "#t"] ?? "string") === "boolean"}
+                    <!-- 新增行值控件随 type 切换（与字段行同槽同排版）：boolean = tri-switch -->
+                    <TriSwitch class="nodrag" value={newVals[w.key + "#v"]}
+                      onchange={v => newVals[w.key + "#v"] = v} />
+                  {:else}
+                    <input class="fval" class:winvalid={(newVals[w.key + "#t"] ?? "string") === "number" && !numOk(newVals[w.key + "#v"])} placeholder="值"
+                      bind:value={newVals[w.key + "#v"]} />
+                  {/if}
                 {/if}
-                <button class="mini" onclick={() => fieldAdd(w.key)}>＋</button>
+                <button class="mini" onclick={() => fieldAdd(w.key, shapeOnly)}>＋</button>
               </span>
             </span>
           {:else}

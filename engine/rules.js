@@ -221,6 +221,7 @@ export function effectiveInputs(meta, data, env = {}) {
  */
 export function effectiveOutputs(meta, data, env = {}) {
     if (meta?.dynamicOutputs === "structSplit") {
+        if ((env?.depth ?? 0) > 8) return []; // split↔fromjson 等互递归形状链熔断
         const e = (env.edges ?? []).find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === env?.id);
         const src = (env.nodes ?? []).find(n => n.id === e?.source);
         // 上游 struct.make：按字段声明序输出
@@ -232,12 +233,15 @@ export function effectiveOutputs(meta, data, env = {}) {
         const lock = srcMeta ? selectorLockType({ ...env, id: src.id }) : undefined;
         const t = (typeof lock === "string" && lock !== "any" ? lock : env?.edges ? undefined : src?.data?.lockType);
         if (typeof t === "string" && t.startsWith("struct:{")) {
-            return t.slice("struct:{".length, -1)
-                .split(",").filter(Boolean)
-                .map(kv => {
-                    const i = kv.indexOf(":");
-                    return { id: kv.slice(0, i), type: kv.slice(i + 1) ?? "string" };
-                });
+            return (structFieldsFromShape(t) ?? []).map(f => ({ id: f.key, type: f.type }));
+        }
+        // 上游出口列表中有形状串出口（struct.fromjson 等静态声明形状的源）→ 解析为字段出口
+        if (srcMeta) {
+            const srcOuts = effectiveOutputs(srcMeta, src.data, { ...env, id: src.id, depth: (env?.depth ?? 0) + 1 });
+            for (const o of srcOuts) {
+                const fs = structFieldsFromShape(o?.type);
+                if (fs) return fs.map(f => ({ id: f.key, type: f.type }));
+            }
         }
         return [];
     }
@@ -245,6 +249,10 @@ export function effectiveOutputs(meta, data, env = {}) {
         // 无字段 = 无出口（无 struct 可供下游消费）
         if (!(data?.fields ?? []).some(f => f.key)) return [];
         return [{ id: "struct", type: structShape(data?.fields) }];
+    }
+    if (meta?.dynamicOutputs === "fromJsonShape") {
+        // shape 人工声明（同 Make Struct 的 key/type）→ 出口类型编辑期即确定；空 shape 退化为纯 struct
+        return [{ id: "struct", type: structShape(data?.shape) }];
     }
     if (meta?.dynamicOutputs === "selectorOut") {
         // 有图上下文纯派生；无图（老调用）才允许遗留 lockType 兜底

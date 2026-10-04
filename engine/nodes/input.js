@@ -75,11 +75,14 @@ export default [
         title: "Struct From JSON",
         category: "输入",
         color: "#c8d3f0",
-        desc: "解析一段 JSON 文本为 struct（运行时形状：字段名运行时才知道，下游 dashboard 运行后按字段渲染）。常与 ssh.exec 连用——远端命令输出 JSON（printf/grep/awk 组装、或 sed 把 python-repr 转成 JSON），本节点解析后供 dashboard/selector 消费。顶层必须是对象，解析失败任务报错。",
+        dynamicOutputs: "fromJsonShape",
+        desc: "解析一段 JSON 文本为 struct。Shape 逐字段声明 key/类型（同 Make Struct 操作）——出口类型即 struct_N；运行时 JSON 必须是 shape 的子集：允许字段缺失（undefined），多余字段或类型不匹配即任务失败。常与 ssh.exec 连用——远端命令输出 JSON（printf/grep/awk 组装、或 sed 把 python-repr 转成 JSON）。",
         inputs: [{ id: "json", type: "string", required: true }],
-        outputs: [{ id: "struct", type: "struct" }],
-        widgets: [],
+        outputs: [],
+        widgets: [{ key: "shape", label: "Shape（key / 类型）", kind: "struct", shapeOnly: true, default: [] }],
         async run(ctx, node, inputs) {
+            const shape = (node.data?.shape ?? []).filter(f => f.key);
+            if (!shape.length) throw new Error("struct.fromjson 未定义 shape（逐字段配置 key/类型，出口类型才能确定）");
             const raw = String(inputs.json ?? "").trim();
             if (!raw) throw new Error("struct.fromjson 未提供 JSON 输入");
             let obj;
@@ -91,7 +94,17 @@ export default [
             if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
                 throw new Error("struct.fromjson：JSON 顶层必须是对象");
             }
-            // 完整无截断上报（dashboard 运行时形状派生从 runNodeOutputs 取；兼任卡片原始输出展示）
+            // 子集校验：JSON ⊆ shape（缺失字段允许；多余字段/类型不匹配拒绝）——像静态语言一样在入口处把关
+            const shapeKeys = new Set(shape.map(f => f.key));
+            const jsType = v => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
+            for (const [k, v] of Object.entries(obj)) {
+                const f = shape.find(s => s.key === k);
+                if (!f) throw new Error(`struct.fromjson：多余字段 "${k}"（不在 shape 中）: ${JSON.stringify(v)?.slice(0, 60)}`);
+                const actual = jsType(v);
+                if (actual !== f.type) {
+                    throw new Error(`struct.fromjson：字段 "${k}" 类型不匹配（期望 ${f.type}，实际 ${actual}）`);
+                }
+            }
             ctx.markNodeOutput?.(node.id, JSON.stringify(obj));
             ctx.log(`[struct.fromjson] ${Object.keys(obj).join(", ")}`);
             return { struct: obj };
