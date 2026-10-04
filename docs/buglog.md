@@ -386,3 +386,4 @@
 - **坑复现**：node -e 生成多行命令时 printf `%s\n` 的 \n 被 bash 命令替换吃掉（旧坑）、JS 字符串 `\'` 与 shell 引号混战（SyntaxError）——改 Write 工具写一次性 .mjs 脚本生成（textareaEnhance 等含特殊字符内容一律如此）。
 - **回归**：verify 66 绿；构建零警告；3199 实测（截图）：6 卡多行 + 行号/高亮/自适应 + asScript 开关可见；audit-demo.json 保留 .tmp 供用户研究。
    - **gutter 溢出卡片 + maxHeight 截断（用户两张截图，FEAT-2026-10-02-05 修补）**：①行号浮在卡外——translateY 加在 gutter 元素自身，框体整体移出、overflow:hidden 裁剪框跟着走；改为 gutter 内 `.ta-gutter-inner`（absolute inset 0）承载行号并 translateY，gutter 框固定参与裁剪。②11 行内容仍出滚动条——maxHeight 默认 420 截断（fit 迭代已正确收敛 438 被 min 截回）；默认上限放宽 2000（仅防失控），同时 fit 保持迭代收敛（亚像素舍入下固定补偿不可靠）。
+   - **高度策略改回手动拖（用户改需求）**：autoGrow/迭代收敛删除；action 参数 `height`（初始高度）+ textarea `resize: vertical` 用户拖；拖完松手（pointerup）`saveWidgetH` 写 `data.uiH[widgetKey]`（随节点序列化/恢复/克隆），action mount 读 uiH 设高、之后不干预。实测：模拟拖拽 → uiH 落盘 {command:172} → 重载恢复 styleH=172px。

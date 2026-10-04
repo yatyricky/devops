@@ -1,6 +1,6 @@
 /**
- * textarea 增强action：行号（逻辑行）/ 语法高亮 overlay / 高度自适应——任意 textarea 用
- * use:enhance={{ text, lineNumbers, highlight, autoGrow, maxHeight }} 选择性应用，destroy 完整还原。
+ * textarea 增强action：行号（逻辑行）/ 语法高亮 overlay——任意 textarea 用
+ * use:enhance={{ text, lineNumbers, highlight, height }} 选择性应用，destroy 完整还原。
  *
  * 结构（action 自管，包一层 .ta-enhance 容器）：
  *   .ta-enhance
@@ -8,7 +8,7 @@
  *   └─ .ta-edit            相对定位编辑区
  *      ├─ pre.ta-hl        高亮层（与 textarea 同字体/换行行为；scrollLeft/Top 同步）
  *      ├─ pre.ta-measure   隐形测量层（逐逻辑行 <span>，读 offsetTop 得逻辑行首 y——软换行续行不占行号）
- *      └─ textarea         原节点（透明文字 caret 可见）
+ *      └─ textarea         原节点（透明文字 caret 可见；高度用户手动拖，params.height 作初始值）
  *
  * 行号取舍：行号标注在【逻辑行】首（软换行续行向下排、顶格——textarea 无悬挂缩进）。
  */
@@ -38,7 +38,7 @@ const escapeTxt = s => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replac
 
 /**
  * @param {HTMLTextAreaElement} node
- * @param {{ text?: string, lineNumbers?: boolean, highlight?: string | ((s: string) => string) | null, autoGrow?: boolean, maxHeight?: number }} [params]
+ * @param {{ text?: string, lineNumbers?: boolean, highlight?: string | ((s: string) => string) | null, height?: number }} [params]
  */
 export function enhance(node, params = {}) {
     let cur = { ...params };
@@ -77,8 +77,9 @@ export function enhance(node, params = {}) {
         edit.appendChild(node); // textarea 移入编辑区末层（文字透明由 CSS 承担）
         box.appendChild(edit);
         node.classList.add("ta-src");
+        // 高度：params.height（序列化的用户拖拽值）作初始；之后由用户手动拖，action 不干预
+        if (cur.height) node.style.height = `${cur.height}px`;
         node.addEventListener("scroll", onScroll);
-        node.addEventListener("input", onInput);
     };
 
     const renderHl = () => {
@@ -103,32 +104,17 @@ export function enhance(node, params = {}) {
         });
     };
 
-    const fit = () => {
-        if (!cur.autoGrow) return;
-        // 迭代收敛：亚像素舍入（zoom 非整数）下固定补偿不可靠，设高后实测不足再 +2；
-        // 默认上限 2000 仅防失控（1000 行级命令），随内容全高显示
-        node.style.height = "auto";
-        let h = node.scrollHeight;
-        for (let i = 0; i < 4; i++) {
-            node.style.height = `${h}px`;
-            if (node.scrollHeight <= node.clientHeight) break;
-            h = node.scrollHeight + 2;
-        }
-        node.style.height = `${Math.min(h, cur.maxHeight ?? 2000)}px`;
-    };
-
     const applyScroll = () => {
         if (hl) { hl.scrollTop = node.scrollTop; hl.scrollLeft = node.scrollLeft; }
         if (gutterInner) gutterInner.style.transform = `translateY(${-node.scrollTop}px)`;
     };
 
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; applyScroll(); }); };
-    const onInput = () => { fit(); };
 
     function destroy() {
         node.removeEventListener("scroll", onScroll);
-        node.removeEventListener("input", onInput);
         node.classList.remove("ta-src");
+        node.style.height = ""; // 还原（rows 属性接管）
         if (box?.parentNode) {
             box.parentNode.insertBefore(node, box);
             box.remove();
@@ -139,19 +125,16 @@ export function enhance(node, params = {}) {
     build();
     renderHl();
     renderGutter();
-    fit();
     applyScroll();
 
     return {
         update(next) {
-            const structural = next.lineNumbers !== cur.lineNumbers
-                || next.highlight !== cur.highlight
-                || next.autoGrow !== cur.autoGrow
-                || next.maxHeight !== cur.maxHeight;
+            const structural = next.lineNumbers !== cur.lineNumbers || next.highlight !== cur.highlight;
+            const heightChanged = next.height !== cur.height;
             cur = { ...next };
             if (structural) { build(); renderHl(); renderGutter(); }
             else { renderHl(); renderGutter(); }
-            fit();
+            if (heightChanged && cur.height) node.style.height = `${cur.height}px`;
             applyScroll();
         },
         destroy,

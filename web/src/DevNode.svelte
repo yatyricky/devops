@@ -325,6 +325,14 @@
     }
     newVals[key + "#k"] = ""; newVals[key + "#t"] = "string";
   }
+
+  // ── textarea 手动拖拽高度序列化（data.uiH[key]，随节点保存/恢复；拖完松手才写） ────
+  function saveWidgetH(widgetKey, ta) {
+    const h = Math.round(ta.getBoundingClientRect().height);
+    const cur = data.uiH?.[widgetKey];
+    if (cur === h) return;
+    ondata(id, "uiH", { ...(data.uiH ?? {}), [widgetKey]: h });
+  }
 </script>
 
 <div class="devnode" class:selected class:onpath={onPath} class:error={!!cardError}
@@ -472,8 +480,9 @@
           {#if w.kind === "text"}
             {@const taText = get(w.key) ?? ""}
             <textarea rows={w.rows ?? 4} value={taText} placeholder={w.placeholder ?? ""}
-              use:enhance={{ text: taText, lineNumbers: !!w.lineNumbers, highlight: w.highlight ?? null, autoGrow: !!w.autoGrow }}
-              oninput={e => set(w.key, e.target.value)}></textarea>
+              use:enhance={{ text: taText, lineNumbers: !!w.lineNumbers, highlight: w.highlight ?? null, height: data.uiH?.[w.key] }}
+              oninput={e => set(w.key, e.target.value)}
+              onpointerup={e => saveWidgetH(w.key, e.currentTarget)}></textarea>
           {:else if w.kind === "boolean"}
             <TriSwitch value={get(w.key) ?? w.default} onchange={v => set(w.key, v)} />
           {:else if w.kind === "enum"}

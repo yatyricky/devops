@@ -150,7 +150,7 @@ export default [
         inputs: [{ id: "ssh", type: "ssh", required: true }],
         outputs: [{ id: "out", type: "string" }],
         widgets: [
-            { key: "command", label: "命令（{{name}} 生成输入插槽，值自动加引号）", kind: "text", fullrow: true, rows: 2, highlight: "shell", lineNumbers: true, autoGrow: true, default: "" },
+            { key: "command", label: "命令（{{name}} 生成输入插槽，值自动加引号）", kind: "text", fullrow: true, rows: 2, highlight: "shell", lineNumbers: true, default: "" },
             { key: "asScript", label: "整段脚本（变量跨行共享，set -e）", kind: "boolean", default: false },
             { key: "useSudo", label: "sudo -n", kind: "boolean", default: true },
             { key: "loginShell", label: "登录 shell（nvm PATH）", kind: "boolean", default: true },
