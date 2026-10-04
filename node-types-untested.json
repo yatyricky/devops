@@ -5,7 +5,6 @@
     "remote.chown",
     "remote.check",
     "field.get",
-    "string.format",
-    "struct.fromjson"
+    "string.format"
   ]
 }
