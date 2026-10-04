@@ -47,27 +47,17 @@ function appendAudit(entry) {
     } catch (e) { console.error("[runner] audit 写入失败:", e.message); }
 }
 
-/** 日志行掩码：键名含 SECRET/TOKEN/PASSWORD/PASSPHRASE（不区分大小写）的 `KEY=VALUE` 与 JSON 形态 `"KEY":"VALUE"` 只显示 ***。 */
-const SECRET_KEY_RE = /([A-Za-z_]*(?:SECRET|TOKEN|PASSWORD|PASSPHRASE)[A-Za-z_]*)(\"?\s*[:=]\s*\"?)([^\s"',]+)/gi;
-export function maskLine(line) {
-    return String(line).replace(SECRET_KEY_RE, (_, k, sep) => `${k}${sep}***`);
-}
-
-/** 键名敏感正则（markNodeInputs 值脱敏用）。 */
-const SECRET_NAME_RE = /SECRET|TOKEN|PASSWORD|PASSPHRASE/i;
-
 /**
- * 输入值 → GUI 显示字符串（脱敏：敏感键名打码，含对象嵌套；超长截断）。
+ * 输入值 → GUI 显示字符串（超长截断，防快照/SSE 膨胀；脱敏功能已移除——本工具用于安全环境，面板显示真实值）。
  * @param {string} key
  * @param {any} v
  */
 function displayValue(key, v) {
     const cut = (s) => (s.length > 300 ? s.slice(0, 300) + "…" : s);
-    if (SECRET_NAME_RE.test(key)) return "***";
     if (typeof v === "string") return cut(v);
     if (typeof v === "number" || typeof v === "boolean") return String(v);
     try {
-        return cut(JSON.stringify(v, (k2, val2) => (SECRET_NAME_RE.test(String(k2)) ? "***" : val2)) ?? "[unserializable]");
+        return cut(JSON.stringify(v) ?? "[unserializable]");
     } catch { return "[unserializable]"; }
 }
 
@@ -109,7 +99,7 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
         logLines: [],
         /** @type {Record<string, string>} nodeId → running|ok|failed（GUI 卡片外框状态） */
         nodeStatus: {},
-        /** @type {Record<string, Record<string, string>>} nodeId → {handle: 显示值}（wired 输入实时值；脱敏后） */
+        /** @type {Record<string, Record<string, string>>} nodeId → {handle: 显示值}（wired 输入实时值） */
         nodeInputs: {},
         /** @type {Record<string, string>} nodeId → 原始输出文本（节点主动上报，如 systemd is-active 的状态词） */
         nodeOutputs: {},
@@ -133,12 +123,10 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
             configDir: path.dirname(path.resolve(wfPath)),
             repoDir: wf.repoDir,
             log(msg) {
-                // 所有日志行统一掩码（含 sshRun 回传的远端 stdout/stderr——struct/JSON 形态机密不落日志）
-                const line = { t: Date.now(), msg: maskLine(String(msg)) };
+                const line = { t: Date.now(), msg: String(msg) };
                 run.logLines.push(line);
                 persistSoon(run);
             },
-            mask: maskLine,
             // 副作用登记（finally 统一处理）
             gitRestores: [],
             sessions: [],
@@ -149,7 +137,7 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
                 run.nodeStatus = { ...run.nodeStatus, [nodeId]: status };
                 persistSoon(run);
             },
-            /** 节点实际收到的输入值（GUI wired 控件实时值）；脱敏后随 run 持久化 + SSE 快照推送 */
+            /** 节点实际收到的输入值（GUI wired 控件实时值）；随 run 持久化 + SSE 快照推送 */
             markNodeInputs(nodeId, inputValues) {
                 const out = {};
                 for (const [k, v] of Object.entries(inputValues ?? {})) {
@@ -170,7 +158,7 @@ export function enqueueWorkflowTask(wf, wfPath, taskName, options = {}) {
             run.status = "ok";
         } catch (err) {
             run.status = "failed";
-            run.error = maskLine(err?.message ?? String(err));
+            run.error = err?.message ?? String(err);
         } finally {
             try { await finalize(ctx); } catch (e) {
                 ctx.log(`[WARN] 收尾清理异常：${e.message}`);

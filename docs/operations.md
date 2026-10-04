@@ -62,8 +62,7 @@ node cli.js run <名或路径> rollback --input release=<name>
 
 - **workflow JSON 即机密文件**（架构决策 4）：struct 字段/token 直接写在图里——存安全处、勿提交公共仓库；
 - local-config.json、`.runs/`、`.tmp/`、web/dist 均已 gitignore；
-- 日志掩码 `SECRET/TOKEN/PASSWORD/PASSPHRASE=***`（注意：JSON 形态 `"KEY":"VALUE"` 目前
-  不在掩码范围，评审 P0-6 待修——打印 struct 时留意）；
+- 日志/输入值显示不做脱敏（2026-10-05 用户指示移除——工具用于安全环境，面板显示真实值）；
 - SSH 认证走 ~/.ssh/config 别名（IdentityFile）或 agent；生产部署前锁定主机指纹；
 - 需要局域网访问时改 host 并**务必设置 token**；
 - 已知未修安全项汇总见 [review-milestone-1.md](review-milestone-1.md) P0-2/P0-5/P0-6。

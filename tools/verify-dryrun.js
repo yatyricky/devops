@@ -13,7 +13,7 @@ import { makeInfer } from "../web/src/lib/infer.js";
 import { validateWorkflow, validateTaskRunnable } from "../engine/workflow.js";
 import { NODE_TYPES, getInputs, getOutputs } from "../engine/nodes/index.js";
 import { loadWorkflows } from "../engine/registry.js";
-import { enqueueWorkflowTask, getRun, maskLine, ROOT } from "../engine/runner.js";
+import { enqueueWorkflowTask, getRun, ROOT } from "../engine/runner.js";
 import fs from "fs";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
@@ -345,20 +345,14 @@ await test("git.getRefs 执行: 输出所选 ref", async () => {
     assert.ok(lines.some(l => l.includes("ref = v1.0")), lines.join("\n"));
 });
 
-// ── 掩码 ────
-await test("日志掩码: SECRET/TOKEN/PASSWORD 值打码", () => {
-    assert.strictEqual(maskLine("JWT_SECRET=abc123 xyz"), "JWT_SECRET=*** xyz");
-    assert.strictEqual(maskLine("FRP_TOKEN=tok"), "FRP_TOKEN=***");
-    assert.strictEqual(maskLine("DOMAIN=x"), "DOMAIN=x");
-});
-
-await test("日志掩码: JSON 形态 \"KEY\":\"VALUE\" 同样打码（struct/打印场景）", () => {
-    assert.strictEqual(maskLine('"JWT_SECRET":"topsecret"'), '"JWT_SECRET":"***"');
-    assert.strictEqual(maskLine('  "API_TOKEN": "abc123",'), '  "API_TOKEN": "***",');
-    assert.strictEqual(maskLine('"db_password":"p@ss"'), '"db_password":"***"');
-    assert.strictEqual(maskLine('"NAME":"正常值"'), '"NAME":"正常值"');
-    // 幂等：已掩码行再过一遍不变
-    assert.strictEqual(maskLine(maskLine('"JWT_SECRET":"topsecret"')), '"JWT_SECRET":"***"');
+// ── 脱敏移除（2026-10-05 用户指示：工具用于安全环境）——日志/输入显示均为真实值 ────
+await test("脱敏已移除: maskLine 入口删除 / log.print 原样输出敏感样式文本", async () => {
+    const runner = await import("../engine/runner.js");
+    assert.strictEqual(runner.maskLine, undefined, "maskLine 入口已删除");
+    const logs = [];
+    const ctx = { log: m => logs.push(m), mask: () => { throw new Error("不应再调用 ctx.mask"); } };
+    await NODE_TYPES["log.print"].run(ctx, { data: { text: "JWT_SECRET=abc123" } }, { value: "JWT_SECRET=abc123" });
+    assert.ok(logs.some(l => l.includes("JWT_SECRET=abc123")), "原样输出（无打码）");
 });
 
 await test("getRun: id 白名单拒绝路径穿越（..%2Flocal-config 等）", () => {
@@ -688,7 +682,7 @@ await test("认证级联: agent 优先，keyFile 降级回退；无 agent 单次
     assert.deepStrictEqual(buildAuthAttempts("pipe", {}), [{ agent: "pipe" }], "无 keyFile → 仅 agent 单次");
 });
 
-await test("运行输入捕获: markNodeInputs 脱敏 + executeTask 时序", async () => {
+await test("运行输入捕获: markNodeInputs + executeTask 时序", async () => {
     const { executeTask } = await import("../engine/workflow.js");
     const doc = {
         name: "cap", nodes: [

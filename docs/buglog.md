@@ -401,3 +401,10 @@
 - **dashboard 运行时形状分支删除**（fromjson 静态化后死代码）；run 删「未定义 shape」抛错（编辑期+门禁已拦），保留运行时子集校验。
 - **回归**：verify 66→67 绿；构建零警告；3199 实测（临时 wf 已删）：①可推导+无 shape → 出口自动 struct_1、split 出现字段口；②shape ⊉ 派生 → 红框+「shape 缺少输入字段」；③运行时+无 shape → 红框+「必须定义 shape」+门禁拦截；devops-wfs 全程只读。
    - **门禁误伤收窄（用户报：任务不含 fj_1 等节点不应被检查）**：validateTaskRunnable 的「节点配置未完成」类语义检查（fromjson shape / selector 接线）与边校验限定**任务选点内**——两端都在选点内的边才校验，一端在任务外不阻塞本任务；数据完整性类（类型未知/struct 字段非法/tar 互斥）保持全图。实测：audit-demo 任务通过（任务外 fj_1..fj_5 不再阻塞）、json_test 合法（lit 可推导 + shape 空 = 1a 自动派生）。
+
+## FEAT-2026-10-05-01 移除全部脱敏功能（用户指示：工具用于安全环境，无需脱敏）
+
+- **触发**：审计面板 password_auth 显示 *** —— SECRET_NAME_RE 按键名打码（含 PASSWORD 子串）误伤审计结论字段。用户裁定：工具本身用于安全环境，无需任何脱敏。
+- **移除**：runner.js 的 maskLine/SECRET_KEY_RE/SECRET_NAME_RE 与 displayValue 打码分支（保留 300 字符截断——显示尺寸用途）；ctx.mask 入口删除；log.print 与 template.render 的 ctx.mask 消费改为原样输出；verify 的 6 条掩码断言替换为「不再打码」回归。
+- **保留**：.runs/ 审计追踪、prod 门禁、工作流文件即机密文件的存放约定——安全机制不受影响。
+- **回归**：verify 66 绿（maskLine 入口删除 + log.print 原样输出断言）；无残留引用（grep 零命中，文档同步 operations/architecture/README）。

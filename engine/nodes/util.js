@@ -150,7 +150,7 @@ export default [
             const title = node.data.title ? `：${node.data.title}` : "";
             const text = typeof inputs.value === "string" ? inputs.value : JSON.stringify(inputs.value, null, 2);
             ctx.log(`──── 预览${title} ────`);
-            for (const line of String(text).split("\n")) ctx.log(`  ${ctx.mask(line)}`);
+            for (const line of String(text).split("\n")) ctx.log(`  ${line}`);
             ctx.log(`──────────────────`);
         },
     },    {

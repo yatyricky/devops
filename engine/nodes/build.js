@@ -274,7 +274,7 @@ export default [
             ctx.log(`[render] ${path.basename(fpTpl)} → ${path.basename(fpOut)}（${Object.keys(vars).length} 变量）`);
             if (ctx.dryRun) {
                 ctx.log("──── 渲染产物（dry-run）────");
-                for (const line of rendered.split("\n").slice(0, 400)) ctx.log(`  ${ctx.mask(line)}`);
+                for (const line of rendered.split("\n").slice(0, 400)) ctx.log(`  ${line}`);
                 ctx.log("────────────────────────────");
             }
             return { file: fpOut };

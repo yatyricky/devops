@@ -31,7 +31,7 @@ workflow 执行器（engine/workflow.js）
 1. **CLI-first**：GUI 与 CLI 是同一 runner 的两个前端。部署逻辑 100% 在 workflow.json + 节点执行器里，可审计、可脱离 GUI 运行。
 2. **任务串行**：全局一个队列，杜绝并发部署写同一目标机。
 3. **prod 门禁在 runner 兜底**：任务 `mutates` + 任务子图内 Struct 构造器的 `SERVER_TYPE=prod` 字段 → 必须携带 `confirmProd === 工作流名`；GUI 弹窗与 CLI 交互只是采集确认的两种方式；dry-run 免门禁。
-4. **工作流文件即机密文件（2026-09-24 定，取代原 envs/ 文件方案）**：env 字段以 Struct 构造器的字段直接定义在图 JSON 中——可视化的收益是哪个字段被哪个流程消费，连线即知。因此 **wf 文件必须存放在安全处（勿提交公共仓库）**；日志掩码 `SECRET/TOKEN/PASSWORD/PASSPHRASE=***` 与审计只记 `confirmProd: "(typed)"` 不变。
+4. **工作流文件即机密文件（2026-09-24 定，取代原 envs/ 文件方案）**：env 字段以 Struct 构造器的字段直接定义在图 JSON 中——可视化的收益是哪个字段被哪个流程消费，连线即知。因此 **wf 文件必须存放在安全处（勿提交公共仓库）**；日志与输入值显示不做脱敏（2026-10-05 移除），审计只记 `confirmProd: "(typed)"`。
 5. **类型即契约**：连线两端类型必须匹配（any 输入兜底）；校验发生在 GUI 连线时、保存写盘前、CLI 加载时三处。
    ⚠ **镜像漂移（2026-09-29 评审发现）**：规则在 engine/types.js 与 web/src/types.js 双份手写，已发生分叉
    （web `canConnect` 缺 SOCKET_TYPES 校验、`effectiveInputs` 块序不同、structSplit 缺源类型检查）——

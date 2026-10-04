@@ -68,7 +68,7 @@ node cli.js run <名或路径> <task> --input ref=master
 ├─ local-config.json      # 运行配置（gitignored；example 见 local-config.example.json）
 ├─ node-types-untested.json # 「未测试」节点类型手工清单（入库）
 ├─ .runs/                 # 任务运行记录 + audit.jsonl（gitignored）
-└─ tools/verify-dryrun.js # 引擎自检（47 项断言，自带 fixture 不连网）
+└─ tools/verify-dryrun.js # 引擎自检（66 项断言，自带 fixture 不连网）
 ```
 
 ## 节点类型（31）
@@ -85,7 +85,7 @@ node cli.js run <名或路径> <task> --input ref=master
 ## 验证
 
 ```bash
-node tools/verify-dryrun.js   # 47 项断言：类型/图校验/子图语义/调度/门禁/掩码/节点行为（自带 fixture）
+node tools/verify-dryrun.js   # 66 项断言：类型/图校验/子图语义/调度/门禁/节点行为（自带 fixture）
 ```
 
 ## 文档
