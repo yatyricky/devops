@@ -4,7 +4,7 @@
  * 直接从 engine/rules.js import 同一文件——与引擎单源，根治镜像漂移；
  * 本文件只保留前端专用：显示色、id 生成、Group 收起条布局常量。
  */
-export { canConnect, SOCKET_TYPES, effectiveInputs, effectiveOutputs, validateTaskSelection, isTunnelEdge, structFieldsFromShape } from "devops-console/engine/rules.js";
+export { canConnect, SOCKET_TYPES, effectiveInputs, effectiveOutputs, validateTaskSelection, isTunnelEdge, structFieldsFromShape, fromjsonShapeProblem } from "devops-console/engine/rules.js";
 
 export const TYPE_COLORS = {
   struct: "#4da3ff", ssh: "#ff9e64", string: "#61afef",

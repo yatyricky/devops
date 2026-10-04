@@ -3,7 +3,7 @@
   import { SvelteFlow, Background, Controls, MiniMap } from "@xyflow/svelte";
   import { api } from "./api.js";
     import { canConnect, displayType, typeColorKey, effectiveInputs, effectiveOutputs, genId, validateTaskSelection, isTunnelEdge, TYPE_COLORS, nodeTitle, portLabel, basenameNoExt, dirOf } from "./types.js";
-  import { selectorEdgeProblem } from "devops-console/engine/rules.js";
+  import { selectorEdgeProblem, fromjsonShapeProblem } from "devops-console/engine/rules.js";
   import { makeInfer } from "./lib/infer.js";
   import { GROUP_COLORS, GROUP_COLLAPSED_W, groupAABB, groupBoxOf, crossEdges, collapsedHeight, makeGroupNode } from "./lib/groups.js";
   import { toDocument } from "./lib/docIO.js";
@@ -135,6 +135,12 @@
     /** struct 值域回溯：srcId 的 struct 出口提供 fieldName 字段的编辑期常量（make/selector/split 链） */
     resolveStructField(srcId, fieldName) {
       return infer().resolveStructFieldValue(srcId, fieldName);
+    },
+    /** struct.fromjson 的 shape 编辑期问题（null = 无问题）；图上下文注入 */
+    fromjsonProblemOf(nodeId) {
+      const n = nodes.find(x => x.id === nodeId);
+      if (!n) return null;
+      return fromjsonShapeProblem(n, { edges, nodes, metas: typeMap });
     },
     /** 编辑期输出推断：path.resolve → 拼接推断值；string.join → 分隔符拼接推断值；渲染模板 → .tmp 产物路径；其余 undefined */
     inferOutput(nodeId) {

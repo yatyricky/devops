@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { canConnect, coerce, selectorWireProblem } from "./rules.js";
+import { canConnect, coerce, fromjsonShapeProblem, selectorWireProblem } from "./rules.js";
 import { validateTaskSelection } from "./rules.js";
 import { NODE_TYPES, getInputs, getOutputs } from "./nodes/index.js";
 import { tarEntriesProblem } from "./nodes/build.js";
@@ -166,6 +166,11 @@ export function validateTaskRunnable(doc, taskName) {
                     return { targetHandle: e.targetHandle, srcType: o?.type ?? "unknown" };
                 });
             const problem = selectorWireProblem(wires);
+            if (problem) problems.push(`节点 ${n.id}：${problem}`);
+        }
+        // struct.fromjson：shape 编辑期问题（运行时输入无 shape / shape ⊉ 派生输入）
+        if (n.type === "struct.fromjson") {
+            const problem = fromjsonShapeProblem(n, { edges: doc.edges, nodes: doc.nodes, metas: NODE_TYPES });
             if (problem) problems.push(`节点 ${n.id}：${problem}`);
         }
     }

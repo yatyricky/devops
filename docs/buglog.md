@@ -391,3 +391,12 @@
    - **测试事故自纠**：3199 复用残留注册导致画布载入的是我自己的 test-bounce wf（非用户 audit-demo）——回弹/滚动条验证全部在自建 wf 上进行，用户 audit-demo.json 完好（json_test/lit 演进/23 节点在）。
    - **「拖高保存后刷新回弹」判非 bug（用户报）**：全链只读核查——保存链五道关口（docIO stripDecor 只剥 `__` / validate 只查 data 是 object / save 原样写盘 / onData 不滤键 / DevNode 读写对路）全通，audit-demo.json 里 col_sshd/col_fw 的 uiH 已正常落盘；xlgbis.json 零 uiH + 3010 的 dist 含新功能 → 根因是用户 3010 标签页内存里跑着 uiH 功能构建之前的旧 JS（拖拽只改 DOM，保存的 doc 无 uiH）。处置：3010 硬刷新一次 + 重拖一次即可，此后持久化。副注：未知类型节点 __origType 保存丢失是已知未修项，与此无关。
    - **uiH 缩放坐标混用（用户报「跟画布缩放有关」）**：saveWidgetH 用 `getBoundingClientRect().height`（屏幕像素 = 布局 × 画布缩放；实测 150px 在 zoom 0.5/1/1.5 读出 72/144/215）写 uiH，恢复按布局像素渲染——不同缩放级别拖出的结果互相打架。改 `offsetHeight`（布局像素，transform 无关）恒 150。**坑**：合成 pointerup 后同步读 `__dbg` 拿到空 uiH——Svelte 5 批量更新把 nodes 替换排进微任务，同步读是批前快照；以及 3199 origin 的 HTTP 缓存索引页导致新标签页载旧 bundle（带 query 参数绕过）。
+
+## FEAT-2026-10-02-07 Struct From JSON shape 语义二轮（可推导→自动出口；shape=契约；编辑期报错）
+
+- **语义定案（用户）**：输入可推导 → a) 无需 shape，出口编辑期自动确定（派生 JSON 字段）；b) 定义了 shape 则必须是派生输入的超集，否则编辑状态报错。输入运行时 → a) 必须定义 shape，shape ⊉ 运行时 JSON 运行时报错（已有子集校验）；b) 未定义 shape → 编辑状态报错。
+- **deriveJsonText**（rules.js 共享，双端单源）：fromjson 的 json 输入口编辑期字符串推导——lit / string.const / select.one（pick 转发）/ struct.split（透传）；path.resolve/string.join 上游不支持（按不可推导，JSON 文本不由此类节点构造）。depth 熔断。
+- **fromJsonShapeProblem**（rules.js 导出）：编辑期问题判定——可推导+无 shape → null；可推导+shape 定义 → 逐派生字段查超集（缺失/类型不符报错）；不可推导+shape 空 → 「必须定义 shape」。消费：validateTaskRunnable 门禁分支（engine/workflow.js）+ DevNode cardError（App context `fromjsonProblemOf` 注入图上下文 → 红框 + shape 编辑器 errline）。
+- **effectiveOutputs fromJsonShape**：shape 非空 = 契约形状串；空 + 可推导 = structShape(派生字段)；空 + 不可推导 = []。
+- **dashboard 运行时形状分支删除**（fromjson 静态化后死代码）；run 删「未定义 shape」抛错（编辑期+门禁已拦），保留运行时子集校验。
+- **回归**：verify 66→67 绿；构建零警告；3199 实测（临时 wf 已删）：①可推导+无 shape → 出口自动 struct_1、split 出现字段口；②shape ⊉ 派生 → 红框+「shape 缺少输入字段」；③运行时+无 shape → 红框+「必须定义 shape」+门禁拦截；devops-wfs 全程只读。

@@ -81,8 +81,10 @@ export default [
         outputs: [],
         widgets: [{ key: "shape", label: "Shape（key / 类型）", kind: "struct", shapeOnly: true, default: [] }],
         async run(ctx, node, inputs) {
+            // shape 非空 = 契约：运行时子集校验（缺失允许/多余/类型不匹配拒绝）。
+            // shape 空：1a（可推导，出口=派生字段，运行时对象即派生对象，无需校验）与 2b（不可推导）
+            // 均已在编辑期/门禁拦截——此处不做兜底重复
             const shape = (node.data?.shape ?? []).filter(f => f.key);
-            if (!shape.length) throw new Error("struct.fromjson 未定义 shape（逐字段配置 key/类型，出口类型才能确定）");
             const raw = String(inputs.json ?? "").trim();
             if (!raw) throw new Error("struct.fromjson 未提供 JSON 输入");
             let obj;
@@ -94,15 +96,17 @@ export default [
             if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
                 throw new Error("struct.fromjson：JSON 顶层必须是对象");
             }
-            // 子集校验：JSON ⊆ shape（缺失字段允许；多余字段/类型不匹配拒绝）——像静态语言一样在入口处把关
-            const shapeKeys = new Set(shape.map(f => f.key));
-            const jsType = v => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
-            for (const [k, v] of Object.entries(obj)) {
-                const f = shape.find(s => s.key === k);
-                if (!f) throw new Error(`struct.fromjson：多余字段 "${k}"（不在 shape 中）: ${JSON.stringify(v)?.slice(0, 60)}`);
-                const actual = jsType(v);
-                if (actual !== f.type) {
-                    throw new Error(`struct.fromjson：字段 "${k}" 类型不匹配（期望 ${f.type}，实际 ${actual}）`);
+            if (shape.length) {
+                // 子集校验：JSON ⊆ shape（缺失字段允许；多余字段/类型不匹配拒绝）
+                const shapeKeys = new Set(shape.map(f => f.key));
+                const jsType = v => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
+                for (const [k, v] of Object.entries(obj)) {
+                    const f = shape.find(s => s.key === k);
+                    if (!f) throw new Error(`struct.fromjson：多余字段 "${k}"（不在 shape 中）: ${JSON.stringify(v)?.slice(0, 60)}`);
+                    const actual = jsType(v);
+                    if (actual !== f.type) {
+                        throw new Error(`struct.fromjson：字段 "${k}" 类型不匹配（期望 ${f.type}，实际 ${actual}）`);
+                    }
                 }
             }
             ctx.markNodeOutput?.(node.id, JSON.stringify(obj));

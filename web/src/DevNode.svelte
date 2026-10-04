@@ -10,7 +10,7 @@
 
   let { id, data, selected } = $props();
   // xyflow 自建组件树，props 传不进来；App 经 context 提供回调
-  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveInputs, resolveOutputs, resolveStructField, structSourceOf, resolveTplVars, inferOutput } = getContext("devnode-actions");
+  const { ondata, ondelete, isWiredAsTarget, getSourceNode, resolveInput, resolveInputs, resolveOutputs, resolveStructField, structSourceOf, fromjsonProblemOf, resolveTplVars, inferOutput } = getContext("devnode-actions");
   const updateNodeInternals = useUpdateNodeInternals();
 
   let meta = $derived(ui.nodeTypesMap[data.__type]);
@@ -19,26 +19,10 @@
   let outputs = $derived(resolveOutputs?.(id) ?? (meta?.outputs ?? []));
   // ── selector：有效输入口（开放口 in + 每条已接入边一个专用口），经 context 由 App 提供图上下文 ────
   let inputs = $derived(meta?.selectorInputs ? (resolveInputs?.(id) ?? []) : effectiveInputs(meta, data));
-  // ── dashboard 汇总面板：字段列表派生 ────
-  // 优先级：① 运行时形状（源上报过完整 JSON——struct.fromjson 等，primitive 值的键即字段）；
-  //         ② 编辑期形状（源为 split → 出口即字段；make/selector → 形状串解析）
-  let dashSrcRaw = $derived.by(() => {
-    if (!meta?.dashboardShow) return undefined;
-    const srcId = structSourceOf?.(id);
-    return srcId ? ui.runNodeOutputs?.[srcId] : undefined;
-  });
+  // ── dashboard 汇总面板：字段列表 = 编辑期形状派生（源为 split → 出口即字段；make/selector/fromjson → 形状串解析）。
+  //    struct.fromjson 已静态化（shape 契约/派生出口），无运行时形状源 ────
   let dashFields = $derived.by(() => {
     if (!meta?.dashboardShow) return [];
-    if (dashSrcRaw !== undefined) {
-      try {
-        const o = JSON.parse(dashSrcRaw);
-        if (typeof o === "object" && o !== null && !Array.isArray(o)) {
-          return Object.entries(o)
-            .filter(([, v]) => v === null || ["boolean", "number", "string"].includes(typeof v))
-            .map(([k, v]) => ({ key: k, type: v === null ? "string" : typeof v }));
-        }
-      } catch { /* 非 JSON 上报 → 走编辑期 */ }
-    }
     const srcId = structSourceOf?.(id);
     if (!srcId) return [];
     const outs = resolveOutputs?.(srcId) ?? [];
@@ -46,22 +30,16 @@
     if (outs.length && outs.every(o => ["string", "number", "boolean"].includes(o.type))) {
       return outs.map(o => ({ key: o.id, type: o.type }));
     }
-    // 源出口为形状串（struct.make / select.one）：解析
+    // 源出口为形状串（struct.make / select.one / struct.fromjson）：解析
     for (const o of outs) {
       const fs = structFieldsFromShape(o?.type);
       if (fs) return fs;
     }
     return [];
   });
-  // 面板值对象：优先源上报 JSON（无截断），回退自身收到的输入（脱敏 + 300 截断）
+  // 面板运行时值对象：自身收到的输入（脱敏 + 300 截断）
   let dashRunObj = $derived.by(() => {
     if (!meta?.dashboardShow) return null;
-    if (dashSrcRaw !== undefined) {
-      try {
-        const o = JSON.parse(dashSrcRaw);
-        if (typeof o === "object" && o !== null && !Array.isArray(o)) return o;
-      } catch { /* 走输入侧 */ }
-    }
     const raw = ui.runNodeInputs?.[id]?.data;
     if (raw === undefined) return null;
     try { const o = JSON.parse(raw); return typeof o === "object" && o !== null ? o : null; } catch { return null; }
@@ -289,6 +267,11 @@
   let cardError = $derived.by(() => {
     if (meta?.refsPicker && refsErr) return refsErr;
     if (meta?.sshAliasesPicker && sshErr) return sshErr;
+    // struct.fromjson：shape 编辑期问题（运行时输入无 shape / shape ⊉ 派生输入）
+    if (meta?.dynamicOutputs === "fromJsonShape") {
+      const p = fromjsonProblemOf?.(id);
+      if (p) return p;
+    }
     return "";
   });
 
@@ -555,6 +538,7 @@
               onchange={e => set(w.key, numOk(e.target.value) ? Number(e.target.value) : e.target.value)} />
           {:else if w.kind === "struct"}
             {@const shapeOnly = !!w.shapeOnly}
+            {#if shapeOnly && cardError}<span class="errline">⚠ {cardError}</span>{/if}
             <!-- 例外排版（QoL-2026-10-02-02）：label 整行左对齐；key/type 对半、值槽/删除右贴。
                  shapeOnly（Struct From JSON 的 shape 声明）无值槽——行 = key/type/删除，
                  且分割为 key 40% / type+button 60%（shaperow 类，区别于 Make Struct 的 20/20/右贴） -->

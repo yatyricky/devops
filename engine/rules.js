@@ -40,6 +40,80 @@ export function structFieldsFromShape(t) {
 }
 
 /**
+ * struct.fromjson 的 json 输入口编辑期字符串推导（纯数据驱动，引擎与前端双端单源）：
+ * lit → string.const → select.one（pick 转发）→ struct.split（struct 口透传）。
+ * path.resolve/string.join 上游不支持（按不可推导处理——JSON 文本不由此类节点构造）；
+ * 不可解/环 → undefined。
+ * @param {{edges?: any[], nodes?: any[], id?: string, metas?: any}} env
+ * @param {string} nodeId
+ * @param {number} [depth]
+ * @returns {string | undefined}
+ */
+export function deriveJsonText(env, nodeId, depth = 0) {
+    if (depth > 8) return undefined;
+    const node = (env?.nodes ?? []).find(n => n.id === nodeId);
+    if (!node) return undefined;
+    const selfLit = node.data?.lit?.json;
+    if (selfLit !== undefined) return String(selfLit);
+    const e = (env?.edges ?? []).find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === nodeId && x.targetHandle === "json");
+    if (!e) return undefined;
+    const src = (env?.nodes ?? []).find(n => n.id === e.source);
+    if (!src) return undefined;
+    if (src.type === "string.const") return src.data?.value === undefined ? undefined : String(src.data.value);
+    if (src.type === "select.one") {
+        const pick = src.data?.pick;
+        if (!pick) return undefined;
+        const pw = (env?.edges ?? []).find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === src.id && x.targetHandle === pick);
+        if (!pw) return undefined;
+        return deriveJsonText(env, pw.source, depth + 1);
+    }
+    if (src.type === "struct.split") {
+        const sw = (env?.edges ?? []).find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === src.id && x.targetHandle === "struct");
+        if (!sw) return undefined;
+        return deriveJsonText(env, sw.source, depth + 1);
+    }
+    return undefined;
+}
+
+/** JSON 文本 → 字段列表 [{key,type}]（primitive 值；解析失败/非对象返回 null）。 */
+export function parseJsonFields(text) {
+    let obj;
+    try { obj = JSON.parse(String(text ?? "")); } catch { return null; }
+    if (typeof obj !== "object" || obj === null || Array.isArray(obj)) return null;
+    return Object.entries(obj)
+        .filter(([, v]) => v === null || ["boolean", "number", "string"].includes(typeof v))
+        .map(([k, v]) => ({ key: k, type: v === null ? "string" : typeof v }));
+}
+
+/**
+ * struct.fromjson 的 shape 编辑期问题判定（无问题返回 null）：
+ * - 输入可推导（deriveJsonText）：shape 已定义时必须是派生字段的超集（缺失/类型不符报错）；未定义 → null（出口自动派生）
+ * - 输入不可推导（运行时数据）：shape 必须定义，否则报错
+ * @param {any} node
+ * @param {{edges?: any[], nodes?: any[], metas?: any}} env
+ * @returns {string | null}
+ */
+export function fromjsonShapeProblem(node, env = {}) {
+    const shape = (node.data?.shape ?? []).filter(f => f.key);
+    const text = deriveJsonText(env, node.id);
+    if (text === undefined) {
+        return shape.length ? null : "输入为运行时数据（JSON 文本不可推导），必须定义 shape";
+    }
+    let obj;
+    try { obj = JSON.parse(text); } catch { return "输入 JSON 无法解析（编辑期派生输入）"; }
+    if (typeof obj !== "object" || obj === null || Array.isArray(obj)) return "输入 JSON 顶层必须是对象";
+    if (!shape.length) return null; // 可推导且未定义 shape：出口自动派生（1a）
+    const jsType = v => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
+    for (const [k, v] of Object.entries(obj)) {
+        const f = shape.find(s => s.key === k);
+        if (!f) return `shape 缺少输入字段 "${k}"（shape 必须是输入 JSON 的超集）`;
+        const actual = jsType(v);
+        if (f.type !== actual) return `shape 字段 "${k}" 类型不匹配（输入 ${actual}，shape ${f.type}）`;
+    }
+    return null;
+}
+
+/**
  * 源类型能否接入目标输入。
  * 规则：未知类型拒绝；同型可连；any 输入兜底；
  * struct 家族：纯 struct 输入接受任意 struct（含带形状）；带形状的输入要求形状串完全一致
@@ -251,8 +325,14 @@ export function effectiveOutputs(meta, data, env = {}) {
         return [{ id: "struct", type: structShape(data?.fields) }];
     }
     if (meta?.dynamicOutputs === "fromJsonShape") {
-        // shape 人工声明（同 Make Struct 的 key/type）→ 出口类型编辑期即确定；空 shape 退化为纯 struct
-        return [{ id: "struct", type: structShape(data?.shape) }];
+        // shape 已定义 = 契约（出口即形状串）；未定义且输入可推导 → 出口 = 派生字段（1a）；
+        // 不可推导且未定义 → 无出口（编辑期 fromjsonShapeProblem 报错）
+        const shape = (data?.shape ?? []).filter(f => f.key);
+        if (shape.length) return [{ id: "struct", type: structShape(shape) }];
+        const fields = deriveJsonText(env, env?.id) !== undefined
+            ? parseJsonFields(deriveJsonText(env, env?.id))
+            : null;
+        return fields ? [{ id: "struct", type: structShape(fields) }] : [];
     }
     if (meta?.dynamicOutputs === "selectorOut") {
         // 有图上下文纯派生；无图（老调用）才允许遗留 lockType 兜底

@@ -1185,7 +1185,7 @@ await test("dashboard.show: 注册形状 + structFieldsFromShape 解析", async 
     assert.strictEqual(structFieldsFromShape("string"), null, "非 struct → null");
 });
 
-await test("struct.fromjson: run 解析/上报/shape 子集校验/出口/split 回溯", async () => {
+await test("struct.fromjson: run 子集校验 + 出口派生/契约 + split 回溯", async () => {
     const def = NODE_TYPES["struct.fromjson"];
     assert.ok(def, "节点已注册");
     const reported = [];
@@ -1195,25 +1195,68 @@ await test("struct.fromjson: run 解析/上报/shape 子集校验/出口/split �
     const r = await def.run(ctx, node, { json: '{"security_updates":3,"listeners":"pass"}' });
     assert.deepStrictEqual(r, { struct: { security_updates: 3, listeners: "pass" } }, "shape 子集通过");
     assert.deepStrictEqual(reported, ['{"security_updates":3,"listeners":"pass"}'], "完整 JSON 上报");
-    // 类型不匹配 / 多余字段 / 空 shape / 非法 JSON / 数组顶层
+    // 类型不匹配 / 多余字段 / 非法 JSON / 数组顶层 / 空输入（「空 shape」错误已移至编辑期+门禁）
     await assert.rejects(() => def.run(ctx, node, { json: '{"security_updates":"3"}' }), /类型不匹配.*期望 number.*实际 string/, "类型不匹配报错");
     await assert.rejects(() => def.run(ctx, node, { json: '{"security_updates":3,"extra":1}' }), /多余字段 "extra"/, "多余字段报错");
-    await assert.rejects(() => def.run(ctx, { data: {} }, { json: "{}" }), /未定义 shape/, "空 shape 报错");
     await assert.rejects(() => def.run(ctx, node, { json: "{oops" }), /解析失败/, "非法 JSON 报错");
     await assert.rejects(() => def.run(ctx, node, { json: "[1,2]" }), /顶层必须是对象/, "数组顶层报错");
     await assert.rejects(() => def.run(ctx, node, { json: "" }), /未提供 JSON/, "空输入报错");
-    // 出口：shape → structShape（编辑期确定）；split 回溯 fromjson → 字段出口
-    const doc = {
+    // 出口：shape 定义 = 契约（形状串）；shape 空 + lit 可推导 = 派生字段形状串（1a）；shape 空 + 不可推导 = 无出口
+    const contracted = getOutputs({ type: "struct.fromjson", data: { shape: [{ key: "alias", type: "string" }, { key: "num", type: "number" }] } }, { nodes: [], edges: [] });
+    assert.deepStrictEqual(contracted, [{ id: "struct", type: "struct:{alias:string,num:number}" }], "shape 契约 → 形状串出口");
+    const derived = getOutputs(
+        { id: "fj", type: "struct.fromjson", data: { lit: { json: '{"alias":"x","num":5}' } } },
+        { nodes: [{ id: "fj", type: "struct.fromjson", data: { lit: { json: '{"alias":"x","num":5}' } } }], edges: [] },
+    );
+    assert.deepStrictEqual(derived, [{ id: "struct", type: "struct:{alias:string,num:number}" }], "shape 空 + lit 可推导 → 派生形状串");
+    const underivable = getOutputs({ type: "struct.fromjson", data: {} }, { nodes: [{ id: "fj", type: "struct.fromjson", data: {} }], edges: [] });
+    assert.deepStrictEqual(underivable, [], "不可推导 + 无 shape → 无出口");
+    // split 回溯 fromjson（形状串出口 → 字段出口）
+    const splitDoc = {
         nodes: [
             { id: "fj", type: "struct.fromjson", data: { shape: [{ key: "alias", type: "string" }, { key: "num", type: "number" }] } },
             { id: "split", type: "struct.split", data: {} },
         ],
         edges: [{ id: "e1", source: "fj", sourceHandle: "struct", target: "split", targetHandle: "struct" }],
     };
-    const outs = getOutputs(doc.nodes[0], doc);
-    assert.deepStrictEqual(outs, [{ id: "struct", type: "struct:{alias:string,num:number}" }], "出口类型 = shape 形状串");
-    const splitOuts = getOutputs(doc.nodes[1], doc);
+    const splitOuts = getOutputs(splitDoc.nodes[1], splitDoc);
     assert.deepStrictEqual(splitOuts, [{ id: "alias", type: "string" }, { id: "num", type: "number" }], "split 回溯 fromjson 形状串 → 字段出口");
+});
+
+await test("struct.fromjson: fromjsonShapeProblem 四态 + 门禁拦截", async () => {
+    const { fromjsonShapeProblem } = await import("../engine/rules.js");
+    // 1a：可推导 + 无 shape → null（出口自动派生）
+    assert.strictEqual(fromjsonShapeProblem(
+        { id: "fj", data: { lit: { json: '{"a":"x"}' } } },
+        { nodes: [{ id: "fj", data: { lit: { json: '{"a":"x"}' } } }], edges: [] },
+    ), null, "可推导 + 无 shape → 无问题");
+    // 1b：shape ⊇ 派生 → null；⊉ → 报错
+    const lit = '{"a":"x"}';
+    const shapeSup = [{ key: "a", type: "string" }, { key: "b", type: "number" }];
+    assert.strictEqual(fromjsonShapeProblem(
+        { id: "fj", data: { lit: { json: lit }, shape: shapeSup } },
+        { nodes: [{ id: "fj", data: { lit: { json: lit }, shape: shapeSup } }], edges: [] },
+    ), null, "shape ⊇ 派生 → 无问题");
+    // 1b：shape ⊉ 派生 → 报错（shape 定义了但缺少输入字段 "a"）
+    assert.ok(String(fromjsonShapeProblem(
+        { id: "fj", data: { lit: { json: lit }, shape: [{ key: "b", type: "number" }] } },
+        { nodes: [{ id: "fj", data: { lit: { json: lit }, shape: [{ key: "b", type: "number" }] } }], edges: [] },
+    )).includes("缺少输入字段"), "shape ⊉ 派生 → 报错");
+    // 2b：运行时输入 + 无 shape → 报错
+    assert.ok(String(fromjsonShapeProblem(
+        { id: "fj", data: {} },
+        { nodes: [{ id: "fj", data: {} }], edges: [] },
+    )).includes("必须定义 shape"), "运行时输入 + 无 shape → 报错");
+    const doc = {
+        nodes: [
+            { id: "fj", type: "struct.fromjson", data: {} },
+            { id: "sess", type: "ssh.session", data: {} },
+        ],
+        edges: [{ id: "e1", source: "fj", sourceHandle: "struct", target: "sess", targetHandle: "alias" }],
+        tasks: { t: { label: "t", mutates: false, nodes: ["fj", "sess"] } },
+    };
+    const problems = validateTaskRunnable(doc, "t");
+    assert.ok(problems.some(p => p.includes("必须定义 shape")), "门禁拦截：运行时输入 + 无 shape");
 });
 
 await test("静默错误链封堵：selector pick 无值报错 / ssh.session 连线口不回退 widget", async () => {
