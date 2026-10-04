@@ -43,7 +43,7 @@ const escapeTxt = s => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replac
 export function enhance(node, params = {}) {
     let cur = { ...params };
     /** @type {any} */
-    let box = null, gutter = null, hl = null, measure = null;
+    let box = null, gutter = null, gutterInner = null, hl = null, measure = null;
     let raf = 0;
 
     const lines = () => String(cur.text ?? node.value ?? "").split("\n");
@@ -56,6 +56,10 @@ export function enhance(node, params = {}) {
         if (cur.lineNumbers) {
             gutter = document.createElement("span");
             gutter.className = "ta-gutter";
+            // 行号在 inner 层滚动（translateY）；gutter 框固定不动，overflow:hidden 才能裁住滚出的行号
+            gutterInner = document.createElement("span");
+            gutterInner.className = "ta-gutter-inner";
+            gutter.appendChild(gutterInner);
             box.appendChild(gutter);
         }
         const edit = document.createElement("span");
@@ -84,31 +88,38 @@ export function enhance(node, params = {}) {
     };
 
     const renderGutter = () => {
-        if (!gutter || !measure) return;
+        if (!gutter || !measure || !gutterInner) return;
         const ls = lines();
         // 逐逻辑行 span → offsetTop 即各逻辑行首视觉行 y（测量层与 textarea 同宽/字体/换行）
         measure.innerHTML = ls.map(l => `<span class="ta-ln">${escapeTxt(l) || " "}</span>`).join("<br>");
         requestAnimationFrame(() => {
-            if (!gutter || !measure) return;
+            if (!gutterInner || !measure) return;
             let html = "";
             measure.querySelectorAll(".ta-ln").forEach((sp, i) => {
                 html += `<span class="ta-no" style="top:${/** @type {any} */(sp).offsetTop}px">${i + 1}</span>`;
             });
-            gutter.innerHTML = html;
+            gutterInner.innerHTML = html;
             applyScroll();
         });
     };
 
     const fit = () => {
         if (!cur.autoGrow) return;
+        // 迭代收敛：亚像素舍入（zoom 非整数）下固定补偿不可靠，设高后实测不足再 +2；
+        // 默认上限 2000 仅防失控（1000 行级命令），随内容全高显示
         node.style.height = "auto";
-        // +2 = 上下 border 补偿（border-box 下 clientHeight = height - border，少 2px 必出滚动条）
-        node.style.height = `${Math.min(node.scrollHeight + 2, cur.maxHeight ?? 420)}px`;
+        let h = node.scrollHeight;
+        for (let i = 0; i < 4; i++) {
+            node.style.height = `${h}px`;
+            if (node.scrollHeight <= node.clientHeight) break;
+            h = node.scrollHeight + 2;
+        }
+        node.style.height = `${Math.min(h, cur.maxHeight ?? 2000)}px`;
     };
 
     const applyScroll = () => {
         if (hl) { hl.scrollTop = node.scrollTop; hl.scrollLeft = node.scrollLeft; }
-        if (gutter) gutter.style.transform = `translateY(${-node.scrollTop}px)`;
+        if (gutterInner) gutterInner.style.transform = `translateY(${-node.scrollTop}px)`;
     };
 
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; applyScroll(); }); };
@@ -122,7 +133,7 @@ export function enhance(node, params = {}) {
             box.parentNode.insertBefore(node, box);
             box.remove();
         }
-        box = gutter = hl = measure = null;
+        box = gutter = gutterInner = hl = measure = null;
     }
 
     build();

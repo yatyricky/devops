@@ -385,3 +385,4 @@
 - **audit-demo**：6 采集器命令改多行排版（5~14 行，set -e 失败即停）+ asScript 开。
 - **坑复现**：node -e 生成多行命令时 printf `%s\n` 的 \n 被 bash 命令替换吃掉（旧坑）、JS 字符串 `\'` 与 shell 引号混战（SyntaxError）——改 Write 工具写一次性 .mjs 脚本生成（textareaEnhance 等含特殊字符内容一律如此）。
 - **回归**：verify 66 绿；构建零警告；3199 实测（截图）：6 卡多行 + 行号/高亮/自适应 + asScript 开关可见；audit-demo.json 保留 .tmp 供用户研究。
+   - **gutter 溢出卡片 + maxHeight 截断（用户两张截图，FEAT-2026-10-02-05 修补）**：①行号浮在卡外——translateY 加在 gutter 元素自身，框体整体移出、overflow:hidden 裁剪框跟着走；改为 gutter 内 `.ta-gutter-inner`（absolute inset 0）承载行号并 translateY，gutter 框固定参与裁剪。②11 行内容仍出滚动条——maxHeight 默认 420 截断（fit 迭代已正确收敛 438 被 min 截回）；默认上限放宽 2000（仅防失控），同时 fit 保持迭代收敛（亚像素舍入下固定补偿不可靠）。

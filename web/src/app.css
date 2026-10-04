@@ -82,6 +82,7 @@ textarea { font: 12px/1.5 var(--mono); }
   font: 12px/1.5 var(--mono); color: var(--dim); text-align: right;
   background: color-mix(in srgb, var(--panel2) 70%, transparent);
   border: 1px solid var(--line); border-right: none; border-radius: 4px 0 0 4px; }
+.ta-gutter-inner { position: absolute; inset: 0; will-change: transform; }
 .ta-gutter .ta-no { position: absolute; right: 4px; left: 0; }
 .ta-edit { position: relative; flex: 1; min-width: 0; }
 .ta-edit pre.ta-hl, .ta-edit pre.ta-measure { position: absolute; inset: 0; margin: 0; pointer-events: none;
