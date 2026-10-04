@@ -368,3 +368,11 @@
 - **重构（用户定案：尽可能降低动态概念，像静态语言）**：fromjson 加 **shape 定义**（widget `kind:"struct" shapeOnly:true`，key/type 逐字段声明，操作同 Make Struct 但无值列——DevNode shapeOnly 模式隐藏值槽，fieldAdd shapeOnly 不带 value）；出口 `dynamicOutputs:"fromJsonShape"` = `structShape(data.shape)`（struct_N 编辑期确定）；**run 子集校验**：JSON ⊆ shape——缺失字段允许（undefined）、多余字段报「多余字段」、类型不匹配报「期望 X 实际 Y」、空 shape 报「未定义 shape」。**structSplit 第三回溯路径**：上游出口列表含形状串出口 → structFieldsFromShape 解析（通用兜底，不点名 fromjson；含 depth>8 互递归熔断；顺手把 selector 分支的解析重构为 structFieldsFromShape——首测暴露 key/id 映射错误已修）。
 - **SSH命令 widget（changes 2）**：command 改 `kind:"text" fullrow:true rows:2 highlight:"shell"`——label 整行 100% 左对齐、textarea 整行 100%（另起一行、默认 2 行、resize:vertical 宽度不可拉）；高亮 overlay：pre 层（同字体/行高/padding/pre-wrap）叠于透明文字 textarea 背后、onscroll 同步——`{{NAME}}` 琥珀加粗、命令词紫、字符串绿、注释灰斜体。
 - **回归**：verify 66 绿（fromjson shape 子集校验六态 + 出口形状串 + split 回溯 + selector 字母序旧断言）；构建零警告；3199 实测（截图）：用户 case 链路 split 出现 aa(number) 口且下游边存活、shape 编辑器无值列、SSH命令卡 fullrow/2 行/高亮对齐；devops-wfs 全程只读。
+
+## FEAT-2026-10-02-05 textarea 增强 action 化（行号/高亮/自适应高度可选择性应用）+ Shape 行 40/60（用户需求/架构意见）
+
+- **架构（用户意见）**：行号/高亮/自适应高度应是相对独立、可对所有 textarea 选择性应用/关闭的代码——收编为新 action `web/src/lib/textareaEnhance.js`：`use:enhance={{ text, lineNumbers, highlight, autoGrow, maxHeight }}`，各键独立开关，destroy 完整解包还原；DevNode 内联实现（highlightCmd/syncHlScroll/hlEls ~45 行）全删。样式全局化（app.css `.ta-enhance/.ta-gutter/.ta-hl/.ta-measure/.ta-src` 套件）。
+- **行号（逻辑行，wrap 兼容）**：用户示例定案——行号标注在每逻辑行首视觉行（软换行续行向下、顶格；textarea 无悬挂缩进的取舍）。实现：隐形测量 pre（同宽/字体/pre-wrap，逐逻辑行 span）读 offsetTop → gutter 绝对定位行号；scroll 同步 translateY。**坑**：Svelte action update 对对象字面量参数不可靠（evaluate 直改 data 后 update 未触发、fit 卡旧值）——模板用 `{@const taText = get(w.key)}` 承载 text 参数（参与响应图）+ 真实输入路径 action 内 input 事件 fit 兜底。
+- **SSH命令 widget**：`kind:"text", fullrow, rows:2, highlight:"shell", lineNumbers:true, autoGrow:true`（元数据开关，其它 textarea 零改动随时可开）。
+- **Shape 行 40/60**（用户指定）：shaperow 类——key 40%、type flex 吃满定宽＋以外（60% 区），区别于 Make Struct 的 20/20/右贴。
+- **回归**：verify 66 绿（无引擎改动）；构建零警告；3199 截图实测：行号 1/2/3 对逻辑行（长行 wrap 正确）、高亮着色对齐、styleH 94px 自适应、Shape 行 132/164（40/60）；devops-wfs 全程只读。

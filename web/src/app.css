@@ -74,20 +74,29 @@ textarea { font: 12px/1.5 var(--mono); }
 /* fullrow（SSH命令等）：label 整行、textarea 整行（另起一行，宽度 100%） */
 .devnode .body .wrow.fullrow { display: block; }
 .devnode .body .wrow.fullrow .wlab { width: 100%; }
-.devnode .body .wrow.fullrow > .cmdhl-wrap, .devnode .body .wrow.fullrow > textarea { width: 100%; }
-/* 命令高亮 overlay：pre 与 textarea 同框叠放——同字体/行高/padding/换行行为，滚动同步 */
-.devnode .body .cmdhl-wrap { position: relative; display: block; }
-.devnode .body .cmdhl-wrap textarea { position: relative; background: transparent; color: transparent;
-  caret-color: var(--fg); display: block; }
-.devnode .body .cmdhl-wrap textarea::selection { background: rgba(97, 175, 239, .35); color: transparent; }
-.devnode .body pre.cmdhl { position: absolute; inset: 0; margin: 0; pointer-events: none;
-  font: 12px/1.5 var(--mono); padding: 2px 6px; border-radius: 4px;
-  white-space: pre-wrap; word-break: break-word; overflow: hidden;
-  color: var(--fg); background: var(--panel2); border: 1px solid var(--line); }
-.devnode .body pre.cmdhl .c-var { color: #e5c07b; font-weight: 700; }
-.devnode .body pre.cmdhl .c-kw { color: #c678dd; }
-.devnode .body pre.cmdhl .c-str { color: #98c379; }
-.devnode .body pre.cmdhl .c-cmt { color: var(--dim); font-style: italic; }
+.devnode .body .wrow.fullrow > .ta-enhance, .devnode .body .wrow.fullrow > textarea { width: 100%; }
+
+/* textarea 增强（web/src/lib/textareaEnhance.js 注入）：行号 gutter / 高亮 overlay / 隐形测量层 */
+.ta-enhance { display: flex; align-items: stretch; }
+.ta-gutter { position: relative; flex: none; width: 2.2em; overflow: hidden;
+  font: 12px/1.5 var(--mono); color: var(--dim); text-align: right;
+  background: color-mix(in srgb, var(--panel2) 70%, transparent);
+  border: 1px solid var(--line); border-right: none; border-radius: 4px 0 0 4px; }
+.ta-gutter .ta-no { position: absolute; right: 4px; left: 0; }
+.ta-edit { position: relative; flex: 1; min-width: 0; }
+.ta-edit pre.ta-hl, .ta-edit pre.ta-measure { position: absolute; inset: 0; margin: 0; pointer-events: none;
+  font: 12px/1.5 var(--mono); padding: 2px 6px; border-radius: 0 4px 4px 0;
+  white-space: pre-wrap; word-break: break-word; overflow: hidden; }
+.ta-edit pre.ta-hl { color: var(--fg); background: var(--panel2); border: 1px solid var(--line); border-left: none; }
+.ta-edit pre.ta-measure { visibility: hidden; }
+.ta-enhance .ta-src { position: relative; display: block; background: transparent; color: transparent;
+  caret-color: var(--fg); white-space: pre-wrap; word-break: break-word; overflow: auto;
+  border: 1px solid var(--line); border-left: none; border-radius: 0 4px 4px 0; }
+.ta-enhance .ta-src::selection { background: rgba(97, 175, 239, .35); color: transparent; }
+.ta-hl .ta-var { color: #e5c07b; font-weight: 700; }
+.ta-hl .ta-kw { color: #c678dd; }
+.ta-hl .ta-str { color: #98c379; }
+.ta-hl .ta-cmt { color: var(--dim); font-style: italic; }
 /* Make Struct 字段编辑器（例外排版）：label 整行左对齐；字段行（key-type-value-action）占卡片一整行——
    key/type 左对齐各 20%（40% 区对半）；值槽（fval=34 与 tri-switch 同槽同宽）/删除/＋ 定宽右贴，
    右侧组合计上限 60%（spacing 计入） */
@@ -149,6 +158,9 @@ textarea { font: 12px/1.5 var(--mono); }
 .devnode .body .trow .wired { flex: none; font-size: 12px; }
 /* Make Struct 字段行：字段被连线时 🔗 与删除按钮右贴（与 tri/值槽的 60% 区右对齐一致） */
 .devnode .body .wrow.structrow .trow > .wired { margin-left: auto; }
+/* Shape（Struct From JSON）行：key 40% / type+button 60%——type 吃满定宽 ＋ 以外的宽度 */
+.devnode .body .wrow.structrow .trow.shaperow > input:not(.fval) { flex: 0 0 40%; }
+.devnode .body .wrow.structrow .trow.shaperow > select { flex: 1 1 0; min-width: 0; }
 
 /* Dashboard 汇总面板：40/60 同语言——字段名左 40% 截断，值右对齐 60% 区；boolean 状态徽章 */
 .devnode .body .dashbody { display: block; padding: 2px 0 4px; }

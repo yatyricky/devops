@@ -3,6 +3,7 @@
   import { Handle, Position, useUpdateNodeInternals } from "@xyflow/svelte";
   import { TYPE_COLORS, effectiveInputs, effectiveOutputs, nodeTitle, portLabel, displayType, typeColorKey, structFieldsFromShape } from "./types.js";
   import { expandHomeLocal } from "./lib/infer.js";
+  import { enhance } from "./lib/textareaEnhance.js";
   import { api } from "./api.js";
   import { ui } from "./store.svelte.js";
   import TriSwitch from "./TriSwitch.svelte";
@@ -324,32 +325,6 @@
     }
     newVals[key + "#k"] = ""; newVals[key + "#t"] = "string";
   }
-
-  // ── 命令高亮（{{NAME}} 占位符 + shell 基础着色）：escape 后按词法包 span，pre 层与 textarea 叠加同步 ────
-  let hlEls = {};
-  function syncHlScroll(key, ta) {
-    const pre = hlEls[key];
-    if (pre) { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft; }
-  }
-  function highlightCmd(src) {
-    const esc = s => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-    // 逐段扫：注释(#…) / 字符串('…' "…") / {{NAME}} / 词（命令词表强调）——其余原样
-    let out = "", i = 0;
-    const KW = /^(sudo|systemctl|bash|sh|grep|awk|sed|cat|find|stat|openssl|apt-get|apt|ufw|ss|ps|tar|curl|jq|python3|fail2ban-client|date|cut|head|tail|xargs|echo|printf|test|mkdir|chmod|chown|ln|rm|cp|mv|install)\b/;
-    while (i < src.length) {
-      const rest = src.slice(i);
-      let m;
-      if ((m = rest.match(/^#[^\n]*/))) { out += `<span class="c-cmt">${esc(m[0])}</span>`; i += m[0].length; continue; }
-      if ((m = rest.match(/^'[^'\n]*'/)) || (m = rest.match(/^"[^"\n]*"/))) { out += `<span class="c-str">${esc(m[0])}</span>`; i += m[0].length; continue; }
-      if ((m = rest.match(/^\{\{(\w+)\}\}/))) { out += `<span class="c-var">${esc(m[0])}</span>`; i += m[0].length; continue; }
-      if ((m = rest.match(/^[A-Za-z_][\w.-]*/))) {
-        out += KW.test(m[0]) ? `<span class="c-kw">${esc(m[0])}</span>` : esc(m[0]);
-        i += m[0].length; continue;
-      }
-      out += esc(src[i]); i += 1;
-    }
-    return out + "\n"; // 尾随换行：pre 与 textarea 的软换行末行对齐
-  }
 </script>
 
 <div class="devnode" class:selected class:onpath={onPath} class:error={!!cardError}
@@ -495,18 +470,10 @@
         <label class="wrow nodrag" class:structrow={w.kind === "struct"} class:fullrow={w.fullrow}>
           <span class="wlab" title={w.label}>{w.label}</span>
           {#if w.kind === "text"}
-            {#if w.highlight}
-              <!-- 高亮 overlay：pre 层在 textarea 背后同步渲染着色文本；textarea 文字透明、caret 可见 -->
-              <span class="cmdhl-wrap nodrag">
-                <pre class="cmdhl" bind:this={hlEls[w.key]}>{@html highlightCmd(get(w.key) ?? "")}</pre>
-                <textarea rows={w.rows ?? 4} value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
-                  oninput={e => set(w.key, e.target.value)}
-                  onscroll={e => syncHlScroll(w.key, e.target)}></textarea>
-              </span>
-            {:else}
-              <textarea rows={w.rows ?? 4} value={get(w.key) ?? ""} placeholder={w.placeholder ?? ""}
-                oninput={e => set(w.key, e.target.value)}></textarea>
-            {/if}
+            {@const taText = get(w.key) ?? ""}
+            <textarea rows={w.rows ?? 4} value={taText} placeholder={w.placeholder ?? ""}
+              use:enhance={{ text: taText, lineNumbers: !!w.lineNumbers, highlight: w.highlight ?? null, autoGrow: !!w.autoGrow }}
+              oninput={e => set(w.key, e.target.value)}></textarea>
           {:else if w.kind === "boolean"}
             <TriSwitch value={get(w.key) ?? w.default} onchange={v => set(w.key, v)} />
           {:else if w.kind === "enum"}
@@ -578,10 +545,11 @@
           {:else if w.kind === "struct"}
             {@const shapeOnly = !!w.shapeOnly}
             <!-- 例外排版（QoL-2026-10-02-02）：label 整行左对齐；key/type 对半、值槽/删除右贴。
-                 shapeOnly（Struct From JSON 的 shape 声明）无值槽——行 = key/type/删除 -->
+                 shapeOnly（Struct From JSON 的 shape 声明）无值槽——行 = key/type/删除，
+                 且分割为 key 40% / type+button 60%（shaperow 类，区别于 Make Struct 的 20/20/右贴） -->
             <span class="tblwrap">
               {#each get(w.key) ?? [] as f, i}
-                <span class="trow">
+                <span class="trow" class:shaperow={shapeOnly}>
                   <input class:winvalid={!/^\w+$/.test(f.key)} placeholder="key" value={f.key}
                     onchange={e => setField(w.key, i, "key", e.target.value)} />
                   <select value={f.type} onchange={e => setField(w.key, i, "type", e.target.value)}>
@@ -605,7 +573,7 @@
                   <button class="mini danger" title="删除字段" onclick={() => set(w.key, (get(w.key) ?? []).filter((_, j) => j !== i))}>{@render trash(11)}</button>
                 </span>
               {/each}
-              <span class="trow">
+              <span class="trow" class:shaperow={shapeOnly}>
                 <input placeholder="key" bind:value={newVals[w.key + "#k"]} />
                 <select bind:value={newVals[w.key + "#t"]}>
                   <option value="string">string</option>
