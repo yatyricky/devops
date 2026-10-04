@@ -389,3 +389,4 @@
    - **高度策略改回手动拖（用户改需求）**：autoGrow/迭代收敛删除；action 参数 `height`（初始高度）+ textarea `resize: vertical` 用户拖；拖完松手（pointerup）`saveWidgetH` 写 `data.uiH[widgetKey]`（随节点序列化/恢复/克隆），action mount 读 uiH 设高、之后不干预。实测：模拟拖拽 → uiH 落盘 {command:172} → 重载恢复 styleH=172px。
    - **回弹根因终修**：action `update` 永不碰高度——高度只在 mount 时由 params.height（uiH）设定一次，之后完全由用户拖拽主导（重渲染按旧 uiH 重设 style.height 即「弹回去一点」的来源）。纯 DOM 复验：设高 180 → 两次全局重渲染 → 172 恒定不回弹。
    - **测试事故自纠**：3199 复用残留注册导致画布载入的是我自己的 test-bounce wf（非用户 audit-demo）——回弹/滚动条验证全部在自建 wf 上进行，用户 audit-demo.json 完好（json_test/lit 演进/23 节点在）。
+   - **「拖高保存后刷新回弹」判非 bug（用户报）**：全链只读核查——保存链五道关口（docIO stripDecor 只剥 `__` / validate 只查 data 是 object / save 原样写盘 / onData 不滤键 / DevNode 读写对路）全通，audit-demo.json 里 col_sshd/col_fw 的 uiH 已正常落盘；xlgbis.json 零 uiH + 3010 的 dist 含新功能 → 根因是用户 3010 标签页内存里跑着 uiH 功能构建之前的旧 JS（拖拽只改 DOM，保存的 doc 无 uiH）。处置：3010 硬刷新一次 + 重拖一次即可，此后持久化。副注：未知类型节点 __origType 保存丢失是已知未修项，与此无关。
