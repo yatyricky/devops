@@ -326,11 +326,13 @@
     newVals[key + "#k"] = ""; newVals[key + "#t"] = "string";
   }
 
-  // ── textarea 手动拖拽高度序列化（data.uiH[key]，随节点保存/恢复；拖完松手才写） ────
+  // ── textarea 手动拖拽高度序列化（data.uiH[key]，随节点保存/恢复；拖完松手才写）。
+  //    offsetHeight = 布局像素（画布缩放无关）——getBoundingClientRect 是屏幕像素（×缩放），
+  //    存进去恢复时缩放级别一变高度就对不上 ────
   function saveWidgetH(widgetKey, ta) {
-    const h = Math.round(ta.getBoundingClientRect().height);
-    const cur = data.uiH?.[widgetKey];
-    if (cur === h) return;
+    const h = ta.offsetHeight;
+    const curH = data.uiH?.[widgetKey];
+    if (curH === h) return;
     ondata(id, "uiH", { ...(data.uiH ?? {}), [widgetKey]: h });
   }
 </script>
