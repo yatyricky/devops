@@ -131,6 +131,9 @@ export function validateTaskRunnable(doc, taskName) {
     if (!task) return [`task not found: ${taskName}`];
 
     const nodeById = new Map(doc.nodes.filter(n => n?.id).map(n => [n.id, n]));
+    // 「节点配置未完成」类的语义检查（fromjson 的 shape 等）只对目标任务选点内的节点生效——
+    // 画布上未配置的半成品节点不应阻塞无关任务的运行
+    const inTask = new Set(task.nodes ?? []);
     for (const n of doc.nodes) {
         if (!n?.id) continue;
         if (!NODE_TYPES[n.type]) { problems.push(`节点 ${n.id} 类型未知: ${n.type}（无法运行）`); continue; }
@@ -155,8 +158,8 @@ export function validateTaskRunnable(doc, taskName) {
             const problem = tarEntriesProblem(n);
             if (problem) problems.push(`节点 ${n.id}：${problem}`);
         }
-        // selector：in1 为类型准绳（in1 未连而其余口有线 / 源类型 ≠ in1 源类型 → 错误）
-        if (n.type === "select.one") {
+        // selector：in1 为类型准绳（in1 未连而其余口有线 / 源类型 ≠ in1 源类型 → 错误）——仅任务选点内的节点
+        if (n.type === "select.one" && inTask.has(n.id)) {
             const wires = doc.edges
                 .filter(e => e.kind !== "seq" && e.target === n.id)
                 .map(e => {
@@ -168,19 +171,21 @@ export function validateTaskRunnable(doc, taskName) {
             const problem = selectorWireProblem(wires);
             if (problem) problems.push(`节点 ${n.id}：${problem}`);
         }
-        // struct.fromjson：shape 编辑期问题（运行时输入无 shape / shape ⊉ 派生输入）
-        if (n.type === "struct.fromjson") {
+        // struct.fromjson：shape 编辑期问题（运行时输入无 shape / shape ⊉ 派生输入）——仅任务选点内的节点
+        if (n.type === "struct.fromjson" && inTask.has(n.id)) {
             const problem = fromjsonShapeProblem(n, { edges: doc.edges, nodes: doc.nodes, metas: NODE_TYPES });
             if (problem) problems.push(`节点 ${n.id}：${problem}`);
         }
     }
 
-    // 边校验：端点存在 / seq handle / handle 存在 / 类型兼容
+    // 边校验：端点存在 / seq handle / handle 存在 / 类型兼容——
+    // 仅任务选点内的边（两端都在选点内）：一端在任务外的边不阻塞本任务
     for (const e of doc.edges) {
         if (!nodeById.has(e.source) || !nodeById.has(e.target)) {
             problems.push(`边 ${e.id ?? "?"} 端点不存在: ${e.source} → ${e.target}`);
             continue;
         }
+        if (!inTask.has(e.source) || !inTask.has(e.target)) continue;
         if (e.kind === "seq") {
             if (e.sourceHandle !== "__seqOut" || e.targetHandle !== "__seqIn") {
                 problems.push(`顺序边 ${e.id ?? "?"} 的 handle 非法（应为 __seqOut → __seqIn）`);

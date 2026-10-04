@@ -1250,13 +1250,19 @@ await test("struct.fromjson: fromjsonShapeProblem 四态 + 门禁拦截", async 
     const doc = {
         nodes: [
             { id: "fj", type: "struct.fromjson", data: {} },
+            { id: "c", type: "string.const", data: { value: "x" } },
             { id: "sess", type: "ssh.session", data: {} },
         ],
         edges: [{ id: "e1", source: "fj", sourceHandle: "struct", target: "sess", targetHandle: "alias" }],
-        tasks: { t: { label: "t", mutates: false, nodes: ["fj", "sess"] } },
+        tasks: {
+            t: { label: "t", mutates: false, nodes: ["fj", "sess"] },
+            other: { label: "other", mutates: false, nodes: ["c", "sess"] },
+        },
     };
     const problems = validateTaskRunnable(doc, "t");
     assert.ok(problems.some(p => p.includes("必须定义 shape")), "门禁拦截：运行时输入 + 无 shape");
+    // 任务不含问题节点 → 不拦（画布半成品不阻塞无关任务）
+    assert.deepStrictEqual(validateTaskRunnable(doc, "other"), [], "任务不含问题节点 → 不拦");
 });
 
 await test("静默错误链封堵：selector pick 无值报错 / ssh.session 连线口不回退 widget", async () => {
