@@ -130,11 +130,12 @@ export function enhance(node, params = {}) {
     return {
         update(next) {
             const structural = next.lineNumbers !== cur.lineNumbers || next.highlight !== cur.highlight;
-            const heightChanged = next.height !== cur.height;
+            // update 永不碰高度：高度只在 mount 时由 params.height（uiH）设定，之后用户拖拽主导——
+            // 重渲染（输入/图状态变化）时按旧 uiH 重设会弹回用户刚拖到的高度
             cur = { ...next };
-            if (structural) { build(); renderHl(); renderGutter(); }
-            else { renderHl(); renderGutter(); }
-            if (heightChanged && cur.height) node.style.height = `${cur.height}px`;
+            if (structural) { build(); renderHl(); renderGutter(); if (cur.height) node.style.height = `${cur.height}px`; }
+            renderHl();
+            renderGutter();
             applyScroll();
         },
         destroy,

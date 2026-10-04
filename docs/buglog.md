@@ -387,3 +387,5 @@
 - **回归**：verify 66 绿；构建零警告；3199 实测（截图）：6 卡多行 + 行号/高亮/自适应 + asScript 开关可见；audit-demo.json 保留 .tmp 供用户研究。
    - **gutter 溢出卡片 + maxHeight 截断（用户两张截图，FEAT-2026-10-02-05 修补）**：①行号浮在卡外——translateY 加在 gutter 元素自身，框体整体移出、overflow:hidden 裁剪框跟着走；改为 gutter 内 `.ta-gutter-inner`（absolute inset 0）承载行号并 translateY，gutter 框固定参与裁剪。②11 行内容仍出滚动条——maxHeight 默认 420 截断（fit 迭代已正确收敛 438 被 min 截回）；默认上限放宽 2000（仅防失控），同时 fit 保持迭代收敛（亚像素舍入下固定补偿不可靠）。
    - **高度策略改回手动拖（用户改需求）**：autoGrow/迭代收敛删除；action 参数 `height`（初始高度）+ textarea `resize: vertical` 用户拖；拖完松手（pointerup）`saveWidgetH` 写 `data.uiH[widgetKey]`（随节点序列化/恢复/克隆），action mount 读 uiH 设高、之后不干预。实测：模拟拖拽 → uiH 落盘 {command:172} → 重载恢复 styleH=172px。
+   - **回弹根因终修**：action `update` 永不碰高度——高度只在 mount 时由 params.height（uiH）设定一次，之后完全由用户拖拽主导（重渲染按旧 uiH 重设 style.height 即「弹回去一点」的来源）。纯 DOM 复验：设高 180 → 两次全局重渲染 → 172 恒定不回弹。
+   - **测试事故自纠**：3199 复用残留注册导致画布载入的是我自己的 test-bounce wf（非用户 audit-demo）——回弹/滚动条验证全部在自建 wf 上进行，用户 audit-demo.json 完好（json_test/lit 演进/23 节点在）。
