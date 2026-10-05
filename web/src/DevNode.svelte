@@ -37,10 +37,10 @@
     }
     return [];
   });
-  // 面板运行时值对象：自身收到的输入（脱敏 + 300 截断）
+  // 面板运行时值对象：markNodeOutput 专用通道的完整 JSON（inputs 快照 300 截断会破坏大 struct）
   let dashRunObj = $derived.by(() => {
     if (!meta?.dashboardShow) return null;
-    const raw = ui.runNodeInputs?.[id]?.data;
+    const raw = ui.runNodeOutputs?.[id];
     if (raw === undefined) return null;
     try { const o = JSON.parse(raw); return typeof o === "object" && o !== null ? o : null; } catch { return null; }
   });

@@ -185,7 +185,9 @@ export default [
         outputs: [],
         widgets: [],
         async run(ctx, node, inputs) {
-            // 展示节点无副作用：数据经 runNodeInputs 通道供 GUI 实时显示
+            // 展示节点无副作用：完整 JSON 走 markNodeOutput 专用通道
+            // （inputs 快照经 displayValue 300 截断，大 struct 会被破坏）
+            ctx.markNodeOutput?.(node.id, JSON.stringify(inputs.data ?? null));
         },
     },
 ];
