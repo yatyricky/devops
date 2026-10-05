@@ -23,7 +23,9 @@ export function toDocument(nodes, edges, tasks, title, repoDir) {
   };
 }
 
-/** 剥除 __ 前缀装饰字段（__type 等运行时标记）。 */
+/** 剥除 __ 前缀装饰字段（__type 等运行时标记）；selector 节点剥 lockType（纯派生后为遗留脏数据）。 */
 export function stripDecor(data) {
-  return Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith("__")));
+  const cleaned = Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith("__")));
+  if ("lockType" in cleaned) delete cleaned.lockType;
+  return cleaned;
 }

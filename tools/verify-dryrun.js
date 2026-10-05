@@ -1302,6 +1302,24 @@ await test("门禁收窄: 任务外节点（未知类型/半成品）不阻塞�
     assert.ok(validateTaskRunnable(doc, "t").some(p => p.includes("字段 key 重复")), "任务内 struct 字段重复仍拦");
 });
 
+await test("ssh.exec asScript: 整段一次执行（set -e 前置 + 换行保留 + CRLF 规范化）", async () => {
+    const def = NODE_TYPES["ssh.exec"];
+    const cmds = [];
+    const ssh = { async execCommand(command) { cmds.push(command); return { code: 0, stdout: "", stderr: "" }; } };
+    const ctx = { log: () => {}, dryRun: false };
+    const node = { data: { command: "A=1\necho $A\necho {{name}}", asScript: true, useSudo: false, loginShell: false } };
+    await def.run(ctx, node, { ssh, name: "x" });
+    assert.strictEqual(cmds.length, 1, "整段模式只执行一次 bash");
+    assert.ok(cmds[0].startsWith("set -e\nA=1"), "set -e 前置 + 首行命令（CRLF 已规范化）");
+    assert.ok(cmds[0].includes("\necho $A"), "换行字面保留（变量跨行共享）");
+    assert.ok(cmds[0].includes("'x'"), "占位符替换加引号");
+    // 逐行模式对照：多行 = 多次执行
+    const cmds2 = [];
+    const ssh2 = { async execCommand(command) { cmds2.push(command); return { code: 0, stdout: "", stderr: "" }; } };
+    await def.run(ctx, { data: { command: "echo a\necho b", asScript: false, useSudo: false, loginShell: false } }, { ssh: ssh2 });
+    assert.strictEqual(cmds2.length, 2, "逐行模式两行两次执行");
+});
+
 await test("静默错误链封堵：selector pick 无值报错 / ssh.session 连线口不回退 widget", async () => {
     const { NODE_TYPES: NT } = await import("../engine/nodes/index.js");
     // selector run：pick 指向的口键存在但值 undefined（源未选入任务的引擎形态）→ 必须抛错
