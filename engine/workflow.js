@@ -131,11 +131,11 @@ export function validateTaskRunnable(doc, taskName) {
     if (!task) return [`task not found: ${taskName}`];
 
     const nodeById = new Map(doc.nodes.filter(n => n?.id).map(n => [n.id, n]));
-    // 「节点配置未完成」类的语义检查（fromjson 的 shape 等）只对目标任务选点内的节点生效——
-    // 画布上未配置的半成品节点不应阻塞无关任务的运行
+    // 全部「节点配置/语义」检查只对目标任务选点内的节点生效——
+    // 画布上未配置的半成品节点（包括未知类型）不应阻塞无关任务的运行
     const inTask = new Set(task.nodes ?? []);
     for (const n of doc.nodes) {
-        if (!n?.id) continue;
+        if (!n?.id || !inTask.has(n.id)) continue;
         if (!NODE_TYPES[n.type]) { problems.push(`节点 ${n.id} 类型未知: ${n.type}（无法运行）`); continue; }
         // struct.make：字段定义合法性（key 供插槽/占位符使用，须为 \w 且唯一）
         if (n.type === "struct.make" && Array.isArray(n.data.fields)) {

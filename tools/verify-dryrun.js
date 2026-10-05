@@ -1259,6 +1259,28 @@ await test("struct.fromjson: fromjsonShapeProblem 四态 + 门禁拦截", async 
     assert.deepStrictEqual(validateTaskRunnable(doc, "other"), [], "任务不含问题节点 → 不拦");
 });
 
+await test("门禁收窄: 任务外节点（未知类型/半成品）不阻塞无关任务", () => {
+    const doc = {
+        nodes: [
+            { id: "ok", type: "log.print", position: [0, 0], data: { lit: { value: "x" } } },
+            { id: "ghost", type: "no.such.type", position: [0, 0], data: {} },
+            { id: "m", type: "struct.make", position: [0, 0], data: { fields: [{ key: "ok", type: "string", value: "" }, { key: "ok", type: "string", value: "" }] } },
+            { id: "tp", type: "tar.pack", position: [0, 0], data: { entries: ["a"], excludes: ["b"] } },
+        ],
+        edges: [],
+        tasks: { t: { label: "t", mutates: false, nodes: ["ok"] } },
+    };
+    // 类型未知在任务外 → 不拦（红框空卡可保存）；struct/tar 半成品同理
+    assert.deepStrictEqual(validateTaskRunnable(doc, "t"), [], "任务外半成品不阻塞");
+    // 任务内出现同类问题 → 仍拦
+    doc.tasks.t.nodes = ["ghost", "ok"];
+    assert.ok(validateTaskRunnable(doc, "t").some(p => p.includes("类型未知")), "任务内未知类型仍拦");
+    doc.tasks.t.nodes = ["tp", "ok"];
+    assert.ok(validateTaskRunnable(doc, "t").some(p => p.includes("只能二选一")), "任务内 tar 互斥仍拦");
+    doc.tasks.t.nodes = ["m", "ok"];
+    assert.ok(validateTaskRunnable(doc, "t").some(p => p.includes("字段 key 重复")), "任务内 struct 字段重复仍拦");
+});
+
 await test("静默错误链封堵：selector pick 无值报错 / ssh.session 连线口不回退 widget", async () => {
     const { NODE_TYPES: NT } = await import("../engine/nodes/index.js");
     // selector run：pick 指向的口键存在但值 undefined（源未选入任务的引擎形态）→ 必须抛错
