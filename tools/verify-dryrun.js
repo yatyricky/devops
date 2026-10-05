@@ -8,7 +8,7 @@ import assert from "assert";
 import path from "path";
 import url from "url";
 import { canConnect, SOCKET_TYPES } from "../engine/types.js";
-import { selectorWireProblem, selectorEdgeProblem } from "../engine/rules.js";
+import { selectorWireProblem, selectorEdgeProblem, deriveJsonText } from "../engine/rules.js";
 import { makeInfer } from "../web/src/lib/infer.js";
 import { validateWorkflow, validateTaskRunnable } from "../engine/workflow.js";
 import { NODE_TYPES, getInputs, getOutputs } from "../engine/nodes/index.js";
@@ -1215,6 +1215,27 @@ await test("struct.fromjson: run 子集校验 + 出口派生/契约 + split 回�
     };
     const splitOuts = getOutputs(splitDoc.nodes[1], splitDoc);
     assert.deepStrictEqual(splitOuts, [{ id: "alias", type: "string" }, { id: "num", type: "number" }], "split 回溯 fromjson 形状串 → 字段出口");
+});
+
+await test("deriveJsonText: make→split→fromjson 文本链（split 字段出口回溯 make 字面量）", () => {
+    const doc = {
+        nodes: [
+            { id: "mk", type: "struct.make", data: { fields: [{ key: "json", type: "string", value: '{"a":"x"}' }, { key: "n", type: "number", value: "1" }] } },
+            { id: "split", type: "struct.split", data: {} },
+            { id: "fj", type: "struct.fromjson", data: {} },
+        ],
+        edges: [
+            { id: "e1", source: "mk", sourceHandle: "struct", target: "split", targetHandle: "struct" },
+            { id: "e2", source: "split", sourceHandle: "json", target: "fj", targetHandle: "json" },
+        ],
+    };
+    // split 的 json 字段出口 ← make 的同名字面量（string 非空）
+    assert.strictEqual(deriveJsonText({ edges: doc.edges, nodes: doc.nodes }, "fj"), '{"a":"x"}', "split 链文本推导");
+    // 字段缺失 / 非字符串类型 → 不可推导
+    doc.edges[1].sourceHandle = "n";
+    assert.strictEqual(deriveJsonText({ edges: doc.edges, nodes: doc.nodes }, "fj"), undefined, "非 string 字段 → undefined");
+    doc.edges[1].sourceHandle = "missing";
+    assert.strictEqual(deriveJsonText({ edges: doc.edges, nodes: doc.nodes }, "fj"), undefined, "字段缺失 → undefined");
 });
 
 await test("struct.fromjson: fromjsonShapeProblem 四态 + 门禁拦截", async () => {

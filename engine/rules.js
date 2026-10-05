@@ -68,9 +68,15 @@ export function deriveJsonText(env, nodeId, depth = 0) {
         return deriveJsonText(env, pw.source, depth + 1);
     }
     if (src.type === "struct.split") {
+        // split 的字段出口 = 其 struct 源的字段：fromjson 的入边 sourceHandle 即字段名。
+        // 源是 struct.make 且该字段（string）有字面值 → 值即 JSON 文本；其它 struct 源
+        // （selector/fromjson）无字段字面量，不可作为文本提供者 → undefined。
         const sw = (env?.edges ?? []).find(x => x.kind !== "seq" && !isTunnelEdge(x) && x.target === src.id && x.targetHandle === "struct");
         if (!sw) return undefined;
-        return deriveJsonText(env, sw.source, depth + 1);
+        const make = (env?.nodes ?? []).find(n => n.id === sw.source);
+        if (make?.type !== "struct.make") return undefined;
+        const f = (make.data?.fields ?? []).find(x => x.key === e.sourceHandle);
+        return f && f.type === "string" && f.value !== undefined && f.value !== "" ? String(f.value) : undefined;
     }
     return undefined;
 }
