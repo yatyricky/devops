@@ -408,3 +408,11 @@
 - **移除**：runner.js 的 maskLine/SECRET_KEY_RE/SECRET_NAME_RE 与 displayValue 打码分支（保留 300 字符截断——显示尺寸用途）；ctx.mask 入口删除；log.print 与 template.render 的 ctx.mask 消费改为原样输出；verify 的 6 条掩码断言替换为「不再打码」回归。
 - **保留**：.runs/ 审计追踪、prod 门禁、工作流文件即机密文件的存放约定——安全机制不受影响。
 - **回归**：verify 66 绿（maskLine 入口删除 + log.print 原样输出断言）；无残留引用（grep 零命中，文档同步 operations/architecture/README）。
+
+## BUG-2026-10-05-02 Review 修复四项（code review 跟进，分 commit）
+
+1. **门禁收窄补全**（b0ffb5d）：validateTaskRunnable 的类型未知/struct.make 字段/tar.pack 互斥此前仍全局检查——任务外半成品节点阻塞无关任务（与 fj_1 同类）。统一 inTask 限定；悬空端点边保持全局（数据损坏信号）。
+2. **deriveJsonText split 分支失效**（77421b4）：原递归回溯 struct 源（非文本提供者）恒 undefined——「make{json:"…"} → split → fromjson」自然链的 1a 自动派生不工作。按真实数据流修复：fromjson 入边 sourceHandle 即 split 字段名 → 回溯 make 同名字段（string 非空字面量）。
+3. **dashboard 截断破坏**（27be99d）：面板数据原走 runNodeInputs 快照——displayValue 300 字符截断使大 struct JSON 带 … 尾、JSON.parse 失败、静默回退编辑期值。SOC 改走 markNodeOutput 完整 JSON 专用通道（通道/SSE/持久化已存在）。
+4. **小项**：asScript 补 verify 断言（整段一次执行/set -e 前置/换行保留/CRLF 规范化）；toDocument 剥除 selector 遗留 lockType（纯派生脏数据）；导入缩进。
+- **回归**：verify 66→69 全绿；构建零警告。
