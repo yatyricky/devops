@@ -7,7 +7,7 @@
   import { makeInfer } from "./lib/infer.js";
   import { GROUP_COLORS, GROUP_COLLAPSED_W, groupAABB, groupBoxOf, crossEdges, collapsedHeight, makeGroupNode } from "./lib/groups.js";
   import { toDocument } from "./lib/docIO.js";
-  import { ui } from "./store.svelte.js";
+  import { ui, pickerRefreshers } from "./store.svelte.js";
   import DevNode from "./DevNode.svelte";
   import GroupBox from "./GroupBox.svelte";
   import Palette from "./Palette.svelte";
@@ -739,47 +739,56 @@
     ui.runNodeInputs = null;
     ui.runNodeOutputs = null;
   }
+  let runBusy = false;
   /** @param {{ dryRun: boolean, prodVal: string }} p RunModal 确认回调 */
   async function doRun(p) {
+    if (runBusy) return;
     const m = runModal;
     if (m.needProd && !p.dryRun && p.prodVal !== displayName) { showToast(`需输入显示名 "${displayName}" 确认`); return; }
-    // 防漂移门禁：任务选点中带实时列表的节点（refs/scripts/ssh 别名），其列表必须已按【当前输入】刷新过，
-    // 否则禁止启动（列表失鲜 = 选值可能已过期）。dry-run 同样受限——预览的也是计划的真实性。
-    const stale = [];
-    for (const id of tasks[m.task].nodes ?? []) {
-      const n = nodeByIdMap.get(id);
-      const meta = n && typeMap[n.data?.__type ?? n.type];
-      if (!meta) continue;
-      let want = undefined;
-      if (meta.refsPicker) want = infer().resolvePortValue(id, "repoDir");
-      else if (meta.scriptsPicker) want = infer().resolvePortValue(id, "path");
-      else if (meta.sshAliasesPicker) { const a = infer().resolvePortValue(id, "alias") ?? n.data?.alias; if (a !== undefined) want = String(a); }
-      if (want === undefined) continue; // 输入来自运行时节点（或 ssh 双空），列表新鲜度无从校验（刷新即按当时输入取）
-      const expect = meta.scriptsPicker ? String(want).trim() : String(want); // scripts 刷新侧记的是 trim 后路径
-      if (ui.pickerFresh[id] !== expect) stale.push(id);
-    }
-    if (stale.length) {
-      showToast(`实时列表未刷新（${stale.join("、")}），先点卡片「刷新」或顶栏「刷新列表」再运行`);
-      return;
-    }
+    runBusy = true;
     try {
-      const { id } = await api("/api/jobs", { method: "POST", body: JSON.stringify({
-        workflow: currentPath, task: m.task, dryRun: p.dryRun,
-        doc: toDoc(), // 内存态执行：未保存的改动也能直接跑（后端校验后以内存为准）
-        ...(m.needProd && !p.dryRun ? { confirmProd: p.prodVal } : {}),
-      }) });
-      runModal = null;
-      // 卡片外框状态：任务选点集（集外半透明灰）+ 节点执行状态清零，随流式事件更新
-      ui.runTaskNodes = new Set(tasks[m.task].nodes ?? tasks[m.task].path ?? []);
-      ui.nodeRunStatus = {};
-      ui.runNodeInputs = {};
-      ui.runNodeOutputs = {};
-      await logRef?.follow(id, `${displayName}/${m.task}${p.dryRun ? " (dry-run)" : ""}`, {
-        onNode: ns => { ui.nodeRunStatus = ns ?? {}; },
-        onNodeInputs: ni => { ui.runNodeInputs = ni ?? {}; },
-        onNodeOutputs: no => { ui.runNodeOutputs = no ?? {}; },
-      });
-    } catch (e) { showToast(e.message); }
+      // 防漂移门禁：任务选点中带实时列表的节点（refs/scripts/ssh 别名），入队前各自动刷新一次——
+      // 幂等只读，免去手动点「刷新列表」；不做已新鲜跳过（输入未变但上游出新提交的内容级漂移靠每次刷新兜住）。
+      // 收集可校验节点：输入来自运行时节点（或 ssh 双空）则无从刷新与校验，跳过（刷新即按当时输入取）。
+      const pickers = [];
+      for (const id of tasks[m.task].nodes ?? []) {
+        const n = nodeByIdMap.get(id);
+        const meta = n && typeMap[n.data?.__type ?? n.type];
+        if (!meta) continue;
+        let want = undefined;
+        if (meta.refsPicker) want = infer().resolvePortValue(id, "repoDir");
+        else if (meta.scriptsPicker) want = infer().resolvePortValue(id, "path");
+        else if (meta.sshAliasesPicker) { const a = infer().resolvePortValue(id, "alias") ?? n.data?.alias; if (a !== undefined) want = String(a); }
+        if (want === undefined) continue;
+        pickers.push({ id, expect: meta.scriptsPicker ? String(want).trim() : String(want) }); // scripts 刷新侧记的是 trim 后路径
+      }
+      await Promise.allSettled(pickers.map(x => pickerRefreshers.get(x.id)?.()));
+      if (runModal !== m) return; // 刷新期间点了取消
+      // 兜底门禁：刷新失败（卡片红框显示具体错误）→ 新鲜键未落 → 拦截。dry-run 同样受限——预览的也是计划的真实性。
+      const stale = pickers.filter(x => ui.pickerFresh[x.id] !== x.expect).map(x => x.id);
+      if (stale.length) {
+        showToast(`实时列表自动刷新失败（${stale.join("、")}），见卡片错误提示，修正后再运行`);
+        return;
+      }
+      try {
+        const { id } = await api("/api/jobs", { method: "POST", body: JSON.stringify({
+          workflow: currentPath, task: m.task, dryRun: p.dryRun,
+          doc: toDoc(), // 内存态执行：未保存的改动也能直接跑（后端校验后以内存为准）
+          ...(m.needProd && !p.dryRun ? { confirmProd: p.prodVal } : {}),
+        }) });
+        runModal = null;
+        // 卡片外框状态：任务选点集（集外半透明灰）+ 节点执行状态清零，随流式事件更新
+        ui.runTaskNodes = new Set(tasks[m.task].nodes ?? tasks[m.task].path ?? []);
+        ui.nodeRunStatus = {};
+        ui.runNodeInputs = {};
+        ui.runNodeOutputs = {};
+        await logRef?.follow(id, `${displayName}/${m.task}${p.dryRun ? " (dry-run)" : ""}`, {
+          onNode: ns => { ui.nodeRunStatus = ns ?? {}; },
+          onNodeInputs: ni => { ui.runNodeInputs = ni ?? {}; },
+          onNodeOutputs: no => { ui.runNodeOutputs = no ?? {}; },
+        });
+      } catch (e) { showToast(e.message); }
+    } finally { runBusy = false; }
   }
 
   function saveDefinedTask() {

@@ -416,3 +416,11 @@
 3. **dashboard 截断破坏**（27be99d）：面板数据原走 runNodeInputs 快照——displayValue 300 字符截断使大 struct JSON 带 … 尾、JSON.parse 失败、静默回退编辑期值。SOC 改走 markNodeOutput 完整 JSON 专用通道（通道/SSE/持久化已存在）。
 4. **小项**：asScript 补 verify 断言（整段一次执行/set -e 前置/换行保留/CRLF 规范化）；toDocument 剥除 selector 遗留 lockType（纯派生脏数据）；导入缩进。
 - **回归**：verify 66→69 全绿；构建零警告。
+
+## FEAT-2026-10-05-02 运行前自动刷新实时列表（用户需求：刷新幂等且必做，自动化省一步）
+
+- **需求**：执行任务前自动执行一次全部刷新。刷新是幂等只读操作（本地 `git for-each-ref` / 读 package.json / 解析本地 ~/.ssh/config），此前 doRun 只校验新鲜度（QoL-2026-09-30-02 防漂移门禁）不触发刷新，用户被迫先手动点「刷新列表」再运行。
+- **实现（SOC：卡片拥有刷新逻辑与下拉状态，App 只编排时机）**：store 新增非响应式注册表 `pickerRefreshers`（nodeId → 刷新函数；函数不是 UI 状态不进 $state），DevNode 挂载注册/卸载注销，三个刷新函数不抽象（尊重「明确未做」决策）；doRun 入队前对任务选点中带 picker 且输入可解析的节点 `Promise.allSettled` 逐卡刷新——**每次运行无条件刷一次**，不做已新鲜跳过（输入未变但上游出新提交的内容级漂移正要靠每次刷新兜住）。
+- **保留为兜底**：防漂移门禁原样保留——刷新失败（卡片红框显示具体错误）→ 新鲜键未落 → 拦截，toast 改「实时列表自动刷新失败（…），见卡片错误提示」。输入来自运行时节点的逃生分支（want undefined 跳过）维持不变。
+- **顺带**：refreshScripts「选值不在新列表回写第一项」发生在 toDoc() 之前，过期 script 名入队前自动修正；runBusy 重入守卫 + 刷新 await 后复查 runModal（给取消按钮生效窗口）。范围：只刷任务选点内的节点（门禁要求的恰好这批，不给运行时接线的无关卡片误挂红框）；顶栏「刷新列表」保留管全画布。
+- **回归**：verify 69 绿；构建零警告；3199 一次性实例实测（临时 wf 已删）：git.getRefs/npm.run/ssh.session 三卡注册渲染无控制台错误，点「刷新列表」后 refs（HEAD/master）/scripts（start/verify，自动回写落盘）/ssh 别名（本地 config 解析）三下拉全部填充；真实运行的自动刷新链路由用户点验（运行按钮禁令）。

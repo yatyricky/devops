@@ -22,3 +22,7 @@ export const ui = $state({
   descAllTick: 0,
   descAllOpen: false,
 });
+
+/** 运行前自动刷新注册表：nodeId → 刷新该卡实时列表的函数。函数不是 UI 状态，不进 $state；
+ *  DevNode 挂载时注册、卸载时注销，doRun 入队前逐卡调用（幂等只读）。 */
+export const pickerRefreshers = new Map();

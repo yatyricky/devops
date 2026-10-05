@@ -5,7 +5,7 @@
   import { expandHomeLocal } from "./lib/infer.js";
   import { enhance } from "./lib/textareaEnhance.js";
   import { api } from "./api.js";
-  import { ui } from "./store.svelte.js";
+  import { ui, pickerRefreshers } from "./store.svelte.js";
   import TriSwitch from "./TriSwitch.svelte";
 
   let { id, data, selected } = $props();
@@ -170,6 +170,19 @@
     if (meta?.refsPicker) refreshRefs();
     if (meta?.scriptsPicker) refreshScripts();
     if (meta?.sshAliasesPicker) refreshSshAliases();
+  });
+
+  // ── 运行前自动刷新注册表：doRun 入队前按 nodeId 调用（幂等只读），免去手动「刷新列表」────
+  $effect(() => {
+    if (!id || !(meta?.refsPicker || meta?.scriptsPicker || meta?.sshAliasesPicker)) return;
+    pickerRefreshers.set(id, () => {
+      const jobs = [];
+      if (meta?.refsPicker) jobs.push(refreshRefs());
+      if (meta?.scriptsPicker) jobs.push(refreshScripts());
+      if (meta?.sshAliasesPicker) jobs.push(refreshSshAliases());
+      return Promise.all(jobs);
+    });
+    return () => pickerRefreshers.delete(id);
   });
 
   // ── 渲染模板：编辑期现场解析模板文件 → {{VAR}} 动态端口 / 不可推导时 struct 口 + 推断输出路径 ────
