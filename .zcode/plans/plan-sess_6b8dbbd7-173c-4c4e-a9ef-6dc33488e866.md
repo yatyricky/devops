@@ -1,25 +1,27 @@
-# Review 问题修复（四个独立 commit，遵循 DRY/KISS/YAGNI/SOC）
+# 运行前自动刷新实时列表（单 commit，前端三文件 + buglog）
 
-## Commit 1：门禁收窄补全（P1-1，engine/workflow.js）
-`validateTaskRunnable` 的节点循环加 `inTask` 过滤（`if (!n?.id || !inTask.has(n.id)) continue;`），使类型未知/struct.make 字段/tar.pack 互斥与 selector/fromjson 同样只对任务选点内节点生效——"类型未知"本就是 loadDoc 改写 unknown 的输入源（红框空卡），属于"配置未完成"类，画布半成品不应阻塞无关任务。悬空端点边检查保持在 inTask skip 之前（数据损坏信号，全局拦）。
-- verify：迁移/新增断言——任务外未知类型节点不阻塞本任务。
+## 现状与切入点
+- 「全部刷新」= 顶栏「刷新列表」（`ui.refreshTick++` 广播）→ 各卡片各自 POST 幂等只读接口并写 `ui.pickerFresh[id]`。
+- `doRun`（App.svelte:743-783）只做新鲜度门禁、不触发刷新，失鲜 toast 拦截 → 用户必须手动刷新后再运行。
+- 三个刷新函数活在 DevNode.svelte 卡片内（依赖 resolveInput/卡片 $state 下拉）；buglog 已明确记录「不抽象这三个函数」（返回结构差异大）——方案尊重该决策。
 
-## Commit 2：deriveJsonText split 分支修复（P1-2，engine/rules.js）
-现状 split 分支递归 `deriveJsonText(env, sw.source)` 是错的——上游是 struct.make（非文本提供者），永远 undefined，注释声称的「struct 口透传」不工作且零测试。
-修法（按真实数据流）：split 入边带 sourceHandle（= split 输出的字段名，如 "json"）；递归到 split 的 struct 源后，若源是 struct.make 且声明了该字段（string 类型）→ 返回其 value；否则（selector/fromjson 等其它 struct 源）递归推导其 json 文本。DRY：字段查找用既有 structFieldsFromShape/字段结构，不重复造轮。
-- verify：新增断言 `make{json:"…"} → split → fromjson`（split 直连 make）链推导成功 + make 字段缺失时 undefined。
+## 方案（SOC：卡片拥有刷新逻辑与下拉状态，App 只编排时机）
+1. **web/src/store.svelte.js**：新增非响应式模块级导出 `export const pickerRefreshers = new Map()`（nodeId → 刷新函数）。函数不是 UI 状态，不放进 `$state`。
+2. **web/src/DevNode.svelte**：在 refreshTick effect 旁新增注册 effect——卡片带任一 picker 标志（refsPicker/scriptsPicker/sshAliasesPicker）时 `pickerRefreshers.set(id, refreshAll)`，refreshAll 按标志调用现有 refreshRefs/refreshScripts/refreshSshAliases（Promise.all 聚合，三者内部均已 try/catch 不会 reject）；effect teardown 注销。
+3. **web/src/App.svelte `doRun` 重构**：
+   - 现有门禁循环改为单次收集 `pickers = [{id, expect}]`（want===undefined 的运行时输入节点仍跳过——维持 buglog 既有的逃生分支语义）；键派生逻辑保持唯一（DRY）。
+   - `await Promise.allSettled(pickers.map(x => pickerRefreshers.get(x.id)?.()))`：**每次运行前无条件刷新一次**（不做「已新鲜则跳过」——repoDir 未变但上游出新 commit 的内容级漂移正要靠每次刷新兜住，也符合「执行一次刷新」的字面语义）；无 picker 节点的任务零开销直通。
+   - 顺带收益：refreshScripts 的「选值不在新列表 → 自动回写第一项」副作用发生在 `toDoc()` 之前，过期 script 名在入队前被自动修正。
+   - 门禁保留为兜底：刷新失败（卡片红框显示具体错误）→ pickerFresh 失鲜 → 拦截，toast 改为「实时列表自动刷新失败（…），见卡片错误提示，修正后重试」。
+   - 加两行健壮性：`runBusy` 重入守卫（刷新 await 拉长了双击窗口）；刷新 await 后复查 `runModal !== m` 则放弃（给取消按钮留出生效窗口）。
+   - **范围**：只刷新本任务选点内带 picker 且输入可解析的节点（门禁要求的恰好这批，避免给运行时接线的无关卡片误挂红框错误）；顶栏「刷新列表」按钮原样保留、继续管全画布。
+4. **docs/buglog.md**：FEAT-2026-10-05-01 记录。
 
-## Commit 3：dashboard 数据走专用通道（P2-3）
-现状：dashboard 的 data 输入经 markNodeInputs → displayValue 截断 300 字符 → 大 struct JSON 带 … 尾 → JSON.parse 失败 → 面板静默回退编辑期值。
-修法（SOC：展示数据与输入快照分离）：struct.fromjson 与 dashboard.show 的 run 中 `ctx.markNodeOutput?.(id, JSON.stringify(obj))` 已有（fromjson 有）；dashboard.show run 里补 markNodeOutput（完整 JSON.stringify(inputs.data)）；**DevNode 的 dashRunObj 改读 `ui.runNodeOutputs?.[id]`**（完整值通道），不再读 runNodeInputs.data（截断通道）。server SSE/持久化通道已存在，零后端改动。
-- 顺手：SSE 前端 onNodeOutputs 接线已存在（store.runNodeOutputs 上一轮已加），确认即可。
+## 验证（AGENTS.md 允许范围内）
+- `node tools/verify-dryrun.js`（回归 69 项全绿）+ 前端构建零警告 + `node --check` store.svelte.js。
+- GUI 实测仅在 `.tmp/` 临时 wf 上：git.getRefs（repoDir 指向本仓库本地）+ npm.run（path 指向本仓库）卡片渲染、点「刷新列表」（非运行按钮、幂等只读）下拉填充、控制台无报错；测完删临时 wf。
+- `doRun` 编排本身挂在「运行」按钮上，按禁令不由我点击——最终一次真实运行点验交给你执行。
+- 单 commit（不 push，等你明确要求再 push）。
 
-## Commit 4：小项打包（P2-4/5/6）
-- asScript 补 verify 断言：整段模式 set -e 前置 + 变量跨行（mock ssh 断言命令形状含 `set -e` 且一次执行）。
-- toDocument（lib/docIO.js）剥除遗留 `lockType`：selector 节点序列化时 `data` 去 lockType（纯派生后为脏数据）；同时在 loadDoc 侧无需处理（读时被忽略）。
-- App.svelte:5 导入行缩进修正（4 空格 → 2 空格）。
-
-## 回归与收尾
-- verify 全绿（66+新增）+ 构建 0 警告。
-- 3199 实例抽查：split 文本链编辑期推导生效、dashboard 大 struct 实时值、asScript dry-run 命令形状。
-- buglog 记录（BUG-2026-10-05-01 门禁收窄补全 / FEAT 推导增强 / QoL 通道分离），分 commit push。
+## 已知边界
+- 收起组内成员卡片未挂载时注册表缺项 → 门禁兜底拦截（展开组即恢复）；App 未启用 onlyRenderVisibleElements，常态下全节点挂载，此边界实际不可达。
