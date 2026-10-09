@@ -257,6 +257,13 @@
       refreshUsage();
     } catch (e) { showToast(`保存失败：${e.message}`); }
   }
+  // ── Ctrl+S（⌘S）触发顶栏「保存」：拦浏览器原生保存对话框；dirty 才动（与按钮 disabled 同语义），无未存改动即空操作 ────
+  function onKeydown(e) {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      if (dirty) save();
+    }
+  }
   /** 关键变更标脏 + 防抖自动写盘（600ms 合并连续编辑） */
   function markCritical() {
     autoDirty = true;
@@ -844,12 +851,14 @@
   $effect(() => { window.__dbg = { get nodes() { return nodes; }, get edges() { return edges; }, get tasks() { return tasks; } }; });
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 <div class="layout">
   <header>
     <h1>DevOps 控制台</h1>
     <select class="wfsel" value={currentPath} onchange={e => { selectWorkflow(e.target.value).catch(er => showToast(`打开失败：${er.message}`)); }}>
       {#each wfList as w (w.path)}
-        <option value={w.path}>{w.error ? `✗ ${w.path}` : `${w.name}${w.serverType === "prod" ? " ⚠PROD" : ""}`}</option>
+        <option value={w.path}>{w.error ? `✗ ${w.path}` : `${w.path}${w.serverType === "prod" ? " ⚠PROD" : ""}`}</option>
       {/each}
     </select>
     <button onclick={() => (openModal = { mode: "open" })}>打开…</button>
@@ -967,7 +976,7 @@
   .layout { display: flex; flex-direction: column; height: 100%; }
   header { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
   header h1 { font-size: 15px; margin: 0 8px 0 0; }
-  .wfsel { max-width: 260px; }
+  .wfsel { max-width: 260px; text-overflow: ellipsis; }
   .token { width: 120px; margin-left: auto; }
   .toast { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); background: var(--panel2);
     border: 1px solid var(--err); color: var(--err); padding: 6px 14px; border-radius: 8px; z-index: 60; }

@@ -433,3 +433,10 @@
 - **板不参与抬层（实测发现的设计修正）**：loadDoc 重建的背景板生而 `selected: true`（makeGroupNode 既有行为），若板参与抬层，每次载入带组 wf 板都会顶到 1001 反压组员卡片；且板自有层级体系（常态1/色板开1000），选中态由描边表达即可。
 - **已知微小边界（接受）**：色板开着时取消板的选中 → 板回落 1（色板可能被空间重叠的成员卡片视觉压过，开关一次色板即复位）。
 - **回归**：verify 69 绿；构建零警告；3199 一次性实例实测（临时 wf 已删，z 值均读 inline style 断言）：普通卡选中 1001/失选回 0；组员选中 1001 高于板/失选回 2；色板开（板1000）时选组员 1001 在上、失选组员回 2 板保持 1000、收色板回 1；选中态克隆 → 克隆卡选中 1001、全部取消后克隆回落 0（克隆继承了源卡的 zIndex 1001 也被 home 派生自愈）；多点框选/Ctrl 多选因合成事件限制未自动化（与单选同代码路径，Set 逐成员），真实鼠标行为由用户点验。控制台 `event.view.document` 报错为合成事件噪音（无节点选择的纯 pane 点击同样触发），非本功能引入。
+
+## FEAT-2026-10-09-02 Ctrl+S 保存 + wfsel 显示完整路径（用户需求）
+
+- **Ctrl+S**：App.svelte 首个 window 级按键处理（`svelte:window onkeydown`）——Ctrl/⌘+S（无 shift/alt）`preventDefault` 拦浏览器原生保存对话框后调 `save()`；`dirty` 才动（与顶栏按钮 disabled 同语义，无未存改动即空操作）。输入框聚焦时同样生效；弹窗打开时不特殊处理（保存无害）。
+- **wfsel 完整路径**：option 文案从显示名改为 `w.path`（保留 ⚠PROD 徽标与 ✗ 错误前缀）；收起截断 = `.wfsel` 加 `text-overflow: ellipsis`（max-width 260 不变）；展开宽度自适应零代码——原生 select 弹层本就按最宽 option 撑开。
+- **测试坑（记录）**：显示名 input 的 `bind:value` 吃 `input` 事件、`markCritical` 挂 `onchange`——合成测试只发其一要么改了状态不脏、要么脏了状态没改；完整链路须 input+change 双事件，并在 600ms 自动保存防抖窗口内（300ms 处）Ctrl+S 才能断言手动落盘。真实用户等价流程：输入后失焦（change）即自动保存，或直接 Ctrl+S。
+- **回归**：verify 69 绿；构建零警告；3199 实测（临时 wf 已删）：option 全为完整路径（含 ⚠PROD 语义位）、收起 clientW 258px + ellipsis 生效；脏标「保存 *」→ Ctrl+S → toast「已保存」+ 星号熄灭 + 磁盘 title 更新（防抖窗口内）；无脏时 Ctrl+S 空操作不弹原生对话框。
