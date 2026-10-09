@@ -688,6 +688,36 @@
     if (changed) edges = next;
   });
 
+  // ── 选中卡片临时置顶（manual z 下 xyflow 无内建选中提升）：选中抬到 1001——压过选中边(1000)
+  //    与色板打开的板(1000)（同值会按 DOM 序平局，板会反压选中的组员卡片）；仅与连线预览线(CSS 1001)
+  //    平局且节点在 DOM 后侧必胜。抬层态用 __zSel 标记（临时字段，不落盘、不随克隆复制）；
+  //    失选回落类型派生的常层（板1/组员2/普通0，按组成员关系现算）——抬层期间的组操作
+  //    （组合 z2/拆组 z0/克隆入组）与色板开合（外部写 1000/1 → 重申置顶）全部自愈。
+  //    引用保持式 map（同边 effect），未变节点保引用避免重渲染循环。 ────
+  $effect(() => {
+    const sel = selectedNodeIds;
+    let changed = false;
+    const next = nodes.map(n => {
+      const marked = n.__zSel === true;
+      // 板不参与：背景板自有层级（常态1/色板开1000），且 loadDoc 重建的板生而 selected，
+      // 若抬层会在每次载入带组 wf 时反压组员卡片；板的选中态由描边表达即可
+      const want = sel.has(n.id) && n.type !== "groupbox";
+      if (marked !== want) {
+        changed = true;
+        if (want) return { ...n, __zSel: true, zIndex: 1001 };
+        const home = n.type === "groupbox" ? 1
+          : nodes.some(b => b.type === "groupbox" && (b.data.memberIds ?? []).includes(n.id)) ? 2 : undefined;
+        const out = { ...n };
+        delete out.__zSel;
+        if (home === undefined) delete out.zIndex; else out.zIndex = home;
+        return out;
+      }
+      if (marked && n.zIndex !== 1001) { changed = true; return { ...n, zIndex: 1001 }; }
+      return n;
+    });
+    if (changed) nodes = next;
+  });
+
   // ── 动态出口：源节点的有效出口不含某边的 sourceHandle 时，该边自动消失 ────
   // 例：struct.split 的上游字段删除 → 对应出口上的连线随之断开。出口列表未知（[] 由规则明确给出）也删。
   $effect(() => {
